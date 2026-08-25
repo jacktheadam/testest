@@ -1866,7 +1866,7 @@ It generates a 48kHz stereo tone and (if needed) linearly resamples it to the *a
 Because it uses `SharedArrayBuffer`, it must be served with cross-origin isolation headers (COOP/COEP). A minimal local server is included:
 
 ```bash
-node web/serve-smoke-test.mjs
+node apps/web/serve-smoke-test.mjs
 ```
 
 Then open:

@@ -179,9 +179,9 @@ KERNELBASE NLS fuse targets.
   **Administrator** credential tile, accessibility button and power button.
   This is the first credential chrome this project has produced; every earlier
   lineage stopped at black-plus-cursor or, with the termination poked out, a
-  bare wallpaper. Capture: `/root/aero-work/probe-v5.png`.
+  bare wallpaper. Capture: `<work>/probe-v5.png`.
 - [verified] **The logon-screen checkpoint is reproducible.** Reloading
-  `/root/aero-work/logon-screen.bin` and running 40 M instructions produces a
+  `<work>/logon-screen.bin` and running 40 M instructions produces a
   framebuffer that is byte-identical (SHA/MD5 `b8666632a5064d10a18275187dca3d87`)
   to both the original 800 M continuation and the independent grind slice that
   first reached it.
@@ -191,7 +191,7 @@ KERNELBASE NLS fuse targets.
   `explorer.exe` and `dwm.exe` all alive** — no pokes, no forced resume, no
   token forgery, and `dwm.exe` running at all is new (earlier sessions
   concluded XPDM `vga.sys` meant DWM would never start). Checkpoint
-  `/root/aero-work/desktop/desktop-10.bin`, capture `desktop-10.png`.
+  `<work>/desktop/desktop-10.bin`, capture `desktop-10.png`.
 - [verified] **The Windows 7 desktop shell paints.** After Active Setup's
   "Personalized Settings" dialog clears, `explorer.exe` builds the shell and the
   framebuffer shows the **taskbar**: Start orb, Internet Explorer, Windows

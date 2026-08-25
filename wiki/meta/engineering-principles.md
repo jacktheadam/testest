@@ -136,7 +136,7 @@ implementation's source for the device.
 An oracle is built outside the repository so it cannot drift into being
 maintained code — but *keep* it and its recorded output next to the evidence it
 produced, rather than deleting it. The power-management-timer oracle's source and
-result are still on disk under `/root/aero-boot-shots/qemu-pmtimer-oracle/`, which
+result are still on disk under the boot-output tree's `qemu-pmtimer-oracle/`, which
 is what makes its finding re-checkable rather than merely asserted.
 
 **Write the regression, watch it fail, then fix.** A test that has never been

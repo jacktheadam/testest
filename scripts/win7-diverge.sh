@@ -20,8 +20,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGES_DIR="${AERO_IMAGES_DIR:-/root/aero-images}"
-OUT_DIR="${AERO_DIVERGE_OUT:-/root/aero-boot-shots/diverge}"
+IMAGES_DIR="${AERO_IMAGES_DIR:-$HOME/aero-images}"
+OUT_DIR="${AERO_DIVERGE_OUT:-$HOME/aero-boot-shots/diverge}"
 BIN="${AERO_MACHINE_BIN:-$REPO_ROOT/target/release/aero-machine}"
 QEMU="${QEMU_BIN:-qemu-system-x86_64}"
 

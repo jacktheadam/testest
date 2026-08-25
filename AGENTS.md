@@ -84,8 +84,8 @@ origin/main` → re-apply — but only with the user's go-ahead.
 
 ## Windows 7 test media
 
-A Win7 SP1 x64 ISO lives at `/root/aero-images/` on the dev box (extracted
-from the user-supplied archive). **Never commit ISOs or disk images** —
+A Win7 SP1 x64 ISO lives in the images directory named by `AERO_IMAGES_DIR`,
+extracted from a user-supplied archive. **Never commit ISOs or disk images** —
 `scripts/ci/check-repo-policy.sh` enforces this.
 
 ---

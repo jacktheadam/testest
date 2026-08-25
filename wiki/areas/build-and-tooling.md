@@ -114,7 +114,7 @@ These are real, verified, and worth fixing rather than documenting around:
   uses it).
 - **The disk-streaming conformance self-tests are broken.**
   `tools/disk-streaming-conformance/selftest_chunk_server_private.py` looks for
-  `server/chunk_server.js`, which was purged with the rest of that tree. The
+  `chunk_server.js` under the top-level `server/` tree, which was purged. The
   conformance checker itself is cited as current by
   [storage.md](./storage.md) and the delivery spec; the *self*-tests need
   rewiring to `tools/disk-gateway` plus a static chunk server before they mean
@@ -457,27 +457,28 @@ unacceptably slow without threads.
 
 The Vite preview server is configured to send COOP/COEP (and the rest of the recommended hardening set).
 
-Canonical header values live in:
+The canonical values live in `scripts/headers.json`. `scripts/security_headers.mjs`
+reads that file and re-exports it as `crossOriginIsolationHeaders`,
+`baselineSecurityHeaders`, and `cspHeaders`.
 
-- `scripts/headers.json`
-- `scripts/security_headers.mjs` (exports used by Vite config)
-
-CI validates that Vite servers + deployment templates stay in sync via:
-
-- `scripts/ci/check-security-headers.mjs`
-
-Currently validated files — the ones that still exist, after the deployment
-templates and the legacy backend were purged:
+Only the two Vite configs import it, so only they are guaranteed to agree with it:
 
 - `vite.harness.config.ts`
 - `apps/web/vite.config.ts`
+
+The other places that send the same headers restate them as literals, and are
+therefore free to drift:
+
 - `services/gateway/src/middleware/crossOriginIsolation.ts`
 - `services/gateway/src/middleware/securityHeaders.ts`
 - `apps/web/public/_headers` — the one surviving static-host header template
 
-The canonical header values themselves live in `scripts/headers.json` and
-`scripts/security_headers.mjs`, which the Vite config imports, so the browser and
-gateway sides cannot drift apart.
+Drift used to be caught by a checker that required the Vite configs to import the
+canonical module and compared the literal copies against it value by value. It
+went with the rest of CI, so nothing catches drift now: editing `headers.json`
+silently updates the dev and preview servers and leaves the gateway and the
+static-host template behind. Until a replacement exists, treat an edit to
+`headers.json` as an edit to all three literal copies too.
 
 ```bash
 pnpm install --frozen-lockfile

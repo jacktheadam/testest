@@ -284,7 +284,7 @@ expectations (Range or chunked mode) with the dependency-free tool:
  stuck) vs consumer dead (`readFrameIndex` stuck / `AudioContext`
  suspended); QA bundle export covers metrics, codec state, WAV snapshots.
  Note: the doc's `/state/win7.iso` reference is stale — the dev-box ISO
- lives at `/root/aero-images/` (see root `AGENTS.md`).
+ lives in the images directory named by `AERO_IMAGES_DIR` (see root `AGENTS.md`).
 - End-to-end subsystem test plans, now in the area pages — "single
  document" plans (device model ↔ guest driver ↔ web runtime). Only entry
  today is the virtio-input test plan, absorbed into

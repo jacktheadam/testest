@@ -31,7 +31,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGES_DIR="${AERO_IMAGES_DIR:-/root/aero-images}"
+IMAGES_DIR="${AERO_IMAGES_DIR:-$HOME/aero-images}"
 
 SRC_ISO="${AERO_WIN7_SOURCE_ISO:-$(ls "$IMAGES_DIR"/*win7*.iso "$IMAGES_DIR"/*.iso 2>/dev/null | grep -iv 'aero-config\|win7-debug' | head -1 || true)}"
 OUT_ISO="${1:-$IMAGES_DIR/win7-debug.iso}"

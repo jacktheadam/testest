@@ -9,7 +9,7 @@
 #   tools/qemu-trace-plugin/aero_diverge.sh [--iso <path>] [--max-insts <N>] [--mode exec|plugin]
 #
 # Options:
-#   --iso <path>        Win7 ISO path (default: /root/aero-images/7601.24214...iso)
+#   --iso <path>        Win7 ISO path (default: a *.iso in $AERO_IMAGES_DIR)
 #   --max-insts <N>     Max Aero instructions (default: 12000000)
 #   --mode exec         Use QEMU -d exec (fast, TB-level; default)
 #   --mode plugin       Use QEMU TCG plugin (slower, instruction-level)
@@ -27,7 +27,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORK_DIR="${AERO_DIFF_WORK_DIR:-/tmp/aero-diff}"
 
 # Defaults
-ISO="/root/aero-images/7601.24214.180801-1700.win7sp1_ldr_escrow_CLIENT_PROFESSIONAL_x64FRE_en-us.iso"
+IMAGES_DIR="${AERO_IMAGES_DIR:-$HOME/aero-images}"
+# Whichever Win7 x64 ISO is in the images directory; `--iso` overrides it. The
+# glob is deliberately narrow: the images directory also holds the unattend
+# config ISO, and booting that instead would look like a divergence. An
+# unmatched glob stays literal, so the `-f` test is what actually decides.
+ISO=""
+for candidate in "$IMAGES_DIR"/*win7*x64*.iso; do
+    [[ -f "$candidate" ]] && { ISO="$candidate"; break; }
+done
 MAX_INSTS=12000000
 MODE="exec"
 RESYNC=10000
@@ -47,6 +55,17 @@ while [[ $# -gt 0 ]]; do
         *) echo "unknown arg: $1"; exit 1 ;;
     esac
 done
+
+# Without this, an unset default reaches QEMU as an empty -cdrom and the run
+# fails much later with something that does not mention the ISO at all.
+if [[ -z "$ISO" ]]; then
+    echo "aero_diverge: no ISO found in $IMAGES_DIR; pass --iso or set AERO_IMAGES_DIR" >&2
+    exit 1
+fi
+if [[ ! -f "$ISO" ]]; then
+    echo "aero_diverge: ISO not found: $ISO" >&2
+    exit 1
+fi
 
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"

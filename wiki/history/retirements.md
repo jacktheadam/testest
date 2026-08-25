@@ -708,7 +708,7 @@ mean anything inside the investigation that produced them.
 
 To be precise about what did and did not survive, because an earlier draft of
 this entry overstated it: the recipes citing the vanished `/tmp` scratch
-directory are genuinely dead, but the lineages under `/root/aero-boot-shots/`
+directory are genuinely dead, but the lineages under the boot-output tree
 are **not** — that tree still holds several hundred checkpoints, including the
 QEMU ground-truth captures and every cold-boot milestone. It is now named on the
 state page so a future session can find it.
@@ -753,7 +753,7 @@ guest-visible change had been observed.
 Not carried: the dated ledger (duplicated) and the method and index sections
 (duplicated). The per-investigation resume recipes were dropped as an indexed
 lineage rather than as dead paths — many of the checkpoints they name are still
-on disk under `/root/aero-boot-shots/`. What was kept is the recipe that
+on disk in the boot-output tree. What was kept is the recipe that
 matters: how to resume the desktop, on the state page, with its disk image,
 its paired overlay, and the two hazards that make a mismatch silently
 worthless.

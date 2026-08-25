@@ -165,7 +165,7 @@ nobody has wanted anything back for a while.
  went away every claim whose only support was in it became unverifiable again.
  The claims had been true when written; they were no longer *checkable*, which
  for a wiki that must be trustworthy is nearly the same thing. Durable artefacts
- go in a durable location — snapshots under `/root/aero-images/snapshots/` — and
+ go in a durable location — snapshots under `$AERO_IMAGES_DIR/snapshots/` — and
  a proof capture small enough to inline belongs in the page that cites it. A
  verification that can evaporate is not a verification, it is a memory.
 - **Distinguish what the system did from what you made it do.** Bring-up work

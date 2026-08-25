@@ -727,7 +727,7 @@ came out of that is in
 [../meta/working-agreements.md](../meta/working-agreements.md).
 
 But the *durable* evidence base survived and is substantial:
-`/root/aero-boot-shots/` still holds several hundred checkpoints, including the
+the boot-output tree still holds several hundred checkpoints, including the
 complete no-poke cold lineage, the QEMU ground-truth captures, and both
 purpose-built oracles with their recorded output. It is named here because it was
 nearly lost a second way — by being findable from nowhere.

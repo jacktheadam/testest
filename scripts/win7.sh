@@ -21,8 +21,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGES_DIR="${AERO_IMAGES_DIR:-/root/aero-images}"
-OUT_ROOT="${AERO_BOOT_OUT:-/root/aero-boot-shots}"
+IMAGES_DIR="${AERO_IMAGES_DIR:-$HOME/aero-images}"
+OUT_ROOT="${AERO_BOOT_OUT:-$HOME/aero-boot-shots}"
 SNAPSHOT="${AERO_BOOT_SNAPSHOT:-$OUT_ROOT/snap/at-wall.bin}"
 BIN="${AERO_MACHINE_BIN:-$REPO_ROOT/target/release/aero-machine}"
 

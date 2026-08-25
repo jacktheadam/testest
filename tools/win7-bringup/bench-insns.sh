@@ -23,7 +23,7 @@
 #
 # Environment:
 #   AERO_BENCH_SNAPSHOT  required; a machine snapshot to resume from
-#   AERO_BENCH_DISK      guest disk image      (default: /root/aero-images/win7-hdd.raw)
+#   AERO_BENCH_DISK      guest disk image      (default: $AERO_IMAGES_DIR/win7-hdd.raw)
 #   AERO_BENCH_LO/HI     guest instruction budgets (default: 20M / 120M)
 #   AERO_BENCH_CORES     taskset CPU list, to keep runs off contended cores
 #
@@ -31,7 +31,7 @@
 set -euo pipefail
 
 SNAP="${AERO_BENCH_SNAPSHOT:-}"
-DISK="${AERO_BENCH_DISK:-/root/aero-images/win7-hdd.raw}"
+DISK="${AERO_BENCH_DISK:-${AERO_IMAGES_DIR:-$HOME/aero-images}/win7-hdd.raw}"
 LO="${AERO_BENCH_LO:-20000000}"
 HI="${AERO_BENCH_HI:-120000000}"
 CORES="${AERO_BENCH_CORES:-}"

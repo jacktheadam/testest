@@ -171,7 +171,14 @@ from pathlib import Path
 repo_root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 
 tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
-md_files = [p for p in tracked if p.endswith(".md")]
+
+# Documents that quote removed material verbatim. Every path they name belongs to
+# a tree that no longer exists — that is what makes them an archive — so holding
+# them to "the file must still be there" would either fail forever or force the
+# quotes to be edited, which would defeat the point of keeping them.
+VERBATIM_ARCHIVES = {"wiki/history/purged-material.md"}
+
+md_files = [p for p in tracked if p.endswith(".md") and p not in VERBATIM_ARCHIVES]
 
 # Cache the git tree mode for all files once. This avoids spawning one `git ls-tree`
 # subprocess per referenced script, which can add up as the docs grow.
@@ -255,6 +262,11 @@ for md in md_files:
         # Ignore glob patterns like `./scripts/*.sh` — these are not literal file
         # paths, and are often used in docs as troubleshooting advice.
         if any(ch in referenced for ch in ("*", "?", "[", "]")):
+            continue
+
+        # Ignore placeholders like `./<name>.cjs`. A reference with a metavariable
+        # in it stands for a family of files, so no single path can satisfy it.
+        if "<" in referenced or ">" in referenced:
             continue
 
         candidates = []

@@ -96,10 +96,11 @@ behaviour the way the retired bring-up wedges did:
 > **Evidence status.** The proof captures are in the repository at
 > [`../assets/`](../assets/README.md), and the tools used to configure the guest
 > are in `tools/win7-bringup/`. What is *not* durable is the checkpoints
-> themselves — half a gigabyte each, still in a working directory rather than
-> `/root/aero-images/snapshots/`. They are too large to commit, so moving them to
-> the durable location is outstanding. An earlier scratch directory holding the
-> evidence for a large body of bring-up findings has already been lost once; see
+> themselves — half a gigabyte each, still in a scratch working directory rather
+> than the durable snapshots directory (`$AERO_IMAGES_DIR/snapshots/`). They are
+> too large to commit, so moving them there is outstanding. An earlier scratch
+> directory holding the evidence for a large body of bring-up findings has
+> already been lost once; see
 > the rule in [../meta/working-agreements.md](../meta/working-agreements.md).
 
 ### The seven failures are one theme: secondary-channel IDE/ATAPI interrupts
@@ -136,16 +137,17 @@ command-packet advertisement.
 ### Resuming the desktop
 
 ```
-aero-machine --disk         /root/aero-work/win7-installed.raw
-             --disk-overlay /root/aero-work/win7-desktop.aerospar
-             --ram          2048
-             --boot         hdd
-             --snapshot-load /root/aero-work/win7-desktop.bin
+aero-machine --disk          <work>/win7-installed.raw
+             --disk-overlay  <work>/win7-desktop.aerospar
+             --ram           2048
+             --boot          hdd
+             --snapshot-load <work>/win7-desktop.bin
 ```
 
+`<work>` is the bring-up working directory, wherever you keep it.
 `win7-installed.raw` is the flattened install with the offline logon
-configuration applied; if it is lost, rebuild it from
-`/root/aero-images/win7-hdd.raw` plus the bring-up overlay.
+configuration applied; if it is lost, rebuild it from the base HDD image in
+`$AERO_IMAGES_DIR` plus the bring-up overlay.
 
 Two hazards. **A checkpoint is paired with a specific overlay** — the desktop
 checkpoint has its own, and resuming it against a different one prints a warning
@@ -157,8 +159,8 @@ one copy-on-write overlay corrupt it, and after a timeout the survivor is not
 always obvious — kill the exact process and verify it exited.
 
 The wider checkpoint lineages, including the QEMU ground-truth captures and every
-cold-boot milestone, are under `/root/aero-boot-shots/` (several hundred
-snapshots). `/root/aero-images/snapshots/` holds the ten survivors of the
+cold-boot milestone, are under the boot-output tree (`$AERO_BOOT_OUT`, several
+hundred snapshots). `$AERO_IMAGES_DIR/snapshots/` holds the ten survivors of the
 scratch-directory loss.
 
 | Area | State | Evidence |
@@ -205,7 +207,7 @@ pinned Node and pnpm are installed under `fnm` and are invisible until you
 activate them:
 
 ```bash
-export PATH="/root/.local/share/fnm/aliases/default/bin:$PATH"
+export PATH="$(dirname "$(fnm which node 2>/dev/null || command -v node)"):$PATH"
 node --version   # v24.18.0
 pnpm --version   # 11.5.0
 ```
@@ -539,16 +541,16 @@ per §3. Dispositions:
   precedent; hybrid (C KMD + Rust UMD) is a Win10+-only future path.
   Revisit conditions recorded in the guest driver language decision.
 - 2026-07-22/23: **First empirical boot probe + strategy assessment**
-  (absorbed; see `wiki/history/retirements.md`). User supplied the Win7 SP1 x64 ISO
-  (7601.24214 LDR escrow; extracted to `/root/aero-images/`). The
-  `aero-machine` native CLI was built and run against it: **execution dies
+  (absorbed; see `wiki/history/retirements.md`). Run against a user-supplied
+  Windows 7 SP1 x64 ISO. The `aero-machine` native CLI was built and run
+  against it: **execution dies
   on `InvalidOpcode` after ~2,500–4,000 guest instructions — inside the
   BIOS, before POST completes** (assist-layer catch-alls in
   `crates/aero-cpu-core/src/assist.rs`, e.g. unimplemented `Rsm`). This is
   the verified integration frontier: component maturity is high, but the
-  boot path had never been walked. Machine: 64 cores / 377 GB / KVM
-  present; missing QEMU, browsers, pinned Node, media tools (install plan
-  in the strategy doc).
+  boot path had never been walked. The host had KVM available but was missing
+  QEMU, browsers, pinned Node and media tools (install plan in the strategy
+  doc).
 - 2026-07-23: **Goal set**: Win7 SP1 x64 to a verified interactive desktop
   in the browser (networking + audio + performance), working autonomously.
   **Order corrected by user: foundations (cleanup phases) before bring-up.**

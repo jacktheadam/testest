@@ -34,7 +34,7 @@ same-value CR3 flush, and RC#41's pure shared-clock PM timer now reaches:
 
 No clock-cell poke, forced IF/CR8, COW override, display redirect, or synthetic
 fill was used. Durable proof:
-`/root/aero-boot-shots/stdvga-clean/rc41-accelerated-plus9b.{bin,log,png}`.
+`<boot-out>/stdvga-clean/rc41-accelerated-plus9b.{bin,log,png}`.
 The BAR1-absent session wall is closed; natural framebuf primary-surface
 creation and setup GDI present remain open.
 
@@ -189,7 +189,7 @@ A partial cold re-POST with the BAR1-cleared binary was started (`stdvga-nobar1-
 ## Resume recipe (next agent)
 
 1. For process continuation, resume
-   `/root/aero-boot-shots/stdvga-clean/rc41-accelerated-plus9b.bin` with its
+   `<boot-out>/stdvga-clean/rc41-accelerated-plus9b.bin` with its
    `std-disk.aerospar`; setup.exe is already naturally alive.
 2. For the display divergence, resume
    `rc41-accelerated-plus1b.bin`. The late PCI I/O replay is unchanged, but

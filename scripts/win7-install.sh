@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-IMAGES_DIR="${AERO_IMAGES_DIR:-/root/aero-images}"
+IMAGES_DIR="${AERO_IMAGES_DIR:-$HOME/aero-images}"
 DISK="${AERO_WIN7_DISK:-$IMAGES_DIR/win7-hdd.raw}"
 CONFIG_ISO="${AERO_WIN7_CONFIG_ISO:-$IMAGES_DIR/aero-config.iso}"
 QMP_SOCK="${AERO_INSTALL_QMP:-/tmp/qmp-win7-install.sock}"

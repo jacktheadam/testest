@@ -323,13 +323,13 @@ For production hosting templates and CSP guidance, see:
 Minimal Vite dev server configuration:
 
 ```ts
-// web/vite.config.ts
+// apps/web/vite.config.ts
 import { defineConfig } from "vite";
 
 import {
   baselineSecurityHeaders,
   crossOriginIsolationHeaders,
-} from "../scripts/security_headers.mjs";
+} from "../../scripts/security_headers.mjs";
 
 export default defineConfig({
   server: {
