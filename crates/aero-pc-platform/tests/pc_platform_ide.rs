@@ -99,27 +99,32 @@ fn pc_platform_enumerates_ide_and_preserves_legacy_bar_bases() {
     assert_eq!((id >> 16) & 0xffff, u32::from(IDE_PIIX3.device_id));
 
     let class = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x08);
-    assert_eq!((class >> 8) & 0x00ff_ffff, 0x01018A);
+    // QEMU piix3-ide: class 01:01, prog-if 0x80 (legacy + BMIDE, channels not
+    // programmable). BAR0–3 are unimplemented; command blocks stay hardwired.
+    assert_eq!((class >> 8) & 0x00ff_ffff, 0x010180);
 
     let command = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x04) & 0xffff;
     assert_ne!(command & 0x1, 0, "BIOS POST should enable I/O decoding");
 
-    // IDE PCI config space should expose legacy compatible BAR assignments.
     assert_eq!(
-        read_io_bar_base(&mut pc, bdf.bus, bdf.device, bdf.function, 0),
-        PRIMARY_PORTS.cmd_base
+        read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x10),
+        0,
+        "BAR0 must be unimplemented"
     );
     assert_eq!(
-        read_io_bar_base(&mut pc, bdf.bus, bdf.device, bdf.function, 1),
-        PRIMARY_PORTS.ctrl_base - 2
+        read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x14),
+        0,
+        "BAR1 must be unimplemented"
     );
     assert_eq!(
-        read_io_bar_base(&mut pc, bdf.bus, bdf.device, bdf.function, 2),
-        SECONDARY_PORTS.cmd_base
+        read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x18),
+        0,
+        "BAR2 must be unimplemented"
     );
     assert_eq!(
-        read_io_bar_base(&mut pc, bdf.bus, bdf.device, bdf.function, 3),
-        SECONDARY_PORTS.ctrl_base - 2
+        read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x1C),
+        0,
+        "BAR3 must be unimplemented"
     );
     assert_eq!(
         read_io_bar_base(&mut pc, bdf.bus, bdf.device, bdf.function, 4),
@@ -499,6 +504,14 @@ fn pc_platform_ide_respects_nien_interrupt_disable() {
         "primary_irq_pending() should respect nIEN gating"
     );
 
+    // process_ide already drove the pin (hardware INTRQ). Consume that edge;
+    // nIEN must then keep a later poll from raising a new one.
+    let pic_vector = pc.interrupts.borrow().pic().get_pending_vector();
+    if let Some(vector) = pic_vector {
+        let mut interrupts = pc.interrupts.borrow_mut();
+        interrupts.pic_mut().acknowledge(vector);
+        interrupts.pic_mut().eoi(vector);
+    }
     pc.poll_pci_intx_lines();
     assert_eq!(
         pc.interrupts.borrow().pic().get_pending_vector(),
@@ -777,6 +790,25 @@ fn pc_platform_ide_dma_works_after_bus_master_bar4_relocation() {
     assert_eq!(pc.interrupts.borrow().pic().get_pending_vector(), None);
 }
 
+fn retire_ide_irq(pc: &mut PcPlatform, status_port: u16) {
+    let _ = pc.io.read(status_port, 1);
+    pc.poll_pci_intx_lines();
+    // The controller now drives IRQ14/15 on the same I/O that changes the
+    // latch. A guest ISR would ACK the PIC/IOAPIC; tests that only poll at
+    // the end must do the same or leftover IRR looks like a new interrupt.
+    let apic_vector = pc.interrupts.borrow().get_pending();
+    if let Some(vector) = apic_vector {
+        pc.interrupts.borrow_mut().acknowledge(vector);
+        pc.interrupts.borrow_mut().eoi(vector);
+    }
+    let pic_vector = pc.interrupts.borrow().pic().get_pending_vector();
+    if let Some(vector) = pic_vector {
+        let mut interrupts = pc.interrupts.borrow_mut();
+        interrupts.pic_mut().acknowledge(vector);
+        interrupts.pic_mut().eoi(vector);
+    }
+}
+
 fn send_atapi_packet(
     pc: &mut PcPlatform,
     base: u16,
@@ -994,8 +1026,7 @@ fn pc_platform_ide_atapi_dma_requires_pci_bus_master_enable() {
         let _ = pc.io.read(SECONDARY_PORTS.cmd_base, 2);
     }
     // Clear any pending IRQ from REQUEST SENSE.
-    let _ = pc.io.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    pc.poll_pci_intx_lines();
+    retire_ide_irq(&mut pc, SECONDARY_PORTS.cmd_base + 7);
     assert_eq!(pc.interrupts.borrow().pic().get_pending_vector(), None);
 
     // PRD table and DMA buffer in guest RAM.
@@ -1115,8 +1146,7 @@ fn pc_platform_ide_secondary_nien_suppresses_irq15_for_atapi_dma() {
         let _ = pc.io.read(SECONDARY_PORTS.cmd_base, 2);
     }
     // Clear any pending IRQ from REQUEST SENSE.
-    let _ = pc.io.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    pc.poll_pci_intx_lines();
+    retire_ide_irq(&mut pc, SECONDARY_PORTS.cmd_base + 7);
     assert_eq!(pc.interrupts.borrow().pic().get_pending_vector(), None);
 
     // PRD table and DMA buffer in guest RAM.
@@ -1161,8 +1191,8 @@ fn pc_platform_ide_secondary_nien_suppresses_irq15_for_atapi_dma() {
     // Clear bus master status bits and any stale state.
     pc.io.write(bm_base + 8, 1, 0);
     pc.io.write(bm_base + 8 + 2, 1, 0x06); // clear IRQ+ERR
-    let _ = pc.io.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    pc.poll_pci_intx_lines();
+    // Clearing nIEN while the latch is still set raises INTRQ immediately.
+    retire_ide_irq(&mut pc, SECONDARY_PORTS.cmd_base + 7);
     assert_eq!(pc.interrupts.borrow().pic().get_pending_vector(), None);
 
     // Reuse the same PRD pointer and issue another READ(10).
@@ -1298,7 +1328,7 @@ fn pc_platform_routes_ide_irq15_via_ioapic_in_apic_mode() {
     // Clear initial UNIT ATTENTION: TEST UNIT READY then REQUEST SENSE.
     let tur = [0u8; 12];
     send_atapi_packet(&mut pc, SECONDARY_PORTS.cmd_base, 0, &tur, 0);
-    let _ = pc.io.read(SECONDARY_PORTS.cmd_base + 7, 1);
+    retire_ide_irq(&mut pc, SECONDARY_PORTS.cmd_base + 7);
 
     let mut req_sense = [0u8; 12];
     req_sense[0] = 0x03;
@@ -1309,8 +1339,7 @@ fn pc_platform_routes_ide_irq15_via_ioapic_in_apic_mode() {
     }
 
     // Clear any pending device interrupt from REQUEST SENSE before starting the DMA read.
-    let _ = pc.io.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    pc.poll_pci_intx_lines();
+    retire_ide_irq(&mut pc, SECONDARY_PORTS.cmd_base + 7);
     assert_eq!(pc.interrupts.borrow().get_pending(), None);
 
     // PRD table and DMA buffer in guest RAM.
@@ -1335,8 +1364,7 @@ fn pc_platform_routes_ide_irq15_via_ioapic_in_apic_mode() {
     // The PACKET command enters a "packet-out" phase and raises an interrupt to request the
     // 12-byte command packet. The helper above writes the packet synchronously, so clear that
     // interrupt before checking DMA completion behavior.
-    let _ = pc.io.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    pc.poll_pci_intx_lines();
+    retire_ide_irq(&mut pc, SECONDARY_PORTS.cmd_base + 7);
     assert_eq!(pc.interrupts.borrow().get_pending(), None);
 
     // Start secondary bus master, direction=read (device -> memory).

@@ -1,0 +1,33 @@
+{
+  "name": "@aero/net-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WebSocket \u2192 TCP/UDP relay proxy for browser-based guest networking",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "check:node": "node ../../scripts/check-node-version.mjs",
+    "predev": "pnpm run check:node",
+    "dev": "tsx watch src/index.ts",
+    "prebuild": "pnpm run check:node",
+    "build": "node scripts/clean-dist.js && tsc -p tsconfig.json",
+    "prestart": "pnpm run check:node",
+    "start": "node dist/index.js",
+    "pretest": "pnpm run check:node",
+    "test": "pnpm run build && node --test dist/test/**/*.test.js"
+  },
+  "dependencies": {
+    "ipaddr.js": "^2.2.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

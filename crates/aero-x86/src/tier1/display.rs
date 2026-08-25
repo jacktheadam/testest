@@ -126,6 +126,8 @@ impl fmt::Display for Operand {
 impl fmt::Display for ShiftOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
+            ShiftOp::Rol => "rol",
+            ShiftOp::Ror => "ror",
             ShiftOp::Shl => "shl",
             ShiftOp::Shr => "shr",
             ShiftOp::Sar => "sar",
@@ -138,13 +140,16 @@ impl fmt::Display for AluOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             AluOp::Add => "add",
+            AluOp::Adc => "adc",
             AluOp::Sub => "sub",
+            AluOp::Sbb => "sbb",
             AluOp::And => "and",
             AluOp::Or => "or",
             AluOp::Xor => "xor",
             AluOp::Shl => "shl",
             AluOp::Shr => "shr",
             AluOp::Sar => "sar",
+            AluOp::Imul => "imul",
         };
         f.write_str(s)
     }

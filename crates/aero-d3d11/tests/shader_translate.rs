@@ -1793,16 +1793,12 @@ fn translates_texture_load_ld() {
         load_line
     );
     assert!(
-        translated.wgsl.contains("bitcast<i32>(ld_x0_f)")
-            && translated.wgsl.contains("bitcast<i32>(ld_y0_f)"),
-        "expected raw-bit fallback when lowering ld coords:\n{}",
+        translated.wgsl.contains("bitcast<i32>(0x00000001u)")
+            && translated.wgsl.contains("bitcast<i32>(0x00000002u)"),
+        "expected raw integer bits (1, 2) to be preserved as ld coords via bitcast:\n{}",
         translated.wgsl
     );
-    assert!(
-        translated.wgsl.contains("bitcast<f32>(0x00000001u)"),
-        "expected raw coordinate bits to be preserved as an f32 payload:\n{}",
-        translated.wgsl
-    );
+    // The sampled payload needs no re-bitcast: `texture_2d<f32>` returns f32 lanes natively.
 
     // Reflection should surface the referenced texture slot (no sampler needed for ld).
     assert!(translated
@@ -1864,21 +1860,18 @@ fn translates_texture_load_ld_prefers_numeric_i32_for_integer_float_coords() {
 
     let translated = translate_sm4_module_to_wgsl(&dxbc, &module, &signatures).expect("translate");
     assert_wgsl_validates(&translated.wgsl);
+    // SM4 `ld` consumes integer texel coordinates read as raw 32-bit patterns — the translator
+    // must NOT apply float-to-int conversion heuristics, even when lanes happen to hold
+    // float-looking values (see the raw-bits policy in the codegen).
     assert!(
-        translated.wgsl.contains("ld_x0 = i32(ld_x0_f);")
-            && translated.wgsl.contains("ld_y0 = i32(ld_y0_f);"),
-        "expected ld to use numeric i32(f32) conversion for integer float lanes:\n{}",
+        translated.wgsl.contains("bitcast<i32>(0x3f800000u)")
+            && translated.wgsl.contains("bitcast<i32>(0x40000000u)"),
+        "expected ld to preserve raw coordinate bits via bitcast (no numeric float→int conversion):\n{}",
         translated.wgsl
     );
     assert!(
-        translated.wgsl.contains("bitcast<i32>(ld_x0_f)")
-            && translated.wgsl.contains("bitcast<i32>(ld_y0_f)"),
-        "expected ld to still emit a raw-bit fallback for non-integer float lanes:\n{}",
-        translated.wgsl
-    );
-    assert!(
-        !translated.wgsl.contains("bitcast<i32>(0x3f800000u)"),
-        "expected ld not to treat integer floats as raw u32 bits:\n{}",
+        !translated.wgsl.contains(" = i32(ld_"),
+        "expected ld NOT to apply numeric float→int conversion heuristics:\n{}",
         translated.wgsl
     );
 }
@@ -2353,9 +2346,8 @@ fn translates_texture_load_with_nonzero_lod() {
     assert_wgsl_validates(&translated.wgsl);
     assert!(translated.wgsl.contains("textureLoad(t0"));
     assert!(
-        translated.wgsl.contains("bitcast<f32>(0x00000003u)")
-            && translated.wgsl.contains("bitcast<i32>(ld_lod_scalar0_f)"),
-        "expected raw mip LOD bits (3) to be preserved via a bitcast fallback:\n{}",
+        translated.wgsl.contains("bitcast<i32>(0x00000003u)"),
+        "expected raw mip LOD bits (3) to be preserved as an integer via bitcast:\n{}",
         translated.wgsl
     );
 }

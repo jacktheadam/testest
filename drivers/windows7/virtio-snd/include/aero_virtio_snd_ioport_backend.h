@@ -13,7 +13,7 @@
  *
  * Note: The Aero Windows 7 virtio contract v1 (`AERO-W7-VIRTIO`) is modern-only.
  * For virtio-pci modern bring-up (PCI vendor caps + BAR0 MMIO + INTx), see:
- * `docs/windows/virtio-pci-modern-wdm.md`.
+ * `wiki/areas/drivers-windows.md`.
  *
  * This header intentionally forward-declares the hardware device extension to
  * avoid pulling in the full device/virtio headers from the WaveRT miniport code.

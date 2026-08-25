@@ -34,7 +34,7 @@ test("D3D9 shader translation is persisted and skipped on next run", async ({}, 
       const page = await context.newPage();
       page.on("console", (msg) => logs.push(msg.text()));
 
-      await page.goto(`${baseUrl}/web/gpu-worker-d3d9-shader-cache.html`);
+      await page.goto(`${baseUrl}/apps/web/gpu-worker-d3d9-shader-cache.html`);
       await page.waitForFunction(() => (window as any).__d3d9ShaderCacheDemo !== undefined);
 
       const result = await page.evaluate(() => (window as any).__d3d9ShaderCacheDemo);

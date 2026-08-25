@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { encodeHttpTextResponse } from "../src/http_text_response.js";
-import httpTextResponseCjs from "../src/http_text_response.cjs";
+import { encodeHttpTextResponse } from "../packages/transport-safety/src/http_text_response.js";
+import httpTextResponseCjs from "../packages/transport-safety/src/http_text_response.cjs";
 
 test("http_text_response: encodes headers + body with correct Content-Length", () => {
   const buf = encodeHttpTextResponse({

@@ -3,13 +3,16 @@ use aero_x86::{DecodedInst, Instruction, Mnemonic, OpKind, Register};
 use crate::cpuid::{self, CpuFeatures};
 use crate::exception::{AssistReason, Exception};
 use crate::linear_mem::{
-    fetch_wrapped_seg_ip, read_u16_wrapped, read_u32_wrapped, read_u64_wrapped, write_u16_wrapped,
+    read_u16_wrapped, read_u32_wrapped, read_u64_wrapped, watch_read, write_u16_wrapped,
     write_u32_wrapped, write_u64_wrapped,
 };
 use crate::mem::CpuBus;
 use crate::msr;
 use crate::segmentation::{LoadReason, Seg};
-use crate::state::{mask_bits, CpuMode, CpuState, RFLAGS_IOPL_MASK};
+use crate::state::{
+    mask_bits, CpuMode, CpuState, RFLAGS_IF, RFLAGS_IOPL_MASK, RFLAGS_ZF, SEG_ACCESS_DB,
+    SEG_ACCESS_L, SEG_ACCESS_PRESENT,
+};
 use crate::time::TimeSource;
 
 /// Maximum number of `INVLPG` addresses retained in [`AssistContext::invlpg_log`].
@@ -43,6 +46,20 @@ pub struct AssistContext {
     /// Number of `INVLPG` log entries dropped because [`AssistContext::invlpg_log`] hit
     /// [`AssistContext::INVLPG_LOG_CAP`].
     pub dropped_invlpg_log_entries: u64,
+    /// Last instruction pointer that executed `RDTSC`/`RDTSCP`.
+    ///
+    /// This is scheduler-only history used to recognize a tight timestamp polling loop before
+    /// applying the opt-in `AERO_RDTSC_QUANTUM` scheduler yield. A one-off timestamp read must
+    /// remain an ordinary sample: Windows also uses RDTSC as entropy, and advancing time on every
+    /// sample changes calibration, allocator placement, and boot correctness.
+    rdtsc_poll_rip: Option<u64>,
+    /// Architectural TSC returned by the preceding timestamp read.
+    rdtsc_poll_tsc: u64,
+    /// Number of consecutive timestamp reads from the same instruction pointer with a small
+    /// instruction-time gap.
+    rdtsc_poll_streak: u8,
+    /// Whether the most recent timestamp assist requested a polling-loop scheduler yield.
+    rdtsc_poll_yield_requested: bool,
 }
 
 impl AssistContext {
@@ -91,17 +108,10 @@ pub fn handle_assist<B: CpuBus>(
     bus.sync(state);
     let ip = state.rip();
     let cs_base = state.seg_base_reg(Register::CS);
-    let bytes = fetch_wrapped_seg_ip(state, bus, cs_base, ip, 15)
+    let (bytes, decoded) =
+        crate::interp::tier0::exec::fetch_and_decode(state, bus, cs_base, ip, aero_x86::decode)
         .inspect_err(|e| state.apply_exception_side_effects(e))?;
     let addr_size_override = has_addr_size_override(&bytes, state.bitness());
-    let decoded = match aero_x86::decode(&bytes, ip, state.bitness()) {
-        Ok(decoded) => decoded,
-        Err(_) => {
-            let e = Exception::InvalidOpcode;
-            state.apply_exception_side_effects(&e);
-            return Err(e);
-        }
-    };
 
     exec_decoded(ctx, time, state, bus, &decoded, addr_size_override)
         .inspect_err(|e| state.apply_exception_side_effects(e))?;
@@ -159,12 +169,12 @@ fn exec_decoded<B: CpuBus>(
             Ok(())
         }
         Mnemonic::Rdtsc => {
-            instr_rdtsc(time, state);
+            instr_rdtsc(ctx, time, state);
             state.set_rip(next_ip_raw);
             Ok(())
         }
         Mnemonic::Rdtscp => {
-            instr_rdtscp(time, state);
+            instr_rdtscp(ctx, time, state);
             state.set_rip(next_ip_raw);
             Ok(())
         }
@@ -181,7 +191,7 @@ fn exec_decoded<B: CpuBus>(
             Ok(())
         }
         Mnemonic::In | Mnemonic::Out => {
-            instr_in_out(state, bus, instr)?;
+            instr_in_out(time, state, bus, instr)?;
             state.set_rip(next_ip_raw);
             Ok(())
         }
@@ -247,6 +257,11 @@ fn exec_decoded<B: CpuBus>(
             state.set_rip(next_ip_raw);
             Ok(())
         }
+        Mnemonic::Lar | Mnemonic::Lsl => {
+            instr_lar_lsl(state, bus, instr, next_ip_raw)?;
+            state.set_rip(next_ip_raw);
+            Ok(())
+        }
         Mnemonic::Lmsw | Mnemonic::Smsw => {
             instr_lmsw_smsw(state, bus, instr, next_ip_raw)?;
             state.set_rip(next_ip_raw);
@@ -254,6 +269,14 @@ fn exec_decoded<B: CpuBus>(
         }
         Mnemonic::Invlpg => {
             instr_invlpg(ctx, state, bus, instr, next_ip_raw)?;
+            state.set_rip(next_ip_raw);
+            Ok(())
+        }
+        // WBINVD / INVD: privileged cache flushes. Emulators without a host
+        // cache model treat them as CPL0 no-ops. Win7 PAGELK issues WBINVD
+        // while programming MTRRs immediately before SSDT conversion.
+        Mnemonic::Wbinvd | Mnemonic::Invd => {
+            require_cpl0(state)?;
             state.set_rip(next_ip_raw);
             Ok(())
         }
@@ -266,7 +289,10 @@ fn exec_decoded<B: CpuBus>(
             instr_syscall(ctx, state, next_ip_raw)?;
             Ok(())
         }
-        Mnemonic::Sysret => {
+        Mnemonic::Sysret | Mnemonic::Sysretq => {
+            // iced-x86 maps legacy SYSRET (0F 07) to Sysret and REX.W SYSRETQ
+            // (48 0F 07) to Sysretq. Win7 x64 only uses SYSRETQ; treating it as
+            // #UD left GS user after SWAPGS and nested #PF → TripleFault.
             instr_sysret(ctx, state)?;
             Ok(())
         }
@@ -423,7 +449,11 @@ fn read_mem<B: CpuBus>(
     bits: u32,
 ) -> Result<u64, Exception> {
     match bits {
-        8 => Ok(bus.read_u8(state.apply_a20(addr))? as u64),
+        8 => {
+            let v = bus.read_u8(state.apply_a20(addr))?;
+            watch_read(state, addr, 1, u64::from(v));
+            Ok(u64::from(v))
+        }
         16 => Ok(read_u16_wrapped(state, bus, addr)? as u64),
         32 => Ok(read_u32_wrapped(state, bus, addr)? as u64),
         64 => Ok(read_u64_wrapped(state, bus, addr)?),
@@ -588,15 +618,111 @@ fn instr_wrmsr(
 // Time
 // -------------------------------------------------------------------------------------------------
 
-fn instr_rdtsc(time: &mut TimeSource, state: &mut CpuState) {
+/// Allocate one line from the bounded timestamp/PM-timer diagnostic stream.
+///
+/// `AERO_TIME_TRACE=<lines>` is intentionally off by default. It records the
+/// architectural samples Windows uses while calibrating the TSC without
+/// enabling the much heavier whole-instruction trace.
+fn time_trace_slot() -> Option<u64> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::OnceLock;
+
+    static LIMIT: OnceLock<u64> = OnceLock::new();
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let limit = *LIMIT.get_or_init(|| {
+        std::env::var("AERO_TIME_TRACE")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0)
+    });
+    if limit == 0 {
+        return None;
+    }
+    let slot = NEXT.fetch_add(1, Ordering::Relaxed);
+    (slot < limit).then_some(slot)
+}
+
+/// Whether sustained interruptible RDTSC polling should yield to the machine scheduler.
+///
+/// The numeric `AERO_RDTSC_QUANTUM` spelling is retained for compatibility with existing
+/// bring-up recipes, but the value is now only an on/off control. Earlier code added it to the
+/// architectural TSC on every timestamp read, corrupting Windows' TSC calibration and entropy.
+fn rdtsc_poll_yield_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("AERO_RDTSC_QUANTUM")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .is_some_and(|value: u64| value != 0)
+    })
+}
+
+/// Whether the most recent RDTSC assist recognized a tight polling loop and requested a scheduler
+/// yield.
+///
+/// Tier-0 yields so `Machine::run_slice` can tick RTC/PIT and poll IRQ8 before a HAL
+/// RDTSC-bounded clock-sync wait expires entirely inside one batch (0x5C / 0x10B). RDTSC itself
+/// remains a pure architectural sample; it never advances time. Isolated timestamp/entropy
+/// samples do not force a yield.
+#[inline]
+pub(crate) fn rdtsc_assist_yields_for_timers(ctx: &AssistContext) -> bool {
+    ctx.rdtsc_poll_yield_requested
+}
+
+/// Maximum architectural-time gap between samples that can belong to one tight timestamp polling
+/// loop. Real HAL delay/calibration loops return to the same RDTSC within a few dozen retired
+/// instructions; calls separated by ordinary kernel work must not be classified as polling.
+const RDTSC_POLL_MAX_GAP_CYCLES: u64 = 64;
+
+/// Require several consecutive tight-loop samples before yielding. This keeps short bursts of
+/// timestamp reads cheap while adding negligible latency to long waits.
+const RDTSC_POLL_WARMUP_SAMPLES: u8 = 8;
+
+fn update_rdtsc_poll_yield(ctx: &mut AssistContext, time: &mut TimeSource, state: &CpuState) {
+    let yield_enabled = rdtsc_poll_yield_enabled();
+    let rip = state.rip();
+    let before = time.read_tsc();
+    let tight_repeat = ctx.rdtsc_poll_rip == Some(rip)
+        && before.wrapping_sub(ctx.rdtsc_poll_tsc) <= RDTSC_POLL_MAX_GAP_CYCLES;
+
+    ctx.rdtsc_poll_streak = if tight_repeat {
+        ctx.rdtsc_poll_streak.saturating_add(1)
+    } else {
+        1
+    };
+    // The optimization exists to let platform timers and IRQ delivery progress during an
+    // interruptible timestamp-bounded wait. Yielding while IF=0 cannot let an ISR satisfy the
+    // wait and just adds host overhead.
+    ctx.rdtsc_poll_yield_requested = yield_enabled
+        && (state.rflags() & RFLAGS_IF) != 0
+        && ctx.rdtsc_poll_streak >= RDTSC_POLL_WARMUP_SAMPLES;
+    ctx.rdtsc_poll_rip = Some(rip);
+    ctx.rdtsc_poll_tsc = time.read_tsc();
+}
+
+fn instr_rdtsc(ctx: &mut AssistContext, time: &mut TimeSource, state: &mut CpuState) {
+    update_rdtsc_poll_yield(ctx, time, state);
     let tsc = time.read_tsc();
+    if let Some(slot) = time_trace_slot() {
+        eprintln!(
+            "AERO_TIME_TRACE[{slot}] RDTSC rip={:#x} tsc={tsc:#x}",
+            state.rip()
+        );
+    }
     state.msr.tsc = tsc;
     state.write_reg(Register::EAX, tsc as u32 as u64);
     state.write_reg(Register::EDX, (tsc >> 32) as u32 as u64);
 }
 
-fn instr_rdtscp(time: &mut TimeSource, state: &mut CpuState) {
+fn instr_rdtscp(ctx: &mut AssistContext, time: &mut TimeSource, state: &mut CpuState) {
+    update_rdtsc_poll_yield(ctx, time, state);
     let tsc = time.read_tsc();
+    if let Some(slot) = time_trace_slot() {
+        eprintln!(
+            "AERO_TIME_TRACE[{slot}] RDTSCP rip={:#x} tsc={tsc:#x}",
+            state.rip()
+        );
+    }
     state.msr.tsc = tsc;
     state.write_reg(Register::EAX, tsc as u32 as u64);
     state.write_reg(Register::EDX, (tsc >> 32) as u32 as u64);
@@ -608,6 +734,7 @@ fn instr_rdtscp(time: &mut TimeSource, state: &mut CpuState) {
 // -------------------------------------------------------------------------------------------------
 
 fn instr_in_out<B: CpuBus>(
+    time: &mut TimeSource,
     state: &mut CpuState,
     bus: &mut B,
     instr: &Instruction,
@@ -624,6 +751,18 @@ fn instr_in_out<B: CpuBus>(
             };
             let val = bus.io_read(port, size)?;
             state.write_reg(dst, val);
+            let tsc_before = time.read_tsc();
+            let extra_cycles = bus.io_read_time_advance_cycles(port, size);
+            time.advance_cycles(extra_cycles);
+            if port == 0x0408 {
+                if let Some(slot) = time_trace_slot() {
+                    eprintln!(
+                        "AERO_TIME_TRACE[{slot}] PM_TMR rip={:#x} size={size} value={val:#x} tsc_before={tsc_before:#x} extra={extra_cycles:#x} tsc_after={:#x}",
+                        state.rip(),
+                        time.read_tsc()
+                    );
+                }
+            }
             Ok(())
         }
         Mnemonic::Out => {
@@ -897,7 +1036,7 @@ fn instr_mov_privileged<B: CpuBus>(
         || instr.op_kind(1) == OpKind::Register
             && (is_ctrl_reg(instr.op1_register()) || is_debug_reg(instr.op1_register()))
     {
-        instr_mov_cr_dr(state, instr)?;
+        instr_mov_cr_dr(state, bus, instr)?;
         state.set_rip(next_ip);
         return Ok(());
     }
@@ -905,7 +1044,11 @@ fn instr_mov_privileged<B: CpuBus>(
     Err(Exception::InvalidOpcode)
 }
 
-fn instr_mov_cr_dr(state: &mut CpuState, instr: &Instruction) -> Result<(), Exception> {
+fn instr_mov_cr_dr<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+) -> Result<(), Exception> {
     require_cpl0(state)?;
     let dst = instr.op0_register();
     let src = instr.op1_register();
@@ -915,7 +1058,10 @@ fn instr_mov_cr_dr(state: &mut CpuState, instr: &Instruction) -> Result<(), Exce
         match dst {
             Register::CR0 => state.control.cr0 = val,
             Register::CR2 => state.control.cr2 = val,
-            Register::CR3 => state.control.cr3 = val,
+            Register::CR3 => {
+                state.control.cr3 = val;
+                bus.write_cr3(val);
+            }
             Register::CR4 => state.control.cr4 = val,
             Register::CR8 => state.control.cr8 = val,
             _ => return Err(Exception::InvalidOpcode),
@@ -1055,10 +1201,29 @@ fn instr_retf<B: CpuBus>(
         0
     };
 
-    let off_bits = state.bitness();
-    let off_size = off_bits / 8;
+    // The number of bytes RETF pops for the offset and for the CS selector slot is the *operand
+    // size*, not the code-segment default: a 0x66 prefix toggles it in 16/32-bit mode (e.g. `66 cb`
+    // in a 16-bit code segment is RETFD, popping a 4-byte offset and a 4-byte selector slot).
+    // Deriving it from `state.bitness()` would mis-split the return frame whenever 0x66 is used.
+    // Decode it from the instruction's Code, matching the real-mode path in ops_cf.
+    let off_size = match instr.code() {
+        aero_x86::Code::Retfd | aero_x86::Code::Retfd_imm16 => 4,
+        aero_x86::Code::Retfq | aero_x86::Code::Retfq_imm16 => 8,
+        _ => 2,
+    };
+    let off_bits = off_size * 8;
     let off = pop_sized(state, bus, off_size)? & mask_bits(off_bits);
-    let cs = pop_u16(state, bus)?;
+    // The CS selector slot is `off_size` bytes wide (selector in the low word, upper bytes
+    // discarded); reading the full slot keeps the stack pointer correctly aligned.
+    let cs_slot = pop_sized(state, bus, off_size)?;
+    let cs = (cs_slot & 0xFFFF) as u16;
+    if std::env::var_os("AERO_SEG_DEBUG").is_some() {
+        eprintln!(
+            "[retf] popped off={off:#x} cs={cs:#06x} (slot={cs_slot:#x}, sp={:#x}, cpl={})",
+            state.stack_ptr(),
+            state.cpl(),
+        );
+    }
     let sp = state.stack_ptr().wrapping_add(pop_imm as u64);
     state.set_stack_ptr(sp);
     far_jump(state, bus, cs, off)
@@ -1070,12 +1235,14 @@ fn push_sized<B: CpuBus>(
     val: u64,
     size: u32,
 ) -> Result<(), Exception> {
+    // Same atomicity rule as tier0 `push`: only commit RSP after the store
+    // succeeds so a stack #PF leaves the instruction restartable.
     let sp_bits = state.stack_ptr_bits();
-    let mut sp = state.stack_ptr();
-    sp = sp.wrapping_sub(size as u64) & mask_bits(sp_bits);
-    state.set_stack_ptr(sp);
-    let addr = state.apply_a20(state.seg_base_reg(Register::SS).wrapping_add(sp));
-    write_mem(state, bus, addr, size * 8, val)
+    let new_sp = state.stack_ptr().wrapping_sub(size as u64) & mask_bits(sp_bits);
+    let addr = state.apply_a20(state.seg_base_reg(Register::SS).wrapping_add(new_sp));
+    write_mem(state, bus, addr, size * 8, val)?;
+    state.set_stack_ptr(new_sp);
+    Ok(())
 }
 
 fn pop_sized<B: CpuBus>(state: &mut CpuState, bus: &mut B, size: u32) -> Result<u64, Exception> {
@@ -1212,6 +1379,146 @@ fn instr_str_sldt<B: CpuBus>(
     write_op_u16(state, bus, instr, 0, selector, next_ip)
 }
 
+/// LAR/LSL: load access rights / segment limit from a selector.
+///
+/// Soft-fault semantics (Intel SDM Vol. 2): invalid selector, bad type, or
+/// privilege failure clears ZF and does **not** raise #GP. Destination is left
+/// unchanged when ZF=0. Used by Win7 ntdll in user mode (`LSL EAX, EAX`).
+fn instr_lar_lsl<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    // Operand 1 is the source selector (r/m16); operand 0 is the destination.
+    let selector = read_op_u16(state, bus, instr, 1, next_ip)?;
+    let null = (selector >> 3) == 0;
+
+    let result = if null {
+        None
+    } else {
+        lar_lsl_probe(state, bus, selector, instr.mnemonic())
+    };
+
+    match result {
+        Some(value) => {
+            // `write_reg` applies 16/32/64 write semantics from the iced register
+            // id (32-bit dest clears the upper half in long mode).
+            match instr.op_kind(0) {
+                OpKind::Register => state.write_reg(instr.op0_register(), value),
+                _ => return Err(Exception::InvalidOpcode),
+            }
+            state.set_flag(RFLAGS_ZF, true);
+        }
+        None => {
+            state.set_flag(RFLAGS_ZF, false);
+        }
+    }
+    Ok(())
+}
+
+/// Probe GDT/LDT for LAR/LSL. Returns `Some(dest_value)` on success (ZF=1 path).
+fn lar_lsl_probe<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    selector: u16,
+    mnemonic: Mnemonic,
+) -> Option<u64> {
+    // Soft checks: anything that would be #GP for a hard load becomes ZF=0.
+    let desc = soft_read_descriptor_8(state, bus, selector)?;
+    let attrs = desc.attrs();
+    if !attrs.present {
+        return None;
+    }
+    if !lar_lsl_type_ok(attrs.s, attrs.typ) {
+        return None;
+    }
+    // Privilege: conforming code is always ok; otherwise max(CPL,RPL) <= DPL.
+    let rpl = (selector & 0b11) as u8;
+    let cpl = state.cpl();
+    let conforming = attrs.s && (attrs.typ & 0b1100) == 0b1100; // code + conforming
+    if !conforming && (cpl > attrs.dpl || rpl > attrs.dpl) {
+        return None;
+    }
+
+    match mnemonic {
+        Mnemonic::Lsl => {
+            // Segment limit already expanded for G bit by parse_descriptor_8.
+            let limit = match desc {
+                crate::descriptors::Descriptor::Segment(s) => s.limit,
+                crate::descriptors::Descriptor::System(s) => s.limit,
+            };
+            Some(u64::from(limit))
+        }
+        Mnemonic::Lar => {
+            // Access rights: bits 16..23 = access byte, 20..23 high flags partially.
+            // Architectural LAR returns: hidden high word of descriptor (access rights
+            // shifted): bits [23:16] = access, [15:0] = 0, with some high flags.
+            // Classic form: DEST[23:0] = descriptor[55:40] << 8? Actually:
+            //   DEST = (access_rights << 8) with bits 19:16 = flags low nibble
+            // SDM: "DEST ← access rights" as the high 4 bytes of the descriptor
+            // (bytes 4-7 of the 8-byte descriptor) with low 8 bits cleared:
+            //   bits 15:0 = 0, bits 23:16 = access byte, bits 31:24 from flags area.
+            // Effective: value = (raw_low >> 32) & 0x00FFFF00
+            // We reconstruct from attrs.
+            let access = (attrs.typ & 0xF)
+                | (u8::from(attrs.s) << 4)
+                | ((attrs.dpl & 3) << 5)
+                | (u8::from(attrs.present) << 7);
+            let flags = u8::from(attrs.avl)
+                | (u8::from(attrs.long) << 1)
+                | (u8::from(attrs.default_big) << 2)
+                | (u8::from(attrs.granularity) << 3);
+            // LAR result: bits[23:16]=access, bits[19:16] also include flags in
+            // the upper nibble of the third byte — SDM packs as descriptor[55:40]
+            // left-shifted by 8 with low byte zero:
+            //   result = ((flags & 0xF) << 20) | ((access as u32) << 8)
+            let rights = (u32::from(access) << 8) | (u32::from(flags & 0xF) << 20);
+            Some(u64::from(rights))
+        }
+        _ => None,
+    }
+}
+
+fn lar_lsl_type_ok(s: bool, typ: u8) -> bool {
+    if s {
+        // All code/data segment types.
+        return true;
+    }
+    // System types valid for LAR/LSL (Intel SDM table).
+    matches!(typ, 0x1 | 0x2 | 0x3 | 0x9 | 0xB)
+}
+
+/// Soft GDT/LDT read for LAR/LSL: returns None instead of #GP on OOB/null.
+fn soft_read_descriptor_8<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    selector: u16,
+) -> Option<crate::descriptors::Descriptor> {
+    let index = selector >> 3;
+    if index == 0 {
+        return None;
+    }
+    let ti = (selector & 0b100) != 0;
+    let (base, limit) = if ti {
+        if state.tables.ldtr.is_unusable() {
+            return None;
+        }
+        (state.tables.ldtr.base, state.tables.ldtr.limit)
+    } else {
+        (state.tables.gdtr.base, u32::from(state.tables.gdtr.limit))
+    };
+    let byte_off = u64::from(index) * 8;
+    if byte_off + 7 > u64::from(limit) {
+        return None;
+    }
+    let addr = base.wrapping_add(byte_off);
+    let raw_low = state
+        .with_supervisor_access(bus, |bus, st| read_u64_wrapped(st, bus, addr))
+        .ok()?;
+    Some(crate::descriptors::parse_descriptor_8(raw_low))
+}
+
 fn instr_lmsw_smsw<B: CpuBus>(
     state: &mut CpuState,
     bus: &mut B,
@@ -1276,6 +1583,77 @@ fn instr_invlpg(
 // SYSCALL/SYSRET/SYSENTER/SYSEXIT/SWAPGS
 // -------------------------------------------------------------------------------------------------
 
+/// Bring-up: `AERO_LOG_SYSCALL=aa,82` logs matching `eax` syscall numbers
+/// (hex, optional `0x`) at the architectural `SYSCALL` assist, so JIT and
+/// Tier-0 share one view. Caps at 32 lines per number.
+fn log_filtered_syscall(state: &CpuState, return_ip: u64) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::OnceLock;
+
+    let want = SYSCALL_LOG_FILTER.get_or_init(parse_syscall_log_filter);
+    if want.is_empty() {
+        return;
+    }
+    let eax = state.read_reg(Register::RAX) as u32;
+    if !want.contains(&eax) {
+        return;
+    }
+    static COUNTS: OnceLock<Vec<AtomicU32>> = OnceLock::new();
+    let counts = COUNTS.get_or_init(|| want.iter().map(|_| AtomicU32::new(0)).collect());
+    let Some(idx) = want.iter().position(|&n| n == eax) else {
+        return;
+    };
+    let n = counts[idx].fetch_add(1, Ordering::Relaxed);
+    if n >= 32 {
+        return;
+    }
+    eprintln!(
+        "AERO_LOG_SYSCALL: eax={eax:#x} rip={return_ip:#x} cr3={:#x} rcx={:#x} rdx={:#x} r8={:#x} r9={:#x} rsp={:#x}",
+        state.control.cr3,
+        state.read_reg(Register::RCX),
+        state.read_reg(Register::RDX),
+        state.read_reg(Register::R8),
+        state.read_reg(Register::R9),
+        state.read_reg(Register::RSP),
+    );
+}
+
+fn parse_syscall_log_filter() -> Vec<u32> {
+    parse_syscall_log_filter_spec(std::env::var("AERO_LOG_SYSCALL").ok().as_deref())
+}
+
+fn parse_syscall_log_filter_spec(spec: Option<&str>) -> Vec<u32> {
+    let Some(spec) = spec.filter(|s| !s.is_empty()) else {
+        return Vec::new();
+    };
+    spec.split(',')
+        .filter_map(|raw| {
+            let raw = raw.trim().trim_start_matches("0x").trim_start_matches("0X");
+            u32::from_str_radix(raw, 16).ok()
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod syscall_log_filter_tests {
+    use super::parse_syscall_log_filter_spec;
+
+    #[test]
+    fn parses_hex_ntcreateuserprocess_and_alpc() {
+        let got = parse_syscall_log_filter_spec(Some("aa,0x82"));
+        assert_eq!(got, vec![0xaa, 0x82], "Win7 NtCreateUserProcess=0xAA, NtAlpcSendWaitReceivePort=0x82");
+    }
+
+    #[test]
+    fn empty_or_unset_disables_the_log() {
+        assert!(parse_syscall_log_filter_spec(None).is_empty());
+        assert!(parse_syscall_log_filter_spec(Some("")).is_empty());
+    }
+}
+
+static SYSCALL_LOG_FILTER: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
+
+
 fn is_canonical(addr: u64, bits: u8) -> bool {
     if bits >= 64 {
         return true;
@@ -1301,13 +1679,26 @@ fn instr_syscall(
         return Err(Exception::InvalidOpcode);
     }
 
+    log_filtered_syscall(state, return_ip);
+
     state.write_reg(Register::RCX, return_ip);
     state.write_reg(Register::R11, state.rflags());
 
     let star = state.msr.star;
     let syscall_cs = ((star >> 32) & 0xFFFF) as u16;
+    // SDM SYSCALL: load flat kernel CS/SS descriptor caches (CPL0, L=1 for CS).
+    // Type=0xB (exec/read/accessed), S=1, DPL=0, P=1, L=1, G=1.
+    const KERNEL_CS_AR: u32 = 0xB | (1 << 4) | SEG_ACCESS_PRESENT | SEG_ACCESS_L | (1 << 11);
+    // Type=0x3 (read/write/accessed), S=1, DPL=0, P=1, B=1, G=1.
+    const KERNEL_SS_AR: u32 = 0x3 | (1 << 4) | SEG_ACCESS_PRESENT | SEG_ACCESS_DB | (1 << 11);
     state.segments.cs.selector = syscall_cs & !0b11;
+    state.segments.cs.base = 0;
+    state.segments.cs.limit = 0xFFFFF;
+    state.segments.cs.access = KERNEL_CS_AR;
     state.segments.ss.selector = syscall_cs.wrapping_add(8) & !0b11;
+    state.segments.ss.base = 0;
+    state.segments.ss.limit = 0xFFFFF;
+    state.segments.ss.access = KERNEL_SS_AR;
 
     let fmask = state.msr.fmask;
     state.set_rflags(state.rflags() & !fmask);
@@ -1334,14 +1725,29 @@ fn instr_sysret(ctx: &AssistContext, state: &mut CpuState) -> Result<(), Excepti
         return Err(Exception::gp0());
     }
 
-    state.set_rflags(state.read_reg(Register::R11));
+    // SDM SYSRET (64-bit): RFLAGS ← (R11 & 0x3C7FD7) | 2  (RF/VM cleared, bit1 set).
+    let r11 = state.read_reg(Register::R11);
+    state.set_rflags((r11 & 0x3C7FD7) | 2);
 
     let star = state.msr.star;
     let base = ((star >> 48) & 0xFFFF) as u16;
     let user_cs = base.wrapping_add(16);
     let user_ss = base.wrapping_add(8);
+    // SDM: fixed flat user CS/SS caches (DPL=3, CS.L=1, CS.D=0, SS.B=1).
+    // Type=0xB (exec/read/accessed), S=1, DPL=3, P=1, L=1, G=1.
+    const USER_CS_AR: u32 =
+        0xB | (1 << 4) | (3 << 5) | SEG_ACCESS_PRESENT | SEG_ACCESS_L | (1 << 11);
+    // Type=0x3 (read/write/accessed), S=1, DPL=3, P=1, B=1, G=1.
+    const USER_SS_AR: u32 =
+        0x3 | (1 << 4) | (3 << 5) | SEG_ACCESS_PRESENT | SEG_ACCESS_DB | (1 << 11);
     state.segments.cs.selector = (user_cs & !0b11) | 0b11;
+    state.segments.cs.base = 0;
+    state.segments.cs.limit = 0xFFFFF;
+    state.segments.cs.access = USER_CS_AR;
     state.segments.ss.selector = (user_ss & !0b11) | 0b11;
+    state.segments.ss.base = 0;
+    state.segments.ss.limit = 0xFFFFF;
+    state.segments.ss.access = USER_SS_AR;
 
     state.set_rip(target);
     Ok(())
@@ -1395,8 +1801,11 @@ fn instr_sysexit(state: &mut CpuState) -> Result<(), Exception> {
             state.set_rip(new_rip);
         }
         CpuMode::Long => {
-            let new_rip = state.read_reg(Register::RCX);
-            let new_rsp = state.read_reg(Register::RDX);
+            // SDM SYSEXIT (IA-32e): RIP ← RDX, RSP ← RCX. Matches the 32-bit
+            // Protected mapping (RIP←EDX, RSP←ECX) above; the prior code had
+            // these two swapped, which silently corrupts the return target.
+            let new_rip = state.read_reg(Register::RDX);
+            let new_rsp = state.read_reg(Register::RCX);
             state.write_reg(Register::RSP, new_rsp);
             state.set_rip(new_rip);
         }

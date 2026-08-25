@@ -11,7 +11,7 @@ The contract is expressed as C/C++ headers suitable for **Windows 7-targeted WDK
 > **legacy bring-up ABI** (`legacy/aerogpu_protocol_legacy.h`).
 >
 > The legacy header is kept for reference and for the emulator’s legacy AeroGPU device model
-> (`crates/emulator/src/devices/pci/aerogpu_legacy.rs`, feature `emulator/aerogpu-legacy`).
+> The bring-up device model has been retired along with the legacy vendor ID.
 >
 > The in-tree Win7 KMD does **not** include the legacy protocol header directly (it uses the minimal internal shim
 > `drivers/aerogpu/kmd/include/aerogpu_legacy_abi.h`), but it can still speak the legacy transport for compatibility.
@@ -23,7 +23,7 @@ The contract is expressed as C/C++ headers suitable for **Windows 7-targeted WDK
 
 > Note: The repository also contains older/prototype GPU ABIs with similar “AeroGPU” naming.
 > New work intended for Windows 7 should target the protocol in this directory.
-> See `docs/graphics/aerogpu-protocols.md` for an overview of the in-tree protocols.
+> See `wiki/areas/graphics.md` for an overview of the in-tree protocols.
 
 ## Files
 
@@ -48,10 +48,10 @@ The **normative A3A0 protocol contract** is defined by these headers:
 
 The emulator maintains **Rust + TypeScript mirrors** of the same ABI for host-side parsing and tooling:
 
-- Rust: `emulator/protocol/aerogpu/*.rs` (crate `aero-protocol`)
-- TypeScript: `emulator/protocol/aerogpu/*.ts`
+- Rust: `crates/aero-protocol/aerogpu/*.rs` (crate `aero-protocol`)
+- TypeScript: `crates/aero-protocol/aerogpu/*.ts`
 
-When any of the normative headers change, the mirrors **must** be updated in lock-step. CI enforces this via conformance tests that compile and run a small C “ABI dump” helper (`emulator/protocol/tests/aerogpu_abi_dump.c`) and compare:
+When any of the normative headers change, the mirrors **must** be updated in lock-step. CI enforces this via conformance tests that compile and run a small C “ABI dump” helper (`crates/aero-protocol/tests/aerogpu_abi_dump.c`) and compare:
 
 - constant values (MMIO offsets, flags, enum values),
 - struct sizes and field offsets, and
@@ -70,9 +70,9 @@ This directory currently contains two PCI/MMIO ABIs:
 
 - **Versioned ABI (current)** – `aerogpu_pci.h` + `aerogpu_ring.h` + `aerogpu_cmd.h`, PCI `A3A0:0001` (`VEN_A3A0&DEV_0001`).
   - Uses the major/minor compatibility model below (major breaking, minor forwards compatible).
-  - Emulator device model: `crates/emulator/src/devices/pci/aerogpu.rs`.
+  - Device model: `crates/aero-devices-gpu/src/pci.rs`.
 - **Legacy bring-up ABI (deprecated)** – `legacy/aerogpu_protocol_legacy.h`, PCI `1AED:0001` (legacy `"ARGP"` device model).
-  - Emulator device model: `crates/emulator/src/devices/pci/aerogpu_legacy.rs` (feature `emulator/aerogpu-legacy`).
+  - The bring-up device model has been retired along with the legacy vendor ID.
 
 Both IDs are project-specific (not PCI-SIG assigned). Both identify as a VGA-compatible display controller (base class `0x03`, subclass `0x00`, prog-if `0x00`).
 
@@ -82,7 +82,7 @@ If you are intentionally using the deprecated legacy device model/ABI (legacy `"
 `emulator/aerogpu-legacy`).
 
 For a quick overview of the canonical AeroGPU PCI IDs (new vs legacy) and which emulator device
-models implement each ABI, see: `docs/abi/aerogpu-pci-identity.md`.
+models implement each ABI, see: `wiki/areas/graphics.md`.
 
 ## Versioning model
 
@@ -130,7 +130,7 @@ The key MMIO responsibilities are:
    - Scanout0 configuration (width/height/format/pitch/framebuffer GPA).
    - Optional vblank timing registers + vblank IRQ (required for Win7 DWM pacing when `AEROGPU_FEATURE_VBLANK` is set; see `vblank.md`).
    - Cursor configuration is reserved and feature-gated.
-   - Format semantics: `*X8*` formats are fully opaque (alpha must be treated as `0xFF` when converting to RGBA), and `*_SRGB` variants are layout-identical to UNORM but differ in interpretation (avoid double-applying gamma). See `aerogpu_pci.h` and `docs/16-gpu-command-abi.md` §2.5.1.
+   - Format semantics: `*X8*` formats are fully opaque (alpha must be treated as `0xFF` when converting to RGBA), and `*_SRGB` variants are layout-identical to UNORM but differ in interpretation (avoid double-applying gamma). See `aerogpu_pci.h` and `wiki/areas/graphics.md`.
 
 See `aerogpu_pci.h` for exact offsets and bit definitions.
 
@@ -257,7 +257,7 @@ validation rules, `backing_offset_bytes` / `row_pitch_bytes` interpretation, ali
    (`aerogpu_wddm_alloc_priv.share_token` in `drivers/aerogpu/protocol/aerogpu_wddm_alloc.h`).
    dxgkrnl preserves the blob and returns the exact same bytes on cross-process
    `OpenResource`, so both processes observe the same `share_token`.
-  Canonical rationale and Win7 guest validation tests: `docs/graphics/win7-shared-surfaces-share-token.md`.
+  Canonical rationale and Win7 guest validation tests: `wiki/areas/graphics.md`.
   - **Collision policy:** `share_token` must be treated as a **globally unique**
     identifier. The host must detect and reject:
     - `EXPORT_SHARED_SURFACE` attempting to bind an already-exported token to a

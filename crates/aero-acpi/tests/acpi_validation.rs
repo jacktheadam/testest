@@ -498,6 +498,7 @@ fn generated_tables_are_self_consistent_and_checksums_pass() {
     let mut lapic_ids = Vec::new();
     let mut found_irq0_iso = false;
     let mut found_sci_iso = false;
+    let mut found_ps2_iso = false;
     while off < madt.len() {
         let entry_type = madt[off];
         let entry_len = madt[off + 1] as usize;
@@ -521,6 +522,9 @@ fn generated_tables_are_self_consistent_and_checksums_pass() {
                     let flags = read_u16_le(madt, off + 8);
                     assert_eq!(flags, 0x000F);
                 }
+                if matches!(src, 1 | 12) {
+                    found_ps2_iso = true;
+                }
             }
             _ => {}
         }
@@ -535,6 +539,10 @@ fn generated_tables_are_self_consistent_and_checksums_pass() {
     );
     assert!(found_irq0_iso);
     assert!(found_sci_iso);
+    assert!(
+        !found_ps2_iso,
+        "MADT must preserve the ISA-default polarity/trigger for PS/2 IRQ1 and IRQ12"
+    );
 
     // --- HPET ---
     let hpet_hdr_raw = mem.read(tables.addresses.hpet, 36);
@@ -590,7 +598,18 @@ fn dsdt_system_resources_device_reserves_acpi_pm_ports() {
     let tables = AcpiTables::build(&cfg, AcpiPlacement::default());
     let aml = &tables.dsdt[36..];
 
-    let sys0 = find_device_body(aml, b"SYS0").expect("expected DSDT to contain _SB_.SYS0");
+    let pci0 = find_device_body(aml, b"PCI0").expect("expected DSDT to contain _SB_.PCI0");
+    let isa = find_device_body(pci0, b"ISA_").expect("expected PCI0 to contain the LPC bridge");
+    let sys0 =
+        find_device_body(isa, b"SYS0").expect("expected motherboard resources beneath PCI0.ISA");
+    assert!(
+        find_device_body(isa, b"RTC_").is_some(),
+        "RTC resources must be owned beneath PCI0.ISA"
+    );
+    assert!(
+        find_device_body(isa, b"TIMR").is_some(),
+        "PIT resources must be owned beneath PCI0.ISA"
+    );
 
     let pnp0c02 = eisa_id_to_u32("PNP0C02").unwrap().to_le_bytes();
     let hid_pnp0c02 = [&[0x08][..], &b"_HID"[..], &[0x0C][..], &pnp0c02[..]].concat();
@@ -648,16 +667,24 @@ fn dsdt_system_resources_device_reserves_acpi_pm_ports() {
         "expected SYS0._CRS to reserve A20 gate port 0x92"
     );
 
-    let i8042 = io_port_descriptor(0x0060, 0x0060, 1, 5);
+    // The i8042 ports belong to the PNP0303 keyboard device. Duplicating them
+    // here as motherboard resources can make Windows report a resource
+    // conflict and prevents the keyboard device from owning its own _CRS.
+    let stale_i8042_reservation = io_port_descriptor(0x0060, 0x0060, 1, 5);
     assert!(
-        crs.windows(i8042.len()).any(|w| w == i8042),
-        "expected SYS0._CRS to reserve i8042 keyboard controller ports 0x60..0x64"
+        !crs.windows(stale_i8042_reservation.len())
+            .any(|w| w == stale_i8042_reservation),
+        "SYS0._CRS must not overlap the PNP0303 keyboard resources"
     );
 
-    let reset = io_port_descriptor(0x0CF9, 0x0CF9, 1, 1);
+    // The FADT ResetReg describes 0xCF9. It must not also appear as a SYS0
+    // consumer because the port lies inside the PCI root's fixed
+    // configuration-mechanism-1 resource at 0xCF8..0xCFF.
+    let stale_reset_reservation = io_port_descriptor(0x0CF9, 0x0CF9, 1, 1);
     assert!(
-        crs.windows(reset.len()).any(|w| w == reset),
-        "expected SYS0._CRS to reserve the reset port (0xCF9)"
+        !crs.windows(stale_reset_reservation.len())
+            .any(|w| w == stale_reset_reservation),
+        "SYS0._CRS must not overlap the PCI configuration ports at 0xCF9"
     );
 }
 

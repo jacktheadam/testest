@@ -104,10 +104,7 @@ fn packaging_fails_fast_on_symlink_in_guest_tools_tools() -> anyhow::Result<()> 
         "expected error to include full symlink path {}; got: {msg}",
         link.display()
     );
-    assert!(
-        msg.contains("guest_tools/tools"),
-        "unexpected error: {msg}"
-    );
+    assert!(msg.contains("guest_tools/tools"), "unexpected error: {msg}");
     assert!(
         msg.contains("replace the symlink with a real file or remove it"),
         "unexpected error (missing remediation): {msg}"
@@ -158,10 +155,7 @@ fn packaging_fails_fast_on_symlink_guest_tools_tools_dir() -> anyhow::Result<()>
         "expected error to include full symlink path {}; got: {msg}",
         tools_link.display()
     );
-    assert!(
-        msg.contains("guest_tools/tools"),
-        "unexpected error: {msg}"
-    );
+    assert!(msg.contains("guest_tools/tools"), "unexpected error: {msg}");
     assert!(
         msg.contains("replace the symlink with a real file or remove it"),
         "unexpected error (missing remediation): {msg}"
@@ -190,6 +184,6 @@ fn device_contract_path() -> std::path::PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }

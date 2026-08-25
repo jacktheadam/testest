@@ -139,10 +139,9 @@ impl IoApic {
 
     /// Construct an IOAPIC that can route interrupts to multiple LAPICs.
     ///
-    /// Delivery is currently limited to xAPIC physical destination mode:
-    /// - `destination_mode == 0` (physical)
-    /// - `delivery_mode == 0` (fixed)
-    ///
+    /// Delivery supports xAPIC fixed and lowest-priority delivery in both
+    /// physical and logical destination modes. Logical mode uses
+    /// [`LapicInterruptSink::matches_logical_destination`] (flat model).
     /// When the redirection entry destination is `0xFF`, interrupts are broadcast to all LAPICs.
     pub fn with_lapics(id: IoApicId, lapics: Vec<Arc<dyn LapicInterruptSink>>) -> Self {
         Self::with_entries_and_lapics(id, lapics, Self::NUM_REDIRECTION_ENTRIES)
@@ -160,9 +159,9 @@ impl IoApic {
         let mut pin_active_low = vec![false; entries];
         for (gsi, active_low) in pin_active_low.iter_mut().enumerate() {
             // Default PC wiring:
-            // - ISA IRQs are typically active-high (except SCI via ACPI ISO)
-            // - PCI INTx lines are active-low (our default ACPI _PRT routes them to GSIs 10-13)
-            *active_low = gsi == 9 || (10..=13).contains(&gsi) || gsi >= 16;
+            // - ISA IRQs are active-high (except SCI via ACPI ISO)
+            // - PCI INTx lines are active-low (the default Q35 _PRT uses GSIs 20-23)
+            *active_low = gsi == 9 || gsi >= 16;
         }
         // Initialise pins to the deasserted electrical level for the assumed wiring.
         let pin_level = pin_active_low.clone();
@@ -178,6 +177,11 @@ impl IoApic {
 
     pub fn num_redirection_entries(&self) -> usize {
         self.redirection.len()
+    }
+
+    /// Whether guest software has enabled at least one redirection-table entry.
+    pub fn has_unmasked_redirection_entry(&self) -> bool {
+        self.redirection.iter().any(|entry| !entry.mask)
     }
 
     pub fn set_pin_active_low(&mut self, gsi: u32, active_low: bool) {
@@ -375,40 +379,53 @@ impl IoApic {
     }
 
     fn deliver(&mut self, gsi: u32) {
-        let entry = &mut self.redirection[gsi as usize];
+        let entry = self.redirection[gsi as usize];
 
-        // Fixed + physical destination routing only for now.
-        if entry.delivery_mode != 0 || entry.destination_mode {
+        // Fixed and Lowest Priority are the maskable IOAPIC delivery modes used by Windows.
+        // SMI / NMI / INIT / ExtINT are not modeled here.
+        if entry.delivery_mode > 1 {
             return;
         }
 
-        if entry.destination == 0xFF {
-            if self.lapics.is_empty() {
-                return;
+        let dest = entry.destination;
+        let logical = entry.destination_mode;
+        let vector = entry.vector;
+        let level = entry.trigger_mode == TriggerMode::Level;
+
+        let matches_destination = |lapic: &&Arc<dyn LapicInterruptSink>| {
+            if dest == 0xFF {
+                return true;
             }
-            if entry.trigger_mode == TriggerMode::Level {
-                entry.remote_irr = true;
-            }
-            for lapic in &self.lapics {
-                lapic.inject_external_interrupt(entry.vector);
-            }
-            return;
-        }
+            let matches = if logical {
+                lapic.matches_logical_destination(dest)
+            } else {
+                dest == lapic.apic_id()
+            };
+            matches
+        };
 
         let mut delivered = false;
-        for lapic in &self.lapics {
-            if entry.destination != lapic.apic_id() {
-                continue;
-            }
-
-            if !delivered {
+        if entry.delivery_mode == 1 {
+            // Lowest Priority delivers to exactly one processor in the destination set. Select the
+            // lowest current PPR class and use APIC ID as a deterministic tie-breaker.
+            if let Some(lapic) = self
+                .lapics
+                .iter()
+                .filter(matches_destination)
+                .min_by_key(|lapic| (lapic.processor_priority() & 0xF0, lapic.apic_id()))
+            {
+                lapic.inject_external_interrupt(vector);
                 delivered = true;
-                if entry.trigger_mode == TriggerMode::Level {
-                    entry.remote_irr = true;
-                }
             }
+        } else {
+            for lapic in self.lapics.iter().filter(matches_destination) {
+                lapic.inject_external_interrupt(vector);
+                delivered = true;
+            }
+        }
 
-            lapic.inject_external_interrupt(entry.vector);
+        if delivered && level {
+            self.redirection[gsi as usize].remote_irr = true;
         }
     }
 }
@@ -651,6 +668,27 @@ mod tests {
     }
 
     #[test]
+    fn q35_default_pin_polarity_keeps_irq12_high_and_pci_gsi20_low() {
+        let (mut ioapic, lapic) = mk_ioapic();
+
+        // ISA IRQ12 has no MADT polarity override: active-high, edge-triggered.
+        ioapic.mmio_write(0x00, 4, 0x10 + 12 * 2);
+        ioapic.mmio_write(0x10, 4, 0x2C);
+        ioapic.set_irq_level(12, true);
+        assert_eq!(service_next(&lapic), Some(0x2C));
+        ioapic.set_irq_level(12, false);
+        assert_eq!(service_next(&lapic), None);
+
+        // Q35 PCI INTx uses dedicated active-low GSIs 20-23.
+        ioapic.mmio_write(0x00, 4, 0x10 + 20 * 2);
+        ioapic.mmio_write(0x10, 4, 0x50 | (1 << 13));
+        ioapic.set_irq_level(20, true);
+        assert_eq!(service_next(&lapic), Some(0x50));
+        ioapic.set_irq_level(20, false);
+        assert_eq!(service_next(&lapic), None);
+    }
+
+    #[test]
     fn level_triggered_delivers_without_storming() {
         let (mut ioapic, lapic) = mk_ioapic();
 
@@ -738,5 +776,67 @@ mod tests {
         ioapic.set_irq_level(0, true);
         assert_eq!(service_next(&lapic0), Some(0x20));
         assert_eq!(service_next(&lapic1), Some(0x20));
+    }
+
+    #[test]
+    fn logical_destination_routes_to_matching_lapic() {
+        let lapic0 = mk_lapic(0);
+        let lapic1 = mk_lapic(1);
+        // Program conventional Windows flat LDR: CPU i → bit i.
+        lapic0.mmio_write(0xD0, &(0x0100_0000u32).to_le_bytes());
+        lapic1.mmio_write(0xD0, &(0x0200_0000u32).to_le_bytes());
+        let mut ioapic = IoApic::with_lapics(IoApicId(0), vec![lapic0.clone(), lapic1.clone()]);
+
+        // GSI0 -> vector 0xD1, edge, unmasked, logical dest bit0 (matches CPU0).
+        // low: vector=0xD1, dest_mode=1 (bit 11)
+        ioapic.mmio_write(0x00, 4, 0x10);
+        ioapic.mmio_write(0x10, 4, 0xD1 | (1 << 11));
+        ioapic.mmio_write(0x00, 4, 0x11);
+        ioapic.mmio_write(0x10, 4, 1u64 << 24);
+
+        ioapic.set_irq_level(0, true);
+        assert_eq!(service_next(&lapic0), Some(0xD1));
+        assert_eq!(service_next(&lapic1), None);
+    }
+
+    #[test]
+    fn logical_lowest_priority_routes_win7_rtc_irq8() {
+        let lapic0 = mk_lapic(0);
+        // Windows 7 uses the flat logical destination bit for the BSP.
+        lapic0.mmio_write(0xD0, &(0x0100_0000u32).to_le_bytes());
+        let mut ioapic = IoApic::with_lapics(IoApicId(0), vec![lapic0.clone()]);
+
+        // Win7 phase-0 HAL programming observed on GSI8:
+        // vector 0xD2, lowest-priority delivery, logical destination bit 0,
+        // edge-triggered and unmasked.
+        ioapic.mmio_write(0x00, 4, 0x20);
+        ioapic.mmio_write(0x10, 4, 0xD2 | (1 << 8) | (1 << 11));
+        ioapic.mmio_write(0x00, 4, 0x21);
+        ioapic.mmio_write(0x10, 4, 1u64 << 24);
+
+        ioapic.set_irq_level(8, true);
+        assert_eq!(service_next(&lapic0), Some(0xD2));
+    }
+
+    #[test]
+    fn lowest_priority_selects_one_matching_lapic_with_lowest_ppr() {
+        let lapic0 = mk_lapic(0);
+        let lapic1 = mk_lapic(1);
+        lapic0.mmio_write(0xD0, &(0x0100_0000u32).to_le_bytes());
+        lapic1.mmio_write(0xD0, &(0x0200_0000u32).to_le_bytes());
+        lapic0.set_tpr(0x40);
+        lapic1.set_tpr(0x20);
+        let mut ioapic = IoApic::with_lapics(IoApicId(0), vec![lapic0.clone(), lapic1.clone()]);
+
+        // Logical destination bits 0 and 1 match both LAPICs, but lowest-priority delivery must
+        // select only LAPIC1 because its PPR class is lower.
+        ioapic.mmio_write(0x00, 4, 0x10);
+        ioapic.mmio_write(0x10, 4, 0xD2 | (1 << 8) | (1 << 11));
+        ioapic.mmio_write(0x00, 4, 0x11);
+        ioapic.mmio_write(0x10, 4, 3u64 << 24);
+
+        ioapic.set_irq_level(0, true);
+        assert_eq!(service_next(&lapic0), None);
+        assert_eq!(service_next(&lapic1), Some(0xD2));
     }
 }

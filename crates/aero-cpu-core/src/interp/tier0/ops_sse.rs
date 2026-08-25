@@ -9,8 +9,8 @@ use crate::linear_mem::{
 };
 use crate::mem::CpuBus;
 use crate::state::{
-    mask_bits, CpuState, CR0_EM, CR0_TS, CR4_OSFXSR, CR4_OSXMMEXCPT, FLAG_CF, FLAG_OF, FLAG_SF,
-    FLAG_ZF, MXCSR_EXCEPTION_MASK, MXCSR_IE, MXCSR_PE, MXCSR_RC_MASK, MXCSR_ZE,
+    mask_bits, CpuState, CR0_EM, CR0_TS, CR4_OSFXSR, CR4_OSXMMEXCPT, FLAG_AF, FLAG_CF, FLAG_OF,
+    FLAG_PF, FLAG_SF, FLAG_ZF, MXCSR_EXCEPTION_MASK, MXCSR_IE, MXCSR_PE, MXCSR_RC_MASK, MXCSR_ZE,
 };
 use aero_x86::{DecodedInst, Instruction, Mnemonic, OpKind, Register};
 
@@ -39,9 +39,13 @@ pub fn handles_mnemonic(m: Mnemonic) -> bool {
         // SSE
         Mnemonic::Movaps
             | Mnemonic::Movups
+            | Mnemonic::Movapd
+            | Mnemonic::Movupd
             | Mnemonic::Movss
             | Mnemonic::Movhlps
             | Mnemonic::Movlhps
+            | Mnemonic::Movlps
+            | Mnemonic::Movhps
             | Mnemonic::Unpcklps
             | Mnemonic::Unpckhps
             | Mnemonic::Shufps
@@ -49,21 +53,33 @@ pub fn handles_mnemonic(m: Mnemonic) -> bool {
             | Mnemonic::Orps
             | Mnemonic::Xorps
             | Mnemonic::Andnps
+            | Mnemonic::Andpd
+            | Mnemonic::Orpd
+            | Mnemonic::Xorpd
+            | Mnemonic::Andnpd
             | Mnemonic::Addss
             | Mnemonic::Subss
             | Mnemonic::Mulss
             | Mnemonic::Divss
+            | Mnemonic::Sqrtss
             | Mnemonic::Addps
             | Mnemonic::Subps
             | Mnemonic::Mulps
             | Mnemonic::Divps
+            | Mnemonic::Sqrtps
             | Mnemonic::Cvtsi2ss
             | Mnemonic::Cvtss2si
             | Mnemonic::Cvttss2si
         // SSE2
         | Mnemonic::Movdqa
             | Mnemonic::Movdqu
+            | Mnemonic::Movntdq
+            | Mnemonic::Movntdqa
+            | Mnemonic::Movntpd
+            | Mnemonic::Movntps
             | Mnemonic::Movsd
+            | Mnemonic::Movlpd
+            | Mnemonic::Movhpd
             | Mnemonic::Movd
             | Mnemonic::Movq
             | Mnemonic::Pand
@@ -105,17 +121,35 @@ pub fn handles_mnemonic(m: Mnemonic) -> bool {
             | Mnemonic::Pcmpgtd
             | Mnemonic::Pmullw
             | Mnemonic::Pmuludq
+            | Mnemonic::Punpcklqdq
+            | Mnemonic::Punpckhqdq
             | Mnemonic::Addsd
             | Mnemonic::Subsd
             | Mnemonic::Mulsd
             | Mnemonic::Divsd
+            | Mnemonic::Sqrtsd
             | Mnemonic::Addpd
             | Mnemonic::Subpd
             | Mnemonic::Mulpd
             | Mnemonic::Divpd
+            | Mnemonic::Sqrtpd
             | Mnemonic::Cvtsi2sd
             | Mnemonic::Cvtsd2si
             | Mnemonic::Cvttsd2si
+            | Mnemonic::Comisd
+            | Mnemonic::Ucomisd
+            | Mnemonic::Comiss
+            | Mnemonic::Ucomiss
+            | Mnemonic::Cvtdq2ps
+            | Mnemonic::Cvtps2dq
+            | Mnemonic::Cvttps2dq
+            | Mnemonic::Cvtdq2pd
+            | Mnemonic::Cvtpd2dq
+            | Mnemonic::Cvttpd2dq
+            | Mnemonic::Cvtps2pd
+            | Mnemonic::Cvtpd2ps
+            | Mnemonic::Cvtsd2ss
+            | Mnemonic::Cvtss2sd
         // SSE3
         | Mnemonic::Lddqu
             | Mnemonic::Haddps
@@ -219,6 +253,19 @@ pub fn exec<B: CpuBus>(
             exec_mov128(state, bus, instr, next_ip, None)?;
             Ok(ExecOutcome::Continue)
         }
+        // SSE2 packed-double moves (same 128-bit transfer as MOVAPS/MOVUPS).
+        Mnemonic::Movapd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_mov128(state, bus, instr, next_ip, Some(16))?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Movupd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_mov128(state, bus, instr, next_ip, None)?;
+            Ok(ExecOutcome::Continue)
+        }
         Mnemonic::Movdqa => {
             check_xmm_available(state)?;
             require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
@@ -229,6 +276,36 @@ pub fn exec<B: CpuBus>(
             check_xmm_available(state)?;
             require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
             exec_mov128(state, bus, instr, next_ip, None)?;
+            Ok(ExecOutcome::Continue)
+        }
+        // Non-temporal stores: architecturally identical to aligned/unaligned
+        // 128-bit stores for our purposes (NT hint only affects cache).
+        // Win7 memcpy uses MOVNTDQ in the SSE2 non-temporal path; missing it
+        // caused KeBugCheck 0x1E / STATUS_ILLEGAL_INSTRUCTION after the
+        // long-mode interrupt-frame fix.
+        Mnemonic::Movntdq => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_mov128(state, bus, instr, next_ip, Some(16))?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Movntdqa => {
+            // SSE4.1 non-temporal load (xmm, m128); treat as aligned MOVDQA load.
+            check_xmm_available(state)?;
+            require_feature_ecx(cfg, cpuid_bits::LEAF1_ECX_SSE41)?;
+            exec_mov128(state, bus, instr, next_ip, Some(16))?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Movntpd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_mov128(state, bus, instr, next_ip, Some(16))?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Movntps => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE)?;
+            exec_mov128(state, bus, instr, next_ip, Some(16))?;
             Ok(ExecOutcome::Continue)
         }
         Mnemonic::Movss => {
@@ -243,6 +320,28 @@ pub fn exec<B: CpuBus>(
             // Tier-0 currently only implements the scalar SSE2 form.
             require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
             exec_movsd(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Movlpd | Mnemonic::Movlps => {
+            check_xmm_available(state)?;
+            if instr.mnemonic() == Mnemonic::Movlpd {
+                require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            } else {
+                require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE)?;
+            }
+            // MOVLPD/MOVLPS: 64-bit low load preserves DEST[127:64] (unlike
+            // MOVSD from memory, which zeros the high half on hardware).
+            exec_movsd(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Movhpd | Mnemonic::Movhps => {
+            check_xmm_available(state)?;
+            if instr.mnemonic() == Mnemonic::Movhpd {
+                require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            } else {
+                require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE)?;
+            }
+            exec_movhpd(state, bus, instr, next_ip)?;
             Ok(ExecOutcome::Continue)
         }
         Mnemonic::Movd => {
@@ -293,6 +392,14 @@ pub fn exec<B: CpuBus>(
             exec_logic_ps(state, bus, instr, next_ip)?;
             Ok(ExecOutcome::Continue)
         }
+        // SSE2 bitwise PD ops — same semantics as PS (pure bitwise on 128 bits).
+        // Win7 winload: XORPD xmm8,xmm8 (#UD → TripleFault) after CVTDQ2PD fix.
+        Mnemonic::Andpd | Mnemonic::Orpd | Mnemonic::Xorpd | Mnemonic::Andnpd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_logic_ps(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
         Mnemonic::Pand | Mnemonic::Por | Mnemonic::Pxor | Mnemonic::Pandn => {
             check_xmm_available(state)?;
             require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
@@ -323,6 +430,8 @@ pub fn exec<B: CpuBus>(
         | Mnemonic::Pcmpgtd
         | Mnemonic::Pmullw
         | Mnemonic::Pmuludq
+        | Mnemonic::Punpcklqdq
+        | Mnemonic::Punpckhqdq
         | Mnemonic::Pshufd => {
             check_xmm_available(state)?;
             require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
@@ -350,10 +459,22 @@ pub fn exec<B: CpuBus>(
             exec_scalar_f32(state, bus, instr, next_ip)?;
             Ok(ExecOutcome::Continue)
         }
+        Mnemonic::Sqrtss => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE)?;
+            exec_sqrtss(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
         Mnemonic::Addps | Mnemonic::Subps | Mnemonic::Mulps | Mnemonic::Divps => {
             check_xmm_available(state)?;
             require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE)?;
             exec_packed_f32(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Sqrtps => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE)?;
+            exec_sqrtps(state, bus, instr, next_ip)?;
             Ok(ExecOutcome::Continue)
         }
         Mnemonic::Addsd | Mnemonic::Subsd | Mnemonic::Mulsd | Mnemonic::Divsd => {
@@ -368,10 +489,22 @@ pub fn exec<B: CpuBus>(
             }
             Ok(ExecOutcome::Continue)
         }
+        Mnemonic::Sqrtsd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_sqrtsd(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
         Mnemonic::Addpd | Mnemonic::Subpd | Mnemonic::Mulpd | Mnemonic::Divpd => {
             check_xmm_available(state)?;
             require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
             exec_packed_f64(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Sqrtpd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_sqrtpd(state, bus, instr, next_ip)?;
             Ok(ExecOutcome::Continue)
         }
         Mnemonic::Cvtsi2ss => {
@@ -396,6 +529,77 @@ pub fn exec<B: CpuBus>(
             check_xmm_available(state)?;
             require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
             exec_cvtsd2si(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        // Scalar compares that write EFLAGS (CF/ZF/PF). Used by Win7 session
+        // code; missing COMISD was #UD → SYSTEM_SERVICE_EXCEPTION (0x3B).
+        Mnemonic::Comisd | Mnemonic::Ucomisd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_comi_f64(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Comiss | Mnemonic::Ucomiss => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE)?;
+            exec_comi_f32(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Cvtdq2ps => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_cvtdq2ps(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Cvtps2dq | Mnemonic::Cvttps2dq => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_cvtps2dq(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        // F3 0F E6 = CVTDQ2PD; F2 0F E6 = CVTPD2DQ; 66 0F E6 = CVTTPD2DQ.
+        // Win7 winload hit CVTDQ2PD (#UD → TripleFault) on the cold AeroGPU path
+        // after VBE mode set (RC#35).
+        Mnemonic::Cvtdq2pd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_cvtdq2pd(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Cvtpd2dq | Mnemonic::Cvttpd2dq => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_cvtpd2dq(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        // 0F 5A /r = CVTPS2PD (mem form is 64-bit / two singles).
+        // Win7 win32k hit this after winpeshl start (0x3B / STATUS_ILLEGAL_INSTRUCTION).
+        Mnemonic::Cvtps2pd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_cvtps2pd(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        // 66 0F 5A /r = CVTPD2PS
+        Mnemonic::Cvtpd2ps => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_cvtpd2ps(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        // F2 0F 5A /r = CVTSD2SS. Win7 LogonUI / spoolsv hit this after
+        // IMAGE_STATE_COMPLETE (AERO_LOG_UD: f2 0f 5a d0 → 0xc000001d).
+        Mnemonic::Cvtsd2ss => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_cvtsd2ss(state, bus, instr, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
+        // F3 0F 5A /r = CVTSS2SD (the other scalar 0F 5A form).
+        Mnemonic::Cvtss2sd => {
+            check_xmm_available(state)?;
+            require_feature_edx(cfg, cpuid_bits::LEAF1_EDX_SSE2)?;
+            exec_cvtss2sd(state, bus, instr, next_ip)?;
             Ok(ExecOutcome::Continue)
         }
         Mnemonic::Lddqu => {
@@ -648,6 +852,255 @@ fn read_xmm_operand_u64<B: CpuBus>(
     }
 }
 
+/// COMISD / UCOMISD: compare low f64 of op0 vs op1; write CF/ZF/PF (OF=SF=AF=0).
+///
+/// Unordered (either NaN): CF=ZF=PF=1. For bring-up we treat QNaN and SNaN the
+/// same for EFLAGS (full MXCSR #IE signalling can be refined later).
+fn exec_comi_f64<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let a_bits = read_xmm_operand_u64(state, bus, instr, 0, next_ip)?;
+    let b_bits = read_xmm_operand_u64(state, bus, instr, 1, next_ip)?;
+    let a = f64::from_bits(a_bits);
+    let b = f64::from_bits(b_bits);
+    set_comi_flags(state, a.partial_cmp(&b));
+    Ok(())
+}
+
+/// COMISS / UCOMISS: compare low f32 of op0 vs op1; same EFLAGS as COMISD.
+fn exec_comi_f32<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let a_bits = read_xmm_operand_u32(state, bus, instr, 0, next_ip)?;
+    let b_bits = read_xmm_operand_u32(state, bus, instr, 1, next_ip)?;
+    let a = f32::from_bits(a_bits);
+    let b = f32::from_bits(b_bits);
+    set_comi_flags(state, a.partial_cmp(&b));
+    Ok(())
+}
+
+/// CVTDQ2PS: four packed i32 → four packed f32 (SSE2).
+fn exec_cvtdq2ps<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let src = read_xmm_operand_u128(state, bus, instr, 1, next_ip, None)?;
+    let mut out = 0u128;
+    for i in 0..4 {
+        let lane = ((src >> (i * 32)) & 0xFFFF_FFFF) as u32 as i32;
+        let bits = (lane as f32).to_bits() as u128;
+        out |= bits << (i * 32);
+    }
+    write_xmm_reg(state, instr.op0_register(), out)
+}
+
+/// CVTPS2DQ / CVTTPS2DQ: four packed f32 → four packed i32.
+fn exec_cvtps2dq<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let src = read_xmm_operand_u128(state, bus, instr, 1, next_ip, None)?;
+    let truncate = instr.mnemonic() == Mnemonic::Cvttps2dq;
+    let mode = rounding_mode(state.sse.mxcsr);
+    let mut out = 0u128;
+    for i in 0..4 {
+        let bits = ((src >> (i * 32)) & 0xFFFF_FFFF) as u32;
+        let f = f32::from_bits(bits);
+        let i32v = if truncate {
+            f as i32
+        } else {
+            round_f32_to_i32(f, mode)
+        };
+        out |= (i32v as u32 as u128) << (i * 32);
+    }
+    write_xmm_reg(state, instr.op0_register(), out)
+}
+
+/// CVTDQ2PD: two packed i32 (low 64 of src) → two packed f64.
+fn exec_cvtdq2pd<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    // Memory form is 64-bit (two dwords); register form uses the low 64 of the XMM.
+    let src = read_xmm_operand_u64(state, bus, instr, 1, next_ip)?;
+    let lo = (src & 0xFFFF_FFFF) as u32 as i32;
+    let hi = ((src >> 32) & 0xFFFF_FFFF) as u32 as i32;
+    let out = u128::from((lo as f64).to_bits()) | (u128::from((hi as f64).to_bits()) << 64);
+    write_xmm_reg(state, instr.op0_register(), out)
+}
+
+/// CVTPS2PD: two packed f32 (low 64 of src) → two packed f64.
+fn exec_cvtps2pd<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    // Memory form is 64-bit (two singles); register form uses the low 64 of the XMM.
+    let src = read_xmm_operand_u64(state, bus, instr, 1, next_ip)?;
+    let lo = f32::from_bits((src & 0xFFFF_FFFF) as u32);
+    let hi = f32::from_bits(((src >> 32) & 0xFFFF_FFFF) as u32);
+    let out = u128::from((lo as f64).to_bits()) | (u128::from((hi as f64).to_bits()) << 64);
+    write_xmm_reg(state, instr.op0_register(), out)
+}
+
+/// CVTPD2PS: two packed f64 → two packed f32 (high 64 of dest zeroed).
+fn exec_cvtpd2ps<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let src = read_xmm_operand_u128(state, bus, instr, 1, next_ip, None)?;
+    let lo = f64::from_bits((src & 0xFFFF_FFFF_FFFF_FFFF) as u64) as f32;
+    let hi = f64::from_bits(((src >> 64) & 0xFFFF_FFFF_FFFF_FFFF) as u64) as f32;
+    let out = u128::from(lo.to_bits()) | (u128::from(hi.to_bits()) << 32);
+    write_xmm_reg(state, instr.op0_register(), out)
+}
+
+/// CVTSD2SS: scalar f64 → f32 in dest[31:0]; dest[127:32] unchanged.
+///
+/// Encoding `F2 0F 5A /r`. Memory form is 64-bit. Win7 LogonUI hit
+/// `F2 0F 5A D0` (cvtsd2ss xmm2, xmm0) and died `0xc000001d`.
+fn exec_cvtsd2ss<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    if instr.op_kind(0) != OpKind::Register || xmm_index(instr.op0_register()).is_none() {
+        return Err(Exception::InvalidOpcode);
+    }
+    let dst = instr.op0_register();
+    let src = read_xmm_operand_u64(state, bus, instr, 1, next_ip)?;
+    let old = read_xmm_reg(state, dst)?;
+    let bits = (f64::from_bits(src) as f32).to_bits();
+    write_xmm_reg(state, dst, u128_set_low_u32_preserve(old, bits))
+}
+
+/// CVTSS2SD: scalar f32 → f64 in dest[63:0]; dest[127:64] unchanged.
+///
+/// Encoding `F3 0F 5A /r`. Memory form is 32-bit.
+fn exec_cvtss2sd<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    if instr.op_kind(0) != OpKind::Register || xmm_index(instr.op0_register()).is_none() {
+        return Err(Exception::InvalidOpcode);
+    }
+    let dst = instr.op0_register();
+    let src = read_xmm_operand_u32(state, bus, instr, 1, next_ip)?;
+    let old = read_xmm_reg(state, dst)?;
+    let bits = (f32::from_bits(src) as f64).to_bits();
+    write_xmm_reg(state, dst, u128_set_low_u64_preserve(old, bits))
+}
+
+/// CVTPD2DQ / CVTTPD2DQ: two packed f64 → two packed i32 (high 64 of dest zeroed).
+fn exec_cvtpd2dq<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let src = read_xmm_operand_u128(state, bus, instr, 1, next_ip, None)?;
+    let truncate = instr.mnemonic() == Mnemonic::Cvttpd2dq;
+    let mode = rounding_mode(state.sse.mxcsr);
+    let mut out = 0u128;
+    for i in 0..2 {
+        let bits = ((src >> (i * 64)) & 0xFFFF_FFFF_FFFF_FFFF) as u64;
+        let f = f64::from_bits(bits);
+        let i32v = if truncate {
+            f as i32
+        } else {
+            round_f64_to_i32(f, mode)
+        };
+        out |= (i32v as u32 as u128) << (i * 32);
+    }
+    write_xmm_reg(state, instr.op0_register(), out)
+}
+
+fn round_f64_to_i32(f: f64, mode: RoundingMode) -> i32 {
+    if !f.is_finite() {
+        return i32::MIN;
+    }
+    let r = match mode {
+        RoundingMode::Nearest => f.round_ties_even(),
+        RoundingMode::Down => f.floor(),
+        RoundingMode::Up => f.ceil(),
+        RoundingMode::TowardZero => f.trunc(),
+    };
+    if r > f64::from(i32::MAX) {
+        i32::MAX
+    } else if r < f64::from(i32::MIN) {
+        i32::MIN
+    } else {
+        r as i32
+    }
+}
+
+fn round_f32_to_i32(f: f32, mode: RoundingMode) -> i32 {
+    if !f.is_finite() {
+        return i32::MIN; // indefinite integer
+    }
+    let r = match mode {
+        RoundingMode::Nearest => f.round_ties_even(),
+        RoundingMode::Down => f.floor(),
+        RoundingMode::Up => f.ceil(),
+        RoundingMode::TowardZero => f.trunc(),
+    };
+    if r > i32::MAX as f32 {
+        i32::MAX
+    } else if r < i32::MIN as f32 {
+        i32::MIN
+    } else {
+        r as i32
+    }
+}
+
+fn set_comi_flags(state: &mut CpuState, ord: Option<core::cmp::Ordering>) {
+    // OF, SF, AF always cleared by COMI*/UCOMI*.
+    state.set_flag(FLAG_OF, false);
+    state.set_flag(FLAG_SF, false);
+    state.set_flag(FLAG_AF, false);
+    match ord {
+        None => {
+            // Unordered
+            state.set_flag(FLAG_CF, true);
+            state.set_flag(FLAG_ZF, true);
+            state.set_flag(FLAG_PF, true);
+        }
+        Some(core::cmp::Ordering::Less) => {
+            state.set_flag(FLAG_CF, true);
+            state.set_flag(FLAG_ZF, false);
+            state.set_flag(FLAG_PF, false);
+        }
+        Some(core::cmp::Ordering::Equal) => {
+            state.set_flag(FLAG_CF, false);
+            state.set_flag(FLAG_ZF, true);
+            state.set_flag(FLAG_PF, false);
+        }
+        Some(core::cmp::Ordering::Greater) => {
+            state.set_flag(FLAG_CF, false);
+            state.set_flag(FLAG_ZF, false);
+            state.set_flag(FLAG_PF, false);
+        }
+    }
+}
+
 #[inline]
 fn u128_set_low_u32_preserve(high: u128, low: u32) -> u128 {
     (high & !0xFFFF_FFFFu128) | (low as u128)
@@ -728,6 +1181,36 @@ fn exec_movsd<B: CpuBus>(
             let addr = calc_ea(state, instr, next_ip, true)?;
             let src_reg = instr.op1_register();
             let v = read_xmm_reg(state, src_reg)? as u64;
+            write_u64_wrapped(state, bus, addr, v)?;
+            Ok(())
+        }
+        _ => Err(Exception::InvalidOpcode),
+    }
+}
+
+/// MOVHPD/MOVHPS: move the high 64 bits to/from memory; low 64 stay put.
+fn exec_movhpd<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    match instr.op_kind(0) {
+        OpKind::Register => {
+            let dst_reg = instr.op0_register();
+            let src_bits = read_xmm_operand_u64(state, bus, instr, 1, next_ip)?;
+            let dst_old = read_xmm_reg(state, dst_reg)?;
+            write_xmm_reg(
+                state,
+                dst_reg,
+                (dst_old & 0xFFFF_FFFF_FFFF_FFFF) | ((src_bits as u128) << 64),
+            )?;
+            Ok(())
+        }
+        OpKind::Memory => {
+            let addr = calc_ea(state, instr, next_ip, true)?;
+            let src_reg = instr.op1_register();
+            let v = (read_xmm_reg(state, src_reg)? >> 64) as u64;
             write_u64_wrapped(state, bus, addr, v)?;
             Ok(())
         }
@@ -975,10 +1458,10 @@ fn exec_logic_ps<B: CpuBus>(
     let src = read_xmm_operand_u128(state, bus, instr, 1, next_ip, None)?;
     let dst_old = read_xmm_reg(state, dst)?;
     let res = match instr.mnemonic() {
-        Mnemonic::Andps => dst_old & src,
-        Mnemonic::Orps => dst_old | src,
-        Mnemonic::Xorps => dst_old ^ src,
-        Mnemonic::Andnps => (!dst_old) & src,
+        Mnemonic::Andps | Mnemonic::Andpd => dst_old & src,
+        Mnemonic::Orps | Mnemonic::Orpd => dst_old | src,
+        Mnemonic::Xorps | Mnemonic::Xorpd => dst_old ^ src,
+        Mnemonic::Andnps | Mnemonic::Andnpd => (!dst_old) & src,
         _ => return Err(Exception::InvalidOpcode),
     };
     write_xmm_reg(state, dst, res)?;
@@ -1241,6 +1724,16 @@ fn exec_sse2_int<B: CpuBus>(
             let hi = (a[2] as u64) * (b[2] as u64);
             u64x2_to_u128([lo, hi])
         }
+        Mnemonic::Punpcklqdq => {
+            let a = u128_to_u64x2(dst_old);
+            let b = u128_to_u64x2(src);
+            u64x2_to_u128([a[0], b[0]])
+        }
+        Mnemonic::Punpckhqdq => {
+            let a = u128_to_u64x2(dst_old);
+            let b = u128_to_u64x2(src);
+            u64x2_to_u128([a[1], b[1]])
+        }
         Mnemonic::Pshufd => {
             let imm8 = instr.immediate8();
             let a = u128_to_u32x4(src);
@@ -1477,6 +1970,95 @@ fn exec_scalar_f64<B: CpuBus>(
         dst,
         u128_set_low_u64_preserve(dst_old, res.to_bits()),
     )?;
+    Ok(())
+}
+
+/// SQRTSD: DEST[63:0] = sqrt(SRC[63:0]); DEST[127:64] unchanged.
+///
+/// Win7 `msvcrt!sqrt` (`F2 0F 51 /r`) used this; a missing decode was
+/// `#UD` / `STATUS_ILLEGAL_INSTRUCTION` inside `unregmp2` first-logon.
+fn exec_sqrtsd<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let dst = instr.op0_register();
+    let dst_old = read_xmm_reg(state, dst)?;
+    let src = f64::from_bits(read_xmm_operand_u64(state, bus, instr, 1, next_ip)?);
+    let mut mxcsr_flags = 0u32;
+    if src < 0.0 {
+        mxcsr_flags |= MXCSR_IE;
+    }
+    record_mxcsr_exception(state, mxcsr_flags)?;
+    write_xmm_reg(
+        state,
+        dst,
+        u128_set_low_u64_preserve(dst_old, src.sqrt().to_bits()),
+    )?;
+    Ok(())
+}
+
+/// SQRTSS: DEST[31:0] = sqrt(SRC[31:0]); DEST[127:32] unchanged.
+fn exec_sqrtss<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let dst = instr.op0_register();
+    let dst_old = read_xmm_reg(state, dst)?;
+    let src = f32::from_bits(read_xmm_operand_u32(state, bus, instr, 1, next_ip)?);
+    let mut mxcsr_flags = 0u32;
+    if src < 0.0 {
+        mxcsr_flags |= MXCSR_IE;
+    }
+    record_mxcsr_exception(state, mxcsr_flags)?;
+    write_xmm_reg(
+        state,
+        dst,
+        u128_set_low_u32_preserve(dst_old, src.sqrt().to_bits()),
+    )?;
+    Ok(())
+}
+
+/// SQRTPS: four packed single-precision square roots.
+fn exec_sqrtps<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let dst = instr.op0_register();
+    let src = u128_to_f32x4(read_xmm_operand_u128(state, bus, instr, 1, next_ip, None)?);
+    let mut mxcsr_flags = 0u32;
+    let mut out = [0f32; 4];
+    for i in 0..4 {
+        if src[i] < 0.0 {
+            mxcsr_flags |= MXCSR_IE;
+        }
+        out[i] = src[i].sqrt();
+    }
+    record_mxcsr_exception(state, mxcsr_flags)?;
+    write_xmm_reg(state, dst, f32x4_to_u128(out))?;
+    Ok(())
+}
+
+/// SQRTPD: two packed double-precision square roots.
+fn exec_sqrtpd<B: CpuBus>(
+    state: &mut CpuState,
+    bus: &mut B,
+    instr: &Instruction,
+    next_ip: u64,
+) -> Result<(), Exception> {
+    let dst = instr.op0_register();
+    let src = u128_to_f64x2(read_xmm_operand_u128(state, bus, instr, 1, next_ip, None)?);
+    let mut mxcsr_flags = 0u32;
+    if src[0] < 0.0 || src[1] < 0.0 {
+        mxcsr_flags |= MXCSR_IE;
+    }
+    record_mxcsr_exception(state, mxcsr_flags)?;
+    write_xmm_reg(state, dst, f64x2_to_u128([src[0].sqrt(), src[1].sqrt()]))?;
     Ok(())
 }
 

@@ -32,10 +32,7 @@ fn pci_intx_can_drive_ioapic_and_be_mirrored_to_pic() {
     let bdf = PciBdf::new(0, 0, 0);
     let pin = PciInterruptPin::IntA;
     let gsi = router.gsi_for_intx(bdf, pin);
-    assert!(
-        gsi < 16,
-        "expected PCI INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
+    assert_eq!(gsi, 20, "Q35 device 0 INTA# should use APIC GSI20");
     let vector = 0x45u8;
     let redtbl_low = 0x10u32 + (gsi * 2);
     let redtbl_high = redtbl_low + 1;
@@ -56,7 +53,8 @@ fn pci_intx_can_drive_ioapic_and_be_mirrored_to_pic() {
     router.assert_intx(bdf, pin, &mut sink);
 
     assert_eq!(lapic.get_pending_vector(), Some(vector));
-    let irq = u8::try_from(gsi).unwrap();
+    let irq = aero_pci_routing::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
     let expected_pic = if irq < 8 {
         0x20 + irq
     } else {

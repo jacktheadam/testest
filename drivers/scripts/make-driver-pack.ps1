@@ -17,7 +17,6 @@ on Linux/macOS: this script will automatically fall back to running the extracto
 The produced driver pack staging directory/zip includes:
 
 - `manifest.json` (source provenance: virtio-win ISO hash/volume label/version hints)
-- `THIRD_PARTY_NOTICES.md` (redistribution attribution template)
 - `licenses/virtio-win/` (best-effort copy of upstream virtio-win LICENSE/NOTICE files when present)
 
 .EXAMPLE
@@ -398,12 +397,6 @@ try {
   Copy-Item -Path (Join-Path $PSScriptRoot "install.cmd") -Destination (Join-Path $packRoot "install.cmd") -Force
   Copy-Item -Path (Join-Path $PSScriptRoot "enable-testsigning.cmd") -Destination (Join-Path $packRoot "enable-testsigning.cmd") -Force
 
-  $noticesSrc = Join-Path (Join-Path (Join-Path $PSScriptRoot "..") "virtio") "THIRD_PARTY_NOTICES.md"
-  if (-not (Test-Path -LiteralPath $noticesSrc -PathType Leaf)) {
-    throw "Expected third-party notices file not found: $noticesSrc"
-  }
-  Copy-Item -LiteralPath $noticesSrc -Destination (Join-Path $packRoot "THIRD_PARTY_NOTICES.md") -Force
-
   $virtioReadmeSrc = Join-Path (Join-Path (Join-Path $PSScriptRoot "..") "virtio") "README.md"
   if (Test-Path -LiteralPath $virtioReadmeSrc -PathType Leaf) {
     Copy-Item -LiteralPath $virtioReadmeSrc -Destination (Join-Path $packRoot "README.md") -Force
@@ -416,7 +409,7 @@ try {
   $virtioWinNoticeFiles = Copy-VirtioWinNotices -VirtioRoot $VirtioWinRoot -DestDir (Join-Path (Join-Path $packRoot "licenses") "virtio-win")
   if ($virtioWinNoticeFiles.Count -eq 0) {
     $msg = "No upstream virtio-win license/notice files were found at the virtio-win root ('$VirtioWinRoot'). " +
-      "The pack will include THIRD_PARTY_NOTICES.md, but you must ensure the correct upstream license texts are included for redistribution."
+      "If you package upstream virtio-win binaries, ensure the correct upstream license texts are included for redistribution."
     $warnings.Add($msg) | Out-Null
     Write-Warning $msg
   }

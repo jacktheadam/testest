@@ -47,16 +47,10 @@ fn spec_loader_accepts_schema_field_without_changing_behavior() -> anyhow::Resul
     });
 
     let spec_path_no_schema = dir.path().join("spec-no-schema.json");
-    fs::write(
-        &spec_path_no_schema,
-        serde_json::to_vec_pretty(&base)?,
-    )?;
+    fs::write(&spec_path_no_schema, serde_json::to_vec_pretty(&base)?)?;
 
     let with_schema = {
-        let mut obj = base
-            .as_object()
-            .expect("spec json object")
-            .clone();
+        let mut obj = base.as_object().expect("spec json object").clone();
         obj.insert(
             "$schema".to_string(),
             serde_json::Value::String("../packaging-spec.schema.json".to_string()),
@@ -80,7 +74,10 @@ fn spec_loader_accepts_schema_field_without_changing_behavior() -> anyhow::Resul
         loaded_no_schema.fail_on_unlisted_driver_dirs,
         loaded_with_schema.fail_on_unlisted_driver_dirs
     );
-    assert_eq!(loaded_no_schema.drivers.len(), loaded_with_schema.drivers.len());
+    assert_eq!(
+        loaded_no_schema.drivers.len(),
+        loaded_with_schema.drivers.len()
+    );
     for (a, b) in loaded_no_schema
         .drivers
         .iter()

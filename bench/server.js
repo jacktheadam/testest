@@ -3,11 +3,11 @@ import fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { formatOneLineError, formatOneLineUtf8 } from "../src/text.js";
-import { isExpectedStreamAbort } from "../src/stream_abort.js";
-import { destroyBestEffort } from "../src/socket_safe.js";
-import { tryWriteResponse } from "../src/http_response_safe.js";
-import { tryGetProp, tryGetStringProp } from "../src/safe_props.js";
+import { formatOneLineError, formatOneLineUtf8 } from "../packages/transport-safety/src/text.js";
+import { isExpectedStreamAbort } from "../apps/web/src/stream_abort.js";
+import { destroyBestEffort } from "../packages/transport-safety/src/socket_safe.js";
+import { tryWriteResponse } from "../packages/transport-safety/src/http_response_safe.js";
+import { tryGetProp, tryGetStringProp } from "../packages/transport-safety/src/safe_props.js";
 
 const MAX_REQUEST_URL_LEN = 8 * 1024;
 const MAX_PATHNAME_LEN = 4 * 1024;

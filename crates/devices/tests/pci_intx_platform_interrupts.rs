@@ -1,4 +1,6 @@
-use aero_devices::pci::{PciBdf, PciInterruptPin, PciIntxRouter, PciIntxRouterConfig};
+use aero_devices::pci::{
+    q35_legacy_pic_irq_for_gsi, PciBdf, PciInterruptPin, PciIntxRouter, PciIntxRouterConfig,
+};
 use aero_platform::interrupts::{InterruptController, PlatformInterruptMode, PlatformInterrupts};
 
 fn program_ioapic_entry(ints: &mut PlatformInterrupts, gsi: u32, low: u32, high: u32) {
@@ -40,11 +42,8 @@ fn pci_intx_can_be_delivered_via_pic_in_legacy_mode_through_platform_interrupts(
     let bdf = PciBdf::new(0, 0, 0);
     let pin = PciInterruptPin::IntA;
     let gsi = router.gsi_for_intx(bdf, pin);
-    assert!(
-        gsi < 16,
-        "expected PCI INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let irq = u8::try_from(gsi).unwrap();
+    let irq =
+        q35_legacy_pic_irq_for_gsi(gsi).expect("Q35 PCI GSI should have a compatibility PIC route");
     if irq >= 8 {
         interrupts.pic_mut().set_masked(2, false); // cascade
     }

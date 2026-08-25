@@ -258,7 +258,7 @@ fn pc_platform_snapshot_roundtrip_redrives_hpet_and_pci_intx_levels_after_restor
     const HPET_GSI: u32 = 17;
     const HPET_VECTOR: u8 = 0x61; // priority class 0x60
 
-    const PCI_GSI: u32 = 10;
+    const PCI_GSI: u32 = 20;
     const PCI_VECTOR: u8 = 0x58; // priority class 0x50
 
     // HPET MMIO register offsets (see `aero_devices::hpet`).

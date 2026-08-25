@@ -61,10 +61,8 @@ fn disabling_sse42_in_cpuid_makes_tier0_crc32_ud() {
         ..CpuFeatureOverrides::default()
     });
 
-    let mut ctx = AssistContext {
-        features,
-        ..AssistContext::default()
-    };
+    let mut ctx = AssistContext::default();
+    ctx.features = features;
     let mut bus = FlatTestBus::new(BUS_SIZE);
     bus.load(CODE_BASE, &coherency_program());
     let mut cpu = make_cpu();
@@ -80,10 +78,8 @@ fn disabling_sse42_in_cpuid_makes_tier0_crc32_ud() {
 fn enabling_sse42_in_cpuid_allows_tier0_crc32() {
     let features = features_optimized(CpuFeatureOverrides::default());
 
-    let mut ctx = AssistContext {
-        features,
-        ..AssistContext::default()
-    };
+    let mut ctx = AssistContext::default();
+    ctx.features = features;
     let mut bus = FlatTestBus::new(BUS_SIZE);
     bus.load(CODE_BASE, &coherency_program());
     let mut cpu = make_cpu();

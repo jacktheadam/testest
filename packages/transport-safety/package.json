@@ -1,0 +1,13 @@
+{
+  "name": "@aero/transport-safety",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "check:node": "node ../../scripts/check-node-version.mjs",
+    "pretest": "pnpm run check:node",
+    "test": "node -e \"console.log('transport-safety: no tests yet')\""
+  }
+}

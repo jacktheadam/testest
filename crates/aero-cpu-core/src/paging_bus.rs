@@ -67,6 +67,16 @@ pub struct PagingBus<B, IO = NoIo> {
     phys: B,
     io: IO,
     cpl: u8,
+    /// Virtual and physical base of the page the last instruction fetch resolved.
+    ///
+    /// Straight-line execution fetches from the same page for many consecutive
+    /// instructions, and re-deriving that translation is a large share of the
+    /// interpreter's per-instruction cost. Architecturally this is the same
+    /// guarantee a TLB gives: a translation stays usable until something that
+    /// requires a flush happens, so it is dropped whenever the MMU's control
+    /// registers change, on `INVLPG`, on a `CR3` write, and on a privilege
+    /// change (which can change the page's accessibility).
+    fetch_page: Option<(u64, u64)>,
     write_chunks: Vec<(u64, usize, usize)>,
     scratch: Vec<u8>,
 }
@@ -81,11 +91,21 @@ impl<B> PagingBus<B, NoIo> {
 
 impl<B, IO> PagingBus<B, IO> {
     pub fn new_with_io(phys: B, io: IO) -> PagingBus<B, IO> {
+        Self::with_mmu_and_io(Mmu::new(), phys, io)
+    }
+
+    /// Construct a paging bus around an existing [`Mmu`].
+    ///
+    /// Prefer this over [`PagingBus::new_with_io`] when the caller already owns a durable
+    /// MMU (e.g. `Machine`'s TLB across batches): `new_with_io` allocates and zeroes a full
+    /// software TLB that is immediately discarded via swap.
+    pub fn with_mmu_and_io(mmu: Mmu, phys: B, io: IO) -> PagingBus<B, IO> {
         Self {
-            mmu: Mmu::new(),
+            mmu,
             phys,
             io,
             cpl: 0,
+            fetch_page: None,
             write_chunks: Vec::new(),
             scratch: Vec::with_capacity(PAGE_SIZE as usize),
         }
@@ -96,9 +116,18 @@ impl<B, IO> PagingBus<B, IO> {
         &self.mmu
     }
 
+    /// Hands out the MMU for direct mutation, so the memoised fetch translation
+    /// has to be dropped: the caller may swap the whole MMU or flush its TLB.
     #[inline]
     pub fn mmu_mut(&mut self) -> &mut Mmu {
+        self.fetch_page = None;
         &mut self.mmu
+    }
+
+    /// Consume the bus and return the MMU (preserving TLB state) plus the physical backend.
+    #[inline]
+    pub fn into_mmu_and_phys(self) -> (Mmu, B) {
+        (self.mmu, self.phys)
     }
 
     #[inline]
@@ -409,6 +438,10 @@ impl<B: MemoryBus, IO: IoBus> CpuBus for WriteIntent<'_, B, IO> {
         self.bus.invlpg(vaddr);
     }
 
+    fn write_cr3(&mut self, value: u64) {
+        self.bus.write_cr3(value);
+    }
+
     fn read_u8(&mut self, vaddr: u64) -> Result<u8, Exception> {
         self.bus.read_u8_access(vaddr, AccessType::Write)
     }
@@ -480,12 +513,29 @@ where
     IO: IoBus,
 {
     fn sync(&mut self, state: &crate::state::CpuState) {
-        state.sync_mmu(&mut self.mmu);
-        self.cpl = state.cpl();
+        let mmu_changed = state.sync_mmu(&mut self.mmu);
+        let cpl = state.cpl();
+        if mmu_changed || cpl != self.cpl {
+            self.fetch_page = None;
+        }
+        self.cpl = cpl;
     }
 
     fn invlpg(&mut self, vaddr: u64) {
+        self.fetch_page = None;
         self.mmu.invlpg(vaddr);
+    }
+
+    fn write_cr3(&mut self, value: u64) {
+        if std::env::var_os("AERO_LOG_CR3_WRITE").is_some() {
+            eprintln!(
+                "AERO_LOG_CR3_WRITE: old={:#x} new={value:#x} cr4={:#x}",
+                self.mmu.cr3(),
+                self.mmu.cr4()
+            );
+        }
+        self.fetch_page = None;
+        self.mmu.set_cr3(value);
     }
 
     fn read_u8(&mut self, vaddr: u64) -> Result<u8, Exception> {
@@ -723,6 +773,25 @@ where
     fn fetch(&mut self, vaddr: u64, max_len: usize) -> Result<[u8; 15], Exception> {
         let mut buf = [0u8; 15];
         let len = max_len.min(15);
+        let page_off = vaddr & (PAGE_SIZE - 1);
+
+        // A window that stays inside one page can reuse the previous fetch's
+        // translation. Anything else (a page-crossing window, or the first fetch
+        // after a flush) goes the long way and re-arms the memo.
+        if len != 0 && page_off + len as u64 <= PAGE_SIZE {
+            let vpage = vaddr - page_off;
+            if let Some((memo_vpage, memo_ppage)) = self.fetch_page {
+                if memo_vpage == vpage {
+                    self.phys.read_bytes(memo_ppage + page_off, &mut buf[..len]);
+                    return Ok(buf);
+                }
+            }
+            let paddr = self.translate(vaddr, AccessType::Execute)?;
+            self.fetch_page = Some((vpage, paddr - page_off));
+            self.phys.read_bytes(paddr, &mut buf[..len]);
+            return Ok(buf);
+        }
+
         self.read_bytes_access(vaddr, &mut buf[..len], AccessType::Execute)?;
         Ok(buf)
     }
@@ -745,5 +814,185 @@ impl<B: fmt::Debug, IO> fmt::Debug for PagingBus<B, IO> {
             // Avoid requiring `IO: Debug` (real backends often aren't).
             .field("io", &core::any::type_name::<IO>())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod fetch_memo_tests {
+    use super::*;
+    use crate::state::{CpuMode, CpuState};
+
+    const PTE_P: u64 = 1 << 0;
+    const PTE_RW: u64 = 1 << 1;
+    const PTE_US: u64 = 1 << 2;
+    const CR0_PG: u64 = 1 << 31;
+    const CR4_PAE: u64 = 1 << 5;
+    const EFER_LME: u64 = 1 << 8;
+    const EFER_LMA: u64 = 1 << 10;
+
+    const PML4: u64 = 0x1000;
+    const PDPT: u64 = 0x2000;
+    const PD: u64 = 0x3000;
+    const PT: u64 = 0x4000;
+    /// The page the guest executes from, and the two physical frames it is
+    /// pointed at in turn.
+    const CODE_VA: u64 = 0x10_0000;
+    const FRAME_A: u64 = 0x8000;
+    const FRAME_B: u64 = 0x9000;
+
+    struct FlatMem(Vec<u8>);
+
+    impl FlatMem {
+        fn put_u64(&mut self, paddr: u64, value: u64) {
+            let off = paddr as usize;
+            self.0[off..off + 8].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+
+    impl MemoryBus for FlatMem {
+        fn read_u8(&mut self, paddr: u64) -> u8 {
+            self.0[paddr as usize]
+        }
+
+        fn read_u16(&mut self, paddr: u64) -> u16 {
+            let o = paddr as usize;
+            u16::from_le_bytes(self.0[o..o + 2].try_into().unwrap())
+        }
+
+        fn read_u32(&mut self, paddr: u64) -> u32 {
+            let o = paddr as usize;
+            u32::from_le_bytes(self.0[o..o + 4].try_into().unwrap())
+        }
+
+        fn read_u64(&mut self, paddr: u64) -> u64 {
+            let o = paddr as usize;
+            u64::from_le_bytes(self.0[o..o + 8].try_into().unwrap())
+        }
+
+        fn write_u8(&mut self, paddr: u64, value: u8) {
+            self.0[paddr as usize] = value;
+        }
+
+        fn write_u16(&mut self, paddr: u64, value: u16) {
+            let o = paddr as usize;
+            self.0[o..o + 2].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn write_u32(&mut self, paddr: u64, value: u32) {
+            let o = paddr as usize;
+            self.0[o..o + 4].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn write_u64(&mut self, paddr: u64, value: u64) {
+            let o = paddr as usize;
+            self.0[o..o + 8].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+
+    /// Long-mode paging with `CODE_VA` mapped to `FRAME_A`, whose first byte is
+    /// `0xAA`, while `FRAME_B` holds `0xBB`. Remapping the leaf PTE between
+    /// fetches is what makes a stale memo observable.
+    fn bus_with_code_page() -> (PagingBus<FlatMem, NoIo>, CpuState) {
+        let mut mem = FlatMem(vec![0u8; 0x20000]);
+        mem.put_u64(PML4, PDPT | PTE_P | PTE_RW | PTE_US);
+        mem.put_u64(PDPT, PD | PTE_P | PTE_RW | PTE_US);
+        mem.put_u64(PD, PT | PTE_P | PTE_RW | PTE_US);
+        let pte = PT + ((CODE_VA >> 12) & 0x1ff) * 8;
+        mem.put_u64(pte, FRAME_A | PTE_P | PTE_RW | PTE_US);
+        mem.0[FRAME_A as usize] = 0xAA;
+        mem.0[FRAME_B as usize] = 0xBB;
+
+        let mut state = CpuState::new(CpuMode::Long);
+        state.control.cr0 |= CR0_PG;
+        state.control.cr3 = PML4;
+        state.control.cr4 |= CR4_PAE;
+        state.msr.efer |= EFER_LME | EFER_LMA;
+
+        let mut bus = PagingBus::new(mem);
+        bus.sync(&state);
+        (bus, state)
+    }
+
+    fn remap_code_page_to(bus: &mut PagingBus<FlatMem, NoIo>, frame: u64) {
+        let pte = PT + ((CODE_VA >> 12) & 0x1ff) * 8;
+        bus.phys.put_u64(pte, frame | PTE_P | PTE_RW | PTE_US);
+    }
+
+    #[test]
+    fn repeated_fetch_in_one_page_reuses_the_memoised_translation() {
+        let (mut bus, _state) = bus_with_code_page();
+        assert_eq!(bus.fetch(CODE_VA, 1).expect("first fetch")[0], 0xAA);
+        assert_eq!(bus.fetch_page, Some((CODE_VA, FRAME_A)));
+        // A second fetch at a different offset in the same page must still be
+        // served, and must not re-arm the memo with a different page.
+        assert_eq!(bus.fetch(CODE_VA + 8, 1).expect("second fetch")[0], 0x00);
+        assert_eq!(bus.fetch_page, Some((CODE_VA, FRAME_A)));
+    }
+
+    #[test]
+    fn invlpg_drops_the_memoised_fetch_translation() {
+        let (mut bus, _state) = bus_with_code_page();
+        assert_eq!(bus.fetch(CODE_VA, 1).expect("prime")[0], 0xAA);
+
+        remap_code_page_to(&mut bus, FRAME_B);
+        bus.invlpg(CODE_VA);
+
+        assert_eq!(
+            bus.fetch(CODE_VA, 1).expect("after invlpg")[0],
+            0xBB,
+            "INVLPG must make the new mapping visible to instruction fetch"
+        );
+    }
+
+    #[test]
+    fn cr3_write_drops_the_memoised_fetch_translation() {
+        let (mut bus, _state) = bus_with_code_page();
+        assert_eq!(bus.fetch(CODE_VA, 1).expect("prime")[0], 0xAA);
+
+        remap_code_page_to(&mut bus, FRAME_B);
+        // Reloading CR3 with the same value is still an architectural flush.
+        bus.write_cr3(PML4);
+
+        assert_eq!(bus.fetch(CODE_VA, 1).expect("after cr3")[0], 0xBB);
+    }
+
+    #[test]
+    fn sync_after_a_control_register_change_drops_the_memoised_translation() {
+        let (mut bus, mut state) = bus_with_code_page();
+        assert_eq!(bus.fetch(CODE_VA, 1).expect("prime")[0], 0xAA);
+
+        remap_code_page_to(&mut bus, FRAME_B);
+        // A guest `MOV CR3` reaches the bus as a changed control register at the
+        // next instruction boundary rather than through `write_cr3`.
+        state.control.cr3 = PML4;
+        state.control.cr4 |= 1 << 7; // CR4.PGE
+        bus.sync(&state);
+
+        assert_eq!(bus.fetch(CODE_VA, 1).expect("after sync")[0], 0xBB);
+    }
+
+    #[test]
+    fn handing_out_the_mmu_drops_the_memoised_translation() {
+        let (mut bus, _state) = bus_with_code_page();
+        assert_eq!(bus.fetch(CODE_VA, 1).expect("prime")[0], 0xAA);
+
+        remap_code_page_to(&mut bus, FRAME_B);
+        // `Machine` swaps its durable MMU in through this accessor every batch.
+        bus.mmu_mut().invlpg(CODE_VA);
+
+        assert_eq!(bus.fetch(CODE_VA, 1).expect("after mmu_mut")[0], 0xBB);
+    }
+
+    #[test]
+    fn a_page_crossing_fetch_window_does_not_use_the_memo() {
+        let (mut bus, _state) = bus_with_code_page();
+        // Map the page after the code page so a 15-byte window can span both.
+        let next_pte = PT + (((CODE_VA + 0x1000) >> 12) & 0x1ff) * 8;
+        bus.phys
+            .put_u64(next_pte, FRAME_B | PTE_P | PTE_RW | PTE_US);
+
+        let near_end = CODE_VA + 0xffc;
+        let window = bus.fetch(near_end, 15).expect("crossing fetch");
+        assert_eq!(window[4], 0xBB, "bytes past the page boundary come from the next frame");
     }
 }

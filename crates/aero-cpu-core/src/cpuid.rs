@@ -259,17 +259,32 @@ impl CpuFeatureSet {
     }
 
     /// Minimum viable x86-64 CPUID bit set for Windows 7.
+    ///
+    /// Win7 SP1 x64 Phase-0 (`KiInitializeKernel` / processor feature probe in
+    /// PAGELK) requires a fixed leaf-1 EDX mask of `0x0789_F3FD`. Missing any
+    /// bit triggers `KeBugCheckEx(UNSUPPORTED_PROCESSOR)` (`0x5D`) before the
+    /// system service table is converted, which then livelocks in
+    /// `NtRaiseException` with an empty SSDT. Advertise exactly that baseline
+    /// (plus SEP, which is independently required for syscalls).
     pub fn win7_minimum() -> Self {
         Self {
             leaf1_ecx: bits::LEAF1_ECX_CX16,
             leaf1_edx: bits::LEAF1_EDX_FPU
+                | bits::LEAF1_EDX_DE
+                | bits::LEAF1_EDX_PSE
                 | bits::LEAF1_EDX_TSC
                 | bits::LEAF1_EDX_MSR
                 | bits::LEAF1_EDX_PAE
+                | bits::LEAF1_EDX_MCE
                 | bits::LEAF1_EDX_CX8
                 | bits::LEAF1_EDX_APIC
                 | bits::LEAF1_EDX_SEP
+                | bits::LEAF1_EDX_MTRR
+                | bits::LEAF1_EDX_PGE
+                | bits::LEAF1_EDX_MCA
                 | bits::LEAF1_EDX_CMOV
+                | bits::LEAF1_EDX_PAT
+                | bits::LEAF1_EDX_CLFSH
                 | bits::LEAF1_EDX_MMX
                 | bits::LEAF1_EDX_FXSR
                 | bits::LEAF1_EDX_SSE
@@ -284,6 +299,13 @@ impl CpuFeatureSet {
                 | bits::EXT1_EDX_LM,
         }
     }
+
+    /// Leaf-1 EDX mask that Win7 SP1 x64 requires during early Phase-0.
+    ///
+    /// Source: ntoskrnl PAGELK feature probe (`and`/`cmp` against this constant
+    /// then `KeBugCheckEx(0x5D)` on mismatch). Kept as a named constant so the
+    /// regression test and the profile stay in lockstep.
+    pub const WIN7_REQUIRED_LEAF1_EDX: u32 = 0x0789_F3FD;
 
     /// Mask of extra bits that may be exposed in the optimized profile (when implemented).
     pub fn optimized_mask() -> Self {
@@ -601,15 +623,19 @@ impl CacheDesc {
 pub mod bits {
     // CPUID.1:EDX
     pub const LEAF1_EDX_FPU: u32 = 1 << 0;
+    pub const LEAF1_EDX_VME: u32 = 1 << 1;
+    pub const LEAF1_EDX_DE: u32 = 1 << 2;
     pub const LEAF1_EDX_PSE: u32 = 1 << 3;
     pub const LEAF1_EDX_TSC: u32 = 1 << 4;
     pub const LEAF1_EDX_MSR: u32 = 1 << 5;
     pub const LEAF1_EDX_PAE: u32 = 1 << 6;
+    pub const LEAF1_EDX_MCE: u32 = 1 << 7;
     pub const LEAF1_EDX_CX8: u32 = 1 << 8;
     pub const LEAF1_EDX_APIC: u32 = 1 << 9;
     pub const LEAF1_EDX_SEP: u32 = 1 << 11;
     pub const LEAF1_EDX_MTRR: u32 = 1 << 12;
     pub const LEAF1_EDX_PGE: u32 = 1 << 13;
+    pub const LEAF1_EDX_MCA: u32 = 1 << 14;
     pub const LEAF1_EDX_CMOV: u32 = 1 << 15;
     pub const LEAF1_EDX_PAT: u32 = 1 << 16;
     pub const LEAF1_EDX_CLFSH: u32 = 1 << 19;
@@ -679,5 +705,27 @@ mod tests {
         .unwrap();
         assert_ne!(dual.leaf1_edx & bits::LEAF1_EDX_HTT, 0);
         assert_eq!((dual.leaf1_ebx >> 16) & 0xFF, 2);
+    }
+
+    #[test]
+    fn win7_minimum_leaf1_edx_covers_unsupported_processor_mask() {
+        // Regression: Win7 SP1 x64 PAGELK feature probe does
+        //   and eax, 0x0789F3FD; cmp eax, 0x0789F3FD; jne KeBugCheckEx(0x5D)
+        // against CPUID.1:EDX. A missing bit livelocks boot in NtRaiseException
+        // with an empty SSDT (never reaches KiServiceTable conversion).
+        let features = CpuFeatures::default();
+        let leaf1 = super::cpuid(&features, 1, 0);
+        assert_eq!(
+            leaf1.edx & CpuFeatureSet::WIN7_REQUIRED_LEAF1_EDX,
+            CpuFeatureSet::WIN7_REQUIRED_LEAF1_EDX,
+            "CPUID.1:EDX={:#010x} missing Win7 required bits {:#010x}",
+            leaf1.edx,
+            CpuFeatureSet::WIN7_REQUIRED_LEAF1_EDX & !leaf1.edx,
+        );
+        // Profile construction must keep the same bits in the gated feature set.
+        assert_eq!(
+            features.feature_set().leaf1_edx & CpuFeatureSet::WIN7_REQUIRED_LEAF1_EDX,
+            CpuFeatureSet::WIN7_REQUIRED_LEAF1_EDX,
+        );
     }
 }

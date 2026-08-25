@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { serializeWebUsbProbeError } from '../src/workers/webusb_probe_error_utils.ts';
+import { serializeWebUsbProbeError } from '../apps/web/src/workers/webusb_probe_error_utils.ts';
 
 test('webusb_probe_error_utils: serializes DOMException-like errors', () => {
   const original = globalThis.DOMException;

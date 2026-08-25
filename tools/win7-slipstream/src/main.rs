@@ -106,17 +106,24 @@ fn patch_iso(ctx: &DepContext, args: &PatchIsoArgs) -> Result<()> {
         _ => None,
     };
 
-    let backend_kind = BackendKind::resolve(ctx, args.backend).context("Failed to select backend")?;
+    let backend_kind =
+        BackendKind::resolve(ctx, args.backend).context("Failed to select backend")?;
     let backend_workdir = workdir.join("backend");
     let backend = Backend::new_with_workdir(backend_kind, ctx, &backend_workdir, args.verbose)?;
 
     let mut patched_paths: Vec<PatchedPath> = Vec::new();
 
-    let driver_src = wim::select_driver_dir(&drivers_root, arch).context("Failed to locate driver pack arch directory")?;
+    let driver_src = wim::select_driver_dir(&drivers_root, arch)
+        .context("Failed to locate driver pack arch directory")?;
     let driver_dst_rel = Path::new("AERO").join("DRIVERS").join(arch.iso_dir_name());
     let driver_dst = iso_root.join(&driver_dst_rel);
-    wim::copy_dir_recursive(&driver_src, &driver_dst, &driver_dst_rel, &mut patched_paths)
-        .context("Failed to copy drivers into ISO tree")?;
+    wim::copy_dir_recursive(
+        &driver_src,
+        &driver_dst,
+        &driver_dst_rel,
+        &mut patched_paths,
+    )
+    .context("Failed to copy drivers into ISO tree")?;
 
     patched_paths.push(PatchedPath::new_dir(
         driver_dst_rel.to_string_lossy().to_string(),
@@ -124,7 +131,11 @@ fn patch_iso(ctx: &DepContext, args: &PatchIsoArgs) -> Result<()> {
 
     let unattend_mode = args.unattend;
     if unattend_mode != UnattendMode::None {
-        let unattend_xml = render_autounattend(arch, driver_dst_rel.to_string_lossy().as_ref(), unattend_mode)?;
+        let unattend_xml = render_autounattend(
+            arch,
+            driver_dst_rel.to_string_lossy().as_ref(),
+            unattend_mode,
+        )?;
         let unattend_path = iso_root.join("autounattend.xml");
         fs::write(&unattend_path, unattend_xml).with_context(|| {
             format!(
@@ -199,7 +210,8 @@ fn patch_iso(ctx: &DepContext, args: &PatchIsoArgs) -> Result<()> {
     }
 
     let input_iso_sha256 = hash::sha256_file(&input_iso).context("Failed to hash input ISO")?;
-    let driver_pack_sha256 = hash::sha256_dir(&drivers_root).context("Failed to hash driver pack")?;
+    let driver_pack_sha256 =
+        hash::sha256_dir(&drivers_root).context("Failed to hash driver pack")?;
 
     let cert_manifest = cert_info.as_ref().map(|cert| cert.as_manifest());
 
@@ -218,7 +230,8 @@ fn patch_iso(ctx: &DepContext, args: &PatchIsoArgs) -> Result<()> {
 
     let manifest_path_rel = Path::new("AERO").join("MANIFEST.json");
     let manifest_path = iso_root.join(&manifest_path_rel);
-    fs::create_dir_all(manifest_path.parent().unwrap()).context("Failed to create AERO directory")?;
+    fs::create_dir_all(manifest_path.parent().unwrap())
+        .context("Failed to create AERO directory")?;
     fs::write(&manifest_path, manifest.to_json_pretty()?).with_context(|| {
         format!(
             "Failed to write manifest file to {}",

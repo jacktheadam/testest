@@ -196,7 +196,7 @@ if (-not (Test-Path -LiteralPath $packagerManifest -PathType Leaf)) {
   throw "Expected packager manifest not found: $packagerManifest"
 }
 
-$deviceContractPath = Join-Path $repoRoot "docs\windows-device-contract.json"
+$deviceContractPath = Join-Path $repoRoot "protocol-vectors\windows-device-contract.json"
 if (-not (Test-Path -LiteralPath $deviceContractPath -PathType Leaf)) {
   throw "Expected Windows device contract not found: $deviceContractPath"
 }

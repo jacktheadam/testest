@@ -38,7 +38,7 @@ fn machine_helper_enables_canonical_win7_storage_topology_pci_functions() {
     assert_eq!(ahci_id >> 16, u32::from(SATA_AHCI_ICH9.device_id));
 
     // IDE controller is a PIIX3 multi-function device; function 0 must exist so OSes enumerate
-    // the IDE function at 00:01.1 (see `docs/05-storage-topology-win7.md`).
+    // the IDE function at 00:01.1 (see `wiki/areas/storage.md`).
     let isa_id = read_cfg_u32(&mut m, ISA_PIIX3.bdf, 0x00);
     assert_eq!(isa_id & 0xFFFF, u32::from(ISA_PIIX3.vendor_id));
     assert_eq!(isa_id >> 16, u32::from(ISA_PIIX3.device_id));

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { dcBufferedAmountSafe, dcCloseSafe, dcIsClosedSafe, dcIsOpenSafe, dcSendSafe, pcCloseSafe } from "../web/src/net/rtcSafe.ts";
+import { dcBufferedAmountSafe, dcCloseSafe, dcIsClosedSafe, dcIsOpenSafe, dcSendSafe, pcCloseSafe } from "../apps/web/src/net/rtcSafe.ts";
 
 test("web rtcSafe: dcSendSafe returns false when channel is not open", () => {
   const calls = [];

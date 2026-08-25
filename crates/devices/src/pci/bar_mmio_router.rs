@@ -574,6 +574,172 @@ mod tests {
         assert_eq!(got6, (1u64 << 48) - 1);
     }
 
+    /// last_hit is a stale cursor. Clearing the BAR it points at must not
+    /// keep dispatching — same GPA, handler still registered, definition gone.
+    #[test]
+    fn last_hit_does_not_dispatch_after_bar_definition_cleared() {
+        let window_base = 0x8000_0000;
+        let bdf = PciBdf::new(0, 8, 0);
+
+        let mut bus = PciBus::new();
+        let mut cfg = PciConfigSpace::new(0x1234, 0x1111);
+        cfg.set_bar_definition(
+            0,
+            PciBarDefinition::Mmio32 {
+                size: 0x1000,
+                prefetchable: true,
+            },
+        );
+        cfg.set_bar_definition(
+            1,
+            PciBarDefinition::Mmio32 {
+                size: 0x1000,
+                prefetchable: true,
+            },
+        );
+        bus.add_device(bdf, Box::new(TestDev { cfg }));
+
+        let cfg_ports: SharedPciConfigPorts = Rc::new(RefCell::new(PciConfigPorts::with_bus(bus)));
+        let (bar0, bar0_state) = TestMmio::new(0x1000);
+        let (bar1, bar1_state) = TestMmio::new(0x1000);
+        let mut router = PciBarMmioRouter::new(window_base, cfg_ports.clone());
+        router.register_bar(bdf, 0, Box::new(bar0));
+        router.register_bar(bdf, 1, Box::new(bar1));
+
+        let bar0_base = window_base + 0x2000;
+        let bar1_base = window_base + 0x4000;
+        {
+            let mut ports = cfg_ports.borrow_mut();
+            ports.bus_mut().write_config(bdf, 0x10, 4, bar0_base as u32);
+            ports.bus_mut().write_config(bdf, 0x14, 4, bar1_base as u32);
+            ports.bus_mut().write_config(bdf, 0x04, 2, 0x0002);
+        }
+
+        let bar1_off = bar1_base - window_base;
+        MmioHandler::write(&mut router, bar1_off, 4, 0x1111_1111);
+        assert_eq!(bar1_state.lock().unwrap().writes.len(), 1);
+
+        {
+            let mut ports = cfg_ports.borrow_mut();
+            ports
+                .bus_mut()
+                .device_config_mut(bdf)
+                .unwrap()
+                .clear_bar_definition(1);
+        }
+
+        // Stale last_hit is BAR1. Same address must float; BAR0 must still work.
+        MmioHandler::write(&mut router, bar1_off, 4, 0x2222_2222);
+        assert_eq!(
+            bar1_state.lock().unwrap().writes.len(),
+            1,
+            "cleared BAR1 must not accept writes through a stale last_hit"
+        );
+        assert_eq!(MmioHandler::read(&mut router, bar1_off, 4), all_ones(4));
+
+        let bar0_off = bar0_base - window_base;
+        MmioHandler::write(&mut router, bar0_off, 4, 0xABCD_EF01);
+        assert_eq!(MmioHandler::read(&mut router, bar0_off, 4), 0xABCD_EF01);
+        assert_eq!(bar0_state.lock().unwrap().writes.len(), 1);
+    }
+
+    /// last_hit + command bit: guest clears MEM decode while a blit cursor
+    /// still names the BAR. Next access must not land.
+    #[test]
+    fn last_hit_respects_mem_decode_disabled_mid_stream() {
+        let window_base = 0x8000_0000;
+        let bdf = PciBdf::new(0, 9, 0);
+
+        let mut bus = PciBus::new();
+        let mut cfg = PciConfigSpace::new(0x1234, 0x5678);
+        cfg.set_bar_definition(
+            0,
+            PciBarDefinition::Mmio32 {
+                size: 0x1000,
+                prefetchable: false,
+            },
+        );
+        bus.add_device(bdf, Box::new(TestDev { cfg }));
+
+        let cfg_ports: SharedPciConfigPorts = Rc::new(RefCell::new(PciConfigPorts::with_bus(bus)));
+        let (mmio, state) = TestMmio::new(0x1000);
+        let mut router = PciBarMmioRouter::new(window_base, cfg_ports.clone());
+        router.register_bar(bdf, 0, Box::new(mmio));
+
+        let bar0_base = window_base + 0x2000;
+        {
+            let mut ports = cfg_ports.borrow_mut();
+            ports.bus_mut().write_config(bdf, 0x10, 4, bar0_base as u32);
+            ports.bus_mut().write_config(bdf, 0x04, 2, 0x0002);
+        }
+
+        let off = bar0_base - window_base + 0x10;
+        MmioHandler::write(&mut router, off, 4, 0xA5A5_A5A5);
+        assert_eq!(state.lock().unwrap().writes.len(), 1);
+
+        {
+            let mut ports = cfg_ports.borrow_mut();
+            ports.bus_mut().write_config(bdf, 0x04, 2, 0x0000);
+        }
+
+        MmioHandler::write(&mut router, off, 4, 0x5A5A_5A5A);
+        assert_eq!(
+            state.lock().unwrap().writes.len(),
+            1,
+            "MEM decode off must stop a hot last_hit BAR"
+        );
+        assert_eq!(MmioHandler::read(&mut router, off, 4), all_ones(4));
+    }
+
+    /// last_hit + BAR size boundary: an access that starts inside the cached
+    /// BAR but straddles its end must miss, not clip into the handler.
+    #[test]
+    fn last_hit_does_not_clip_straddle_past_bar_end() {
+        let window_base = 0x8000_0000;
+        let bdf = PciBdf::new(0, 10, 0);
+
+        let mut bus = PciBus::new();
+        let mut cfg = PciConfigSpace::new(0x1234, 0x5678);
+        cfg.set_bar_definition(
+            0,
+            PciBarDefinition::Mmio32 {
+                size: 0x1000,
+                prefetchable: false,
+            },
+        );
+        bus.add_device(bdf, Box::new(TestDev { cfg }));
+
+        let cfg_ports: SharedPciConfigPorts = Rc::new(RefCell::new(PciConfigPorts::with_bus(bus)));
+        let (mmio, state) = TestMmio::new(0x1000);
+        let mut router = PciBarMmioRouter::new(window_base, cfg_ports.clone());
+        router.register_bar(bdf, 0, Box::new(mmio));
+
+        let bar0_base = window_base + 0x2000;
+        {
+            let mut ports = cfg_ports.borrow_mut();
+            ports.bus_mut().write_config(bdf, 0x10, 4, bar0_base as u32);
+            ports.bus_mut().write_config(bdf, 0x04, 2, 0x0002);
+        }
+
+        let last_dword = bar0_base - window_base + 0xFFC;
+        MmioHandler::write(&mut router, last_dword, 4, 0x1122_3344);
+        assert_eq!(state.lock().unwrap().writes.len(), 1);
+
+        // 8-byte access starting 4 bytes before the end — contained start,
+        // overflowing end. last_hit is this BAR.
+        MmioHandler::write(&mut router, last_dword, 8, 0x5566_7788_99AA_BBCC);
+        assert_eq!(
+            state.lock().unwrap().writes.len(),
+            1,
+            "straddle past BAR end must not dispatch through last_hit"
+        );
+        assert_eq!(
+            MmioHandler::read(&mut router, last_dword, 4),
+            0x1122_3344,
+            "in-BAR dword must be unchanged by the rejected straddle"
+        );
+    }
+
     #[test]
     fn routes_mmio64_bar_base_above_4gib() {
         // Place the PCI MMIO window above 4GiB so BAR0 programming uses the 64-bit BAR path and

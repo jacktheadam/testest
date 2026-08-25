@@ -139,7 +139,7 @@ When enabled, `VirtioPciModernDumpBars()` and `VirtioPciModernDumpCaps()` emit:
 ## Aero fixed MMIO layout enforcement (optional)
 
 The Aero virtio contract fixes a single BAR0 MMIO layout for all devices (see
-[`docs/windows7-virtio-driver-contract.md`](../../../../docs/windows7-virtio-driver-contract.md) §1.4).
+[`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md#the-aero-w7-virtio-device-contract-v1)).
 
 By default, `virtio-core` is **permissive** and accepts any valid virtio-pci modern
 capability placement (this keeps QEMU usable as a test target).

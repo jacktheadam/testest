@@ -3,8 +3,8 @@
 Place the public certificate(s) needed to validate Aero driver signatures in this directory.
 
 The repository includes `AeroTestRoot.cer` as a **placeholder** development/test root certificate.
-When building Guest Tools media from CI-signed driver packages (for example via `ci/sign-drivers.ps1` +
-`ci/package-guest-tools.ps1`), the packaging step replaces any placeholder certs with the **actual**
+When building Guest Tools media from CI-signed driver packages (for example via `drivers/build/sign-drivers.ps1` +
+`drivers/build/package-guest-tools.ps1`), the packaging step replaces any placeholder certs with the **actual**
 public signing certificate used for the driver catalogs (by default: `out/certs/aero-test.cer`).
 
 Driver `.cat` files must be signed with a certificate that chains up to one of the certificates in this folder.

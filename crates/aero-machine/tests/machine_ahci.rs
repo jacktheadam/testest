@@ -179,12 +179,11 @@ fn machine_processes_ahci_and_can_wake_a_halted_cpu_via_intx() {
     let bdf = SATA_AHCI_ICH9.bdf;
     let irq = {
         let router = m.pci_intx_router().expect("pc platform enabled");
-        let gsi = router.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        assert!(
-            gsi < 16,
-            "expected AHCI INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-        );
-        u8::try_from(gsi).unwrap()
+        let irq = router
+            .borrow()
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("AHCI INTx should have a legacy PIC compatibility route");
+        irq
     };
     let vector = if irq < 8 {
         0x20 + irq

@@ -35,7 +35,7 @@
  * By default, virtio-core is permissive and accepts any valid virtio-pci modern
  * capability placement (e.g. QEMU's multi-BAR layout). Set
  * VIRTIO_CORE_ENFORCE_AERO_MMIO_LAYOUT=1 to require the Aero contract v1 fixed
- * BAR0 layout (see docs/windows7-virtio-driver-contract.md §1.4).
+ * BAR0 layout (see wiki/areas/drivers-windows.md, AERO-W7-VIRTIO contract v1).
  */
 #ifndef VIRTIO_CORE_ENFORCE_AERO_MMIO_LAYOUT
 #define VIRTIO_CORE_ENFORCE_AERO_MMIO_LAYOUT 0
@@ -146,7 +146,7 @@ typedef struct _VIRTIO_PCI_MODERN_DEVICE {
  * Aero Windows 7 virtio contract (AERO-W7-VIRTIO) v1.0 gatekeeping.
  *
  * Contract v1 is identified by PCI Revision ID 0x01 and uses a fixed BAR0
- * MMIO layout. See: docs/windows7-virtio-driver-contract.md
+ * MMIO layout. See: wiki/areas/drivers-windows.md
  */
 #define VIRTIO_PCI_AERO_CONTRACT_V1_REVISION_ID           0x01u
 #define VIRTIO_PCI_AERO_CONTRACT_V1_BAR0_INDEX            0u

@@ -633,6 +633,21 @@ where
         &self.config
     }
 
+    /// Returns a clone of the backend. For `Rc`-based backends (like
+    /// `WasmBackend`), this is a cheap reference-count clone that shares the
+    /// underlying engine.
+    pub fn backend_clone(&self) -> B
+    where
+        B: Clone,
+    {
+        self.backend.clone()
+    }
+
+    /// Returns a mutable reference to the backend.
+    pub fn backend_mut(&mut self) -> &mut B {
+        &mut self.backend
+    }
+
     #[inline]
     pub fn stats(&self) -> &JitRuntimeStats {
         &self.stats

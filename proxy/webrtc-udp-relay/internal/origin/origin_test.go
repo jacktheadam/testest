@@ -34,7 +34,7 @@ func TestNormalizeHeader_MatchesSharedVectors(t *testing.T) {
 	if !ok {
 		t.Fatalf("runtime.Caller failed")
 	}
-	vectorsPath := filepath.Clean(filepath.Join(filepath.Dir(file), "../../../../docs/origin-allowlist-test-vectors.json"))
+	vectorsPath := filepath.Clean(filepath.Join(filepath.Dir(file), "../../../../protocol-vectors/origin.json"))
 	contents, err := os.ReadFile(vectorsPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", vectorsPath, err)

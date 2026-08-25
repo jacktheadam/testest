@@ -1,8 +1,8 @@
 [package]
 name = "aero-devices-gpu"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
 publish = false
 
 [features]
@@ -15,7 +15,7 @@ wgpu-backend = ["aerogpu-native"]
 
 [dependencies]
 aero-devices = { path = "../devices" }
-aero-protocol = { path = "../../emulator/protocol" }
+aero-protocol = { path = "../aero-protocol" }
 aero-gpu-vga = { path = "../aero-gpu-vga" }
 aero-io-snapshot = { path = "../aero-io-snapshot" }
 memory = { path = "../memory" }

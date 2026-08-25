@@ -1,8 +1,8 @@
 /**
  * Canonical Aero TCP multiplexing framing: `aero-tcp-mux-v1`.
  *
- * This matches the gateway implementation in `backend/aero-gateway` and the
- * public contract in `docs/backend/01-aero-gateway-api.md`.
+ * This matches the gateway implementation in `services/gateway` and the
+ * public contract in `wiki/history/retirements.md`.
  *
  * Transport model: all WebSocket *binary* messages are treated as an arbitrary
  * byte stream that carries one or more protocol frames. Frames may be split
@@ -11,7 +11,7 @@
  * All multi-byte integers are big-endian (network byte order).
  */
 
-import { sanitizeOneLine, truncateUtf8 } from "./text.js";
+import { sanitizeOneLine, truncateUtf8 } from "../../../packages/transport-safety/src/text.js";
 
 export const TCP_MUX_SUBPROTOCOL = "aero-tcp-mux-v1";
 
@@ -37,7 +37,7 @@ export const TcpMuxCloseFlags = Object.freeze({
   RST: 0x02,
 });
 
-// Matches `backend/aero-gateway/src/protocol/tcpMux.ts`.
+// Matches `services/gateway/src/protocol/tcpMux.ts`.
 export const TcpMuxErrorCode = Object.freeze({
   POLICY_DENIED: 1,
   DIAL_FAILED: 2,

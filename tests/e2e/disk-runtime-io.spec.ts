@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 
 test.describe("runtime disk IO worker", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/", { waitUntil: "load" });
+    await page.goto("/apps/web/", { waitUntil: "load" });
     await page.evaluate(async () => {
-      const { DiskManager } = await import("/web/src/storage/disk_manager.ts");
+      const { DiskManager } = await import("/apps/web/src/storage/disk_manager.ts");
       await DiskManager.clearAllStorage();
     });
   });
@@ -18,8 +18,8 @@ test.describe("runtime disk IO worker", () => {
 
       const result = await page.evaluate(
         async ({ backend }) => {
-          const { DiskManager } = await import("/web/src/storage/disk_manager.ts");
-          const { RuntimeDiskClient } = await import("/web/src/storage/runtime_disk_client.ts");
+          const { DiskManager } = await import("/apps/web/src/storage/disk_manager.ts");
+          const { RuntimeDiskClient } = await import("/apps/web/src/storage/runtime_disk_client.ts");
 
           const dm = await DiskManager.create({ backend });
           const meta = await dm.createBlankDisk({ name: "rt", sizeBytes: 2 * 1024 * 1024 });
@@ -76,8 +76,8 @@ test.describe("runtime disk IO worker", () => {
 
   test("can write across IndexedDB chunk boundary", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { DiskManager } = await import("/web/src/storage/disk_manager.ts");
-      const { RuntimeDiskClient } = await import("/web/src/storage/runtime_disk_client.ts");
+      const { DiskManager } = await import("/apps/web/src/storage/disk_manager.ts");
+      const { RuntimeDiskClient } = await import("/apps/web/src/storage/runtime_disk_client.ts");
 
       const dm = await DiskManager.create({ backend: "idb" });
       const meta = await dm.createBlankDisk({ name: "rt", sizeBytes: 8 * 1024 * 1024 });

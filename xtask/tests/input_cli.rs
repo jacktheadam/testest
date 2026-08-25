@@ -162,8 +162,12 @@ fn input_help_mentions_flags_and_steps() {
         .stdout(predicate::str::contains(
             "src/io/devices/virtio_input_mouse_buttons.test.ts",
         ))
-        .stdout(predicate::str::contains("src/io/devices/virtio_input_compat.test.ts"))
-        .stdout(predicate::str::contains("src/io/devices/virtio_input_keymap.test.ts"))
+        .stdout(predicate::str::contains(
+            "src/io/devices/virtio_input_compat.test.ts",
+        ))
+        .stdout(predicate::str::contains(
+            "src/io/devices/virtio_input_keymap.test.ts",
+        ))
         .stdout(predicate::str::contains(
             "src/io/devices/virtio_input_rust_drift.test.ts",
         ))

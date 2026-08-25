@@ -1,0 +1,246 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { AerogpuCmdWriter } from "../aerogpu/aerogpu_cmd.ts";
+import { AerogpuFormat } from "../aerogpu/aerogpu_pci.ts";
+
+import {
+  createAerogpuCpuExecutorState,
+  executeAerogpuCmdStream,
+} from "../../../apps/web/src/workers/aerogpu-acmd-executor.ts";
+
+test("ACMD shared surface IMPORT creates alias handle usable for upload + present", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0x1234n;
+  const upload = Uint8Array.from([
+    // 2x2 RGBA8: pixel(0,0) pixel(1,0) pixel(0,1) pixel(1,1)
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+  ]);
+
+  const w = new AerogpuCmdWriter();
+  w.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+  w.exportSharedSurface(1, token);
+  w.importSharedSurface(10, token);
+  w.uploadResource(10, 0n, upload);
+  w.setRenderTargets([10], 0);
+  w.present(0, 0);
+
+  executeAerogpuCmdStream(state, w.finish().buffer, { allocTable: null, guestU8: null });
+
+  assert(state.lastPresentedFrame, "expected a present to populate lastPresentedFrame");
+  assert.equal(state.lastPresentedFrame.width, 2);
+  assert.equal(state.lastPresentedFrame.height, 2);
+  assert.deepEqual(Array.from(new Uint8Array(state.lastPresentedFrame.rgba8)), Array.from(upload));
+});
+
+test("ACMD RELEASE_SHARED_SURFACE retires token but keeps existing imported handles valid", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0x9999n;
+  const upload = Uint8Array.from([
+    // 2x2 RGBA8
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+  ]);
+
+  const setup = new AerogpuCmdWriter();
+  setup.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+  setup.exportSharedSurface(1, token);
+  setup.importSharedSurface(10, token);
+  setup.uploadResource(10, 0n, upload);
+  setup.releaseSharedSurface(token);
+  executeAerogpuCmdStream(state, setup.finish().buffer, { allocTable: null, guestU8: null });
+
+  // Token should no longer be importable.
+  const importAgain = new AerogpuCmdWriter();
+  importAgain.importSharedSurface(11, token);
+  assert.throws(
+    () => executeAerogpuCmdStream(state, importAgain.finish().buffer, { allocTable: null, guestU8: null }),
+    /IMPORT_SHARED_SURFACE.*unknown share_token/i,
+  );
+
+  // Existing handles remain usable.
+  const present = new AerogpuCmdWriter();
+  present.setRenderTargets([10], 0);
+  present.present(0, 0);
+  executeAerogpuCmdStream(state, present.finish().buffer, { allocTable: null, guestU8: null });
+
+  assert(state.lastPresentedFrame, "expected a present to populate lastPresentedFrame after release");
+  assert.deepEqual(Array.from(new Uint8Array(state.lastPresentedFrame.rgba8)), Array.from(upload));
+});
+
+test("ACMD shared surface refcounting keeps underlying resource alive until final DESTROY_RESOURCE", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0x4242n;
+  const upload = Uint8Array.from([
+    // 2x2 RGBA8
+    51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66,
+  ]);
+
+  // Create + export, then import an alias and drop the original handle. The alias should keep the
+  // underlying texture alive.
+  const w = new AerogpuCmdWriter();
+  w.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+  w.exportSharedSurface(1, token);
+  w.importSharedSurface(10, token);
+  w.uploadResource(10, 0n, upload);
+  w.destroyResource(1); // drop original handle; alias remains
+  w.setRenderTargets([10], 0);
+  w.present(0, 0);
+  executeAerogpuCmdStream(state, w.finish().buffer, { allocTable: null, guestU8: null });
+
+  assert(state.lastPresentedFrame, "expected present to work via alias after destroying original handle");
+  assert.deepEqual(Array.from(new Uint8Array(state.lastPresentedFrame.rgba8)), Array.from(upload));
+
+  // Destroy the alias too; this should free the underlying resource and retire any tokens that
+  // were still mapped to it.
+  const destroyAlias = new AerogpuCmdWriter();
+  destroyAlias.destroyResource(10);
+  executeAerogpuCmdStream(state, destroyAlias.finish().buffer, { allocTable: null, guestU8: null });
+  assert.equal(state.textures.has(1), false, "expected underlying texture to be destroyed after final handle release");
+
+  // Re-export of the same token must fail once the token is retired.
+  const reuseToken = new AerogpuCmdWriter();
+  reuseToken.createTexture2d(2, 0, AerogpuFormat.R8G8B8A8Unorm, 1, 1, 1, 1, 0, 0, 0);
+  reuseToken.exportSharedSurface(2, token);
+  assert.throws(
+    () => executeAerogpuCmdStream(state, reuseToken.finish().buffer, { allocTable: null, guestU8: null }),
+    /EXPORT_SHARED_SURFACE.*previously released/i,
+  );
+});
+
+test("ACMD RELEASE_SHARED_SURFACE is a no-op for unknown tokens", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0x1111n;
+  const upload = Uint8Array.from([
+    // 2x2 RGBA8
+    71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86,
+  ]);
+
+  const w = new AerogpuCmdWriter();
+  w.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+  // Token has not been exported yet; this should not retire it.
+  w.releaseSharedSurface(token);
+  w.exportSharedSurface(1, token);
+  w.importSharedSurface(10, token);
+  w.uploadResource(10, 0n, upload);
+  w.setRenderTargets([10], 0);
+  w.present(0, 0);
+
+  executeAerogpuCmdStream(state, w.finish().buffer, { allocTable: null, guestU8: null });
+
+  assert(state.lastPresentedFrame, "expected a present to populate lastPresentedFrame");
+  assert.deepEqual(Array.from(new Uint8Array(state.lastPresentedFrame.rgba8)), Array.from(upload));
+});
+
+test("ACMD shared surface forbids reusing a destroyed original handle while an alias is alive", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0xBEEF_1234n;
+
+  const w = new AerogpuCmdWriter();
+  w.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+  w.exportSharedSurface(1, token);
+  w.importSharedSurface(10, token);
+  w.destroyResource(1);
+  // Buggy guest behavior: attempt to reuse the underlying handle while the alias is still alive.
+  w.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+
+  assert.throws(
+    () => executeAerogpuCmdStream(state, w.finish().buffer, { allocTable: null, guestU8: null }),
+    /CREATE_TEXTURE2D.*still in use/i,
+  );
+});
+
+test("ACMD shared surface duplicate DESTROY_RESOURCE of original handle is idempotent while alias is alive", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0xCAFE_4242n;
+  const upload = Uint8Array.from([
+    // 2x2 RGBA8
+    81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
+  ]);
+
+  const w = new AerogpuCmdWriter();
+  w.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+  w.exportSharedSurface(1, token);
+  w.importSharedSurface(10, token);
+  w.uploadResource(10, 0n, upload);
+  w.destroyResource(1);
+  w.destroyResource(1); // must be an idempotent no-op; alias keeps underlying alive
+  w.setRenderTargets([10], 0);
+  w.present(0, 0);
+
+  executeAerogpuCmdStream(state, w.finish().buffer, { allocTable: null, guestU8: null });
+
+  assert(state.lastPresentedFrame, "expected a present to populate lastPresentedFrame");
+  assert.deepEqual(Array.from(new Uint8Array(state.lastPresentedFrame.rgba8)), Array.from(upload));
+});
+
+test("ACMD shared surface using destroyed original handle is an error", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0x0BAD_F00Dn;
+
+  const setup = new AerogpuCmdWriter();
+  setup.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+  setup.exportSharedSurface(1, token);
+  setup.importSharedSurface(10, token);
+  setup.destroyResource(1);
+  executeAerogpuCmdStream(state, setup.finish().buffer, { allocTable: null, guestU8: null });
+
+  const useAfterDestroy = new AerogpuCmdWriter();
+  useAfterDestroy.setRenderTargets([1], 0);
+  assert.throws(
+    () => executeAerogpuCmdStream(state, useAfterDestroy.finish().buffer, { allocTable: null, guestU8: null }),
+    /SET_RENDER_TARGETS.*destroyed/i,
+  );
+});
+
+test("ACMD shared surface IMPORT into destroyed original handle is an error", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0x1234_5678n;
+
+  const setup = new AerogpuCmdWriter();
+  setup.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 1, 1, 1, 1, 0, 0, 0);
+  setup.exportSharedSurface(1, token);
+  setup.importSharedSurface(10, token);
+  setup.destroyResource(1);
+  executeAerogpuCmdStream(state, setup.finish().buffer, { allocTable: null, guestU8: null });
+
+  const importIntoDestroyed = new AerogpuCmdWriter();
+  importIntoDestroyed.importSharedSurface(1, token);
+  assert.throws(
+    () => executeAerogpuCmdStream(state, importIntoDestroyed.finish().buffer, { allocTable: null, guestU8: null }),
+    /IMPORT_SHARED_SURFACE.*still in use/i,
+  );
+});
+
+test("ACMD destroying original handle does not unbind current render target when alias is alive", () => {
+  const state = createAerogpuCpuExecutorState();
+
+  const token = 0xD00D_F00Dn;
+  const upload = Uint8Array.from([
+    // 2x2 RGBA8
+    101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116,
+  ]);
+
+  const w = new AerogpuCmdWriter();
+  w.createTexture2d(1, 0, AerogpuFormat.R8G8B8A8Unorm, 2, 2, 1, 1, 0, 0, 0);
+  w.exportSharedSurface(1, token);
+  w.importSharedSurface(10, token);
+  w.uploadResource(10, 0n, upload);
+  w.setRenderTargets([10], 0);
+  // Destroy the original handle after binding the alias as the render target. The alias should
+  // keep the underlying alive, and the current render target should remain valid.
+  w.destroyResource(1);
+  w.present(0, 0);
+
+  executeAerogpuCmdStream(state, w.finish().buffer, { allocTable: null, guestU8: null });
+
+  assert(state.lastPresentedFrame, "expected a present to populate lastPresentedFrame");
+  assert.deepEqual(Array.from(new Uint8Array(state.lastPresentedFrame.rgba8)), Array.from(upload));
+});

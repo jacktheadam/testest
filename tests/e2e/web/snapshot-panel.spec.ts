@@ -12,9 +12,8 @@ function parseSerialBytes(text: string | null): number | null {
 test("demo VM snapshot panel saves/restores via OPFS (streaming when available)", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
 
-  // The snapshot demo panel lives on the `/web/` capabilities page (served under
-  // the repo-root Vite harness during Playwright runs).
-  await page.goto("/web/", { waitUntil: "load" });
+  // The snapshot demo panel lives on the bring-up shell, not the canonical one.
+  await page.goto("/apps/web/bringup.html", { waitUntil: "load" });
 
   // Wait for the snapshot panel to either become ready, or surface an error (e.g. missing
   // OPFS / missing streaming exports / missing sync access handles).

@@ -13,12 +13,12 @@ Build host: **Windows 10/11 x64** (WDK 10 + MSBuild).
 From repo root:
 
 ```powershell
-pwsh ci/install-wdk.ps1
-pwsh ci/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
-pwsh ci/build-aerogpu-dbgctl.ps1 -ToolchainJson out/toolchain.json
-pwsh ci/make-catalogs.ps1 -ToolchainJson out/toolchain.json
-pwsh ci/sign-drivers.ps1 -ToolchainJson out/toolchain.json
-pwsh ci/package-drivers.ps1
+pwsh drivers/build/install-wdk.ps1
+pwsh drivers/build/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
+pwsh drivers/build/build-aerogpu-dbgctl.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/make-catalogs.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/sign-drivers.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/package-drivers.ps1
 ```
 
 Binaries are staged under:
@@ -52,7 +52,7 @@ Artifacts produced by the workflow:
 
 ## CI packaging manifest (`ci-package.json`)
 
-Catalog generation (`ci/make-catalogs.ps1`) is driven by `drivers/aerogpu/ci-package.json`:
+Catalog generation (`drivers/build/make-catalogs.ps1`) is driven by `drivers/aerogpu/ci-package.json`:
 
 - `infFiles` selects which INF(s) to stage at the **package root**.
   - **Policy:** AeroGPU CI intentionally stages **only one** canonical INF at the package root to avoid ambiguous installs/driver selection when multiple INFs match the same HWID.
@@ -69,15 +69,15 @@ Catalog generation (`ci/make-catalogs.ps1`) is driven by `drivers/aerogpu/ci-pac
   - `aerogpu_d3d9.dll` (required for Win7 x64 WOW64 D3D9)
   - `aerogpu_d3d10.dll` (required for Win7 x64 WOW64 D3D10/11 when staging DX11-capable INFs)
 
-Details: `docs/16-driver-packaging-and-signing.md`.
+Details: `wiki/areas/drivers-windows.md`.
 
 ## Key docs / entrypoints
 
-* Repo-wide graphics status (“what’s implemented vs missing”): [`docs/graphics/status.md`](../../docs/graphics/status.md)
+* Repo-wide graphics status (“what’s implemented vs missing”): [`wiki/areas/graphics.md`](wiki/areas/graphics.md)
 * Build + toolchain setup: `drivers/aerogpu/build/README.md`
 * Win7 packaging/signing/install: `drivers/aerogpu/packaging/win7/README.md`
 * Guest-side validation tests: `drivers/aerogpu/tests/win7/README.md`
-* AeroGPU PCI IDs + ABI generations (new vs legacy): `docs/abi/aerogpu-pci-identity.md`
+* AeroGPU PCI IDs + ABI generations (new vs legacy): `wiki/areas/graphics.md`
 * Protocol / device ABI (canonical): `drivers/aerogpu/protocol/README.md`, `drivers/aerogpu/protocol/aerogpu_pci.h`, `drivers/aerogpu/protocol/aerogpu_ring.h`, `drivers/aerogpu/protocol/aerogpu_cmd.h`, `drivers/aerogpu/protocol/aerogpu_escape.h`
   * Note: the legacy bring-up ABI is `drivers/aerogpu/protocol/legacy/aerogpu_protocol_legacy.h` (deprecated/retired; legacy PCI identity; feature-gated in the emulator).
 * Debug control tool (bring-up): `drivers/aerogpu/tools/win7_dbgctl/README.md`

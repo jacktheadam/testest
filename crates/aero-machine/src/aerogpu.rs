@@ -3,7 +3,7 @@
 use std::collections::{HashSet, VecDeque};
 
 use aero_devices::clock::{Clock as _, ManualClock};
-use aero_devices::pci::{PciBarMmioHandler, PciConfigSpace, PciDevice};
+use aero_devices::pci::{PciBarMmioHandler, PciConfigSpace, PciDevice, PciSubsystemIds};
 use aero_devices_gpu::backend::{
     AeroGpuBackendScanout, AeroGpuBackendSubmission, AeroGpuCommandBackend,
 };
@@ -471,7 +471,7 @@ impl AeroGpuMmioDevice {
                 _ => {
                     return Err(SnapshotError::InvalidFieldEncoding(
                         "aerogpu.exec_state.pending_fences.kind",
-                    ))
+                    ));
                 }
             };
             pending_fence_completions.push_back(PendingFenceCompletion {
@@ -850,6 +850,18 @@ impl Default for AeroGpuMmioDevice {
         let scanout0_vblank_period_ns = period_ns_to_reg(vblank_period_ns);
 
         let mut config = aero_devices::pci::profile::AEROGPU.build_config_space();
+        // Optional bring-up identity: Bochs/QEMU Standard VGA IDs (see
+        // `AERO_AEROGPU_STDVGA_IDS` / `crate::aerogpu_stdvga_pci_ids_enabled`).
+        if std::env::var_os("AERO_AEROGPU_STDVGA_IDS").is_some() {
+            config.set_vendor_device_id(
+                aero_gpu_vga::VGA_PCI_VENDOR_ID,
+                aero_gpu_vga::VGA_PCI_DEVICE_ID,
+            );
+            config.set_subsystem_ids(PciSubsystemIds {
+                subsystem_vendor_id: aero_gpu_vga::VGA_PCI_VENDOR_ID,
+                subsystem_id: aero_gpu_vga::VGA_PCI_DEVICE_ID,
+            });
+        }
         // Start with decoding disabled; the canonical PCI config space (owned by `Machine`) will be
         // mirrored into this internal copy from `Machine::sync_pci_intx_sources_to_interrupts`.
         config.set_command(0);
@@ -3098,8 +3110,10 @@ mod tests {
 
     #[test]
     fn force_complete_pending_fences_completes_without_backend_completion() {
-        let mut dev = AeroGpuMmioDevice::default();
-        dev.irq_enable = pci::AEROGPU_IRQ_FENCE;
+        let mut dev = AeroGpuMmioDevice {
+            irq_enable: pci::AEROGPU_IRQ_FENCE,
+            ..Default::default()
+        };
 
         dev.pending_fence_completions
             .push_back(PendingFenceCompletion {
@@ -3942,7 +3956,7 @@ mod tests {
             fb_gpa: u64::MAX - 2,
         };
 
-        let mut mem = PanicMem::default();
+        let mut mem = PanicMem;
         assert_eq!(state.read_rgba8888(&mut mem), None);
     }
 
@@ -3960,7 +3974,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut mem = PanicMem::default();
+        let mut mem = PanicMem;
         assert_eq!(cursor.read_rgba8888(&mut mem), None);
     }
 

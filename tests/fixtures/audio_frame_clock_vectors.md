@@ -6,7 +6,7 @@ time→audio-frame conversion.
 The same semantics are implemented in two places:
 
 - Rust: `crates/aero-audio/src/clock.rs`
-- TypeScript: `web/src/audio/audio_frame_clock.ts`
+- TypeScript: `apps/web/src/audio/audio_frame_clock.ts`
 
 ## Format
 

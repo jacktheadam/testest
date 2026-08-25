@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { callMethodBestEffort, destroyBestEffort, tryGetMethodBestEffort } from "../web/src/safeMethod.ts";
+import { callMethodBestEffort, destroyBestEffort, tryGetMethodBestEffort } from "../apps/web/src/safeMethod.ts";
 
 test("safeMethod(web): tryGetMethodBestEffort returns function or null", () => {
   assert.equal(tryGetMethodBestEffort(null, "x"), null);

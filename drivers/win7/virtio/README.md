@@ -16,7 +16,7 @@ The intent is to provide a repeatable starting point for future virtio drivers
 ## Toolchain requirements
 
 * Visual Studio Build Tools (or Visual Studio) + a modern Windows Driver Kit (WDK).
-  * CI provisions a pinned Windows Kits toolchain via `ci/install-wdk.ps1`.
+  * CI provisions a pinned Windows Kits toolchain via `drivers/build/install-wdk.ps1`.
 * Drivers target Windows 7 (`TargetVersion=Windows7`) and KMDF 1.9 (`KmdfLibraryVersion=1.9` in the INF).
 
 ## Building

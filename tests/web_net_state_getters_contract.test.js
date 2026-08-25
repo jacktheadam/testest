@@ -7,11 +7,11 @@ import { collectJsTsSourceFiles, findLineNumber, stripStringsAndComments } from 
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const WEB_NET_ROOT = "web/src/net";
+const WEB_NET_ROOT = "apps/web/src/net";
 const ALLOWED_STATE_READERS = new Set([
   // Centralized, throw-safe accessors live here.
-  "web/src/net/wsSafe.ts",
-  "web/src/net/rtcSafe.ts",
+  "apps/web/src/net/wsSafe.ts",
+  "apps/web/src/net/rtcSafe.ts",
 ]);
 
 function findStateGetterHitsInSource(source) {

@@ -12,10 +12,16 @@ pub const DEFAULT_ACPI_NVS_SIZE: u64 = 0x1000;
 // the DSDT.
 //
 // Bit positions are defined by the ACPI specification (FADT "Flags" field).
+pub const FADT_FLAG_WBINVD: u32 = 1 << 0; // bit 0: WBINVD (WBINVD instruction is supported)
+pub const FADT_FLAG_PROC_C1: u32 = 1 << 2; // bit 2: PROC_C1 (C1/HLT power state available on all CPUs)
 pub const FADT_FLAG_PWR_BUTTON: u32 = 1 << 4; // bit 4: PWR_BUTTON (fixed-feature power button)
 pub const FADT_FLAG_SLP_BUTTON: u32 = 1 << 5; // bit 5: SLP_BUTTON (fixed-feature sleep button)
 pub const FADT_FLAG_FIX_RTC: u32 = 1 << 6; // bit 6: FIX_RTC (RTC is a fixed hardware feature)
 pub const FADT_FLAG_RESET_REG_SUP: u32 = 1 << 10; // bit 10: RESET_REG_SUP (ResetReg/ResetValue supported)
+
+// FADT IA-PC Boot Architecture Flags.
+pub const FADT_IAPC_BOOT_ARCH_LEGACY_DEVICES: u16 = 1 << 0;
+pub const FADT_IAPC_BOOT_ARCH_8042: u16 = 1 << 1;
 
 /// Physical memory writing abstraction used by firmware to place tables in
 /// guest RAM.
@@ -65,6 +71,12 @@ pub struct AcpiConfig {
     pub local_apic_addr: u32,
     pub io_apic_addr: u32,
     pub hpet_addr: u64,
+
+    /// Whether the platform exposes a legacy i8042 PS/2 keyboard/mouse controller.
+    ///
+    /// When enabled, the DSDT publishes the standard `PNP0303` keyboard and `PNP0F13` mouse
+    /// devices so operating systems can bind their inbox i8042 driver and claim IRQ1/IRQ12.
+    pub enable_i8042: bool,
 
     /// ACPI SCI interrupt (legacy IRQ number).
     pub sci_irq: u8,
@@ -130,6 +142,8 @@ impl Default for AcpiConfig {
             local_apic_addr: 0xFEE0_0000,
             io_apic_addr: 0xFEC0_0000,
             hpet_addr: 0xFED0_0000,
+
+            enable_i8042: true,
 
             sci_irq: 9,
 
@@ -572,13 +586,23 @@ fn build_fadt(cfg: &AcpiConfig, dsdt_addr: u64, facs_addr: u64) -> Vec<u8> {
                  // Many PC firmware implementations (and QEMU) set this to 0x32 so ACPI OSes
                  // can read the full year without relying on heuristics.
     out.push(0x32); // CENTURY (CMOS century register index)
-    out.extend_from_slice(&(0x0003u16).to_le_bytes()); // IAPC_BOOT_ARCH (legacy devices + 8042)
+    let mut iapc_boot_arch = FADT_IAPC_BOOT_ARCH_LEGACY_DEVICES;
+    if cfg.enable_i8042 {
+        iapc_boot_arch |= FADT_IAPC_BOOT_ARCH_8042;
+    }
+    out.extend_from_slice(&iapc_boot_arch.to_le_bytes()); // IAPC_BOOT_ARCH
     out.push(0); // reserved
 
     // Advertise fixed-feature power/sleep buttons so OSes (notably Windows 7)
     // use the PM1 event bits (`PWRBTN_STS` / `SLPBTN_STS`) as button input.
-    let flags =
-        FADT_FLAG_RESET_REG_SUP | FADT_FLAG_PWR_BUTTON | FADT_FLAG_SLP_BUTTON | FADT_FLAG_FIX_RTC;
+    // WBINVD (bit 0) is set since WBINVD/INVD are implemented (no longer #UD).
+    // PROC_C1 (bit 2) is set since HLT works on the emulated CPU.
+    let flags = FADT_FLAG_WBINVD
+        | FADT_FLAG_PROC_C1
+        | FADT_FLAG_RESET_REG_SUP
+        | FADT_FLAG_PWR_BUTTON
+        | FADT_FLAG_SLP_BUTTON
+        | FADT_FLAG_FIX_RTC;
     out.extend_from_slice(&flags.to_le_bytes());
 
     // RESET_REG + RESET_VALUE (use standard PCI reset port 0xCF9).
@@ -664,6 +688,26 @@ fn build_madt(cfg: &AcpiConfig) -> Vec<u8> {
         cfg.sci_irq as u32,
         ISO_ACTIVE_LOW_LEVEL,
     ));
+    // A non-default caller may still route PCI INTx through an ISA-range GSI. Describe those
+    // shared legacy lines as active-low/level-triggered, but never override a fixed PS/2 IRQ:
+    // KBD/MOU advertise IRQ1/IRQ12 as active-high/edge-triggered/exclusive. The default Q35
+    // routing uses GSIs 20-23 and therefore needs no MADT ISO at all.
+    let mut emitted_pci_isos = [u32::MAX; 4];
+    let mut emitted_pci_iso_count = 0usize;
+    for &gsi in &cfg.pirq_to_gsi {
+        if gsi >= 16
+            || gsi == 0
+            || gsi == 2
+            || gsi == u32::from(cfg.sci_irq)
+            || (cfg.enable_i8042 && matches!(gsi, 1 | 12))
+            || emitted_pci_isos[..emitted_pci_iso_count].contains(&gsi)
+        {
+            continue;
+        }
+        body.extend_from_slice(&madt_iso(0, gsi as u8, gsi, ISO_ACTIVE_LOW_LEVEL));
+        emitted_pci_isos[emitted_pci_iso_count] = gsi;
+        emitted_pci_iso_count += 1;
+    }
 
     // Local APIC NMI: LINT1 for all processors.
     body.extend_from_slice(&madt_lapic_nmi(0xFF, 0x0000, 1));
@@ -795,14 +839,11 @@ fn aml_imcr_region_and_field() -> Vec<u8> {
 }
 
 fn aml_scope_sb(cfg: &AcpiConfig) -> Vec<u8> {
-    let sb_devices = [
-        aml_device_sys0(cfg),
+    let sb_devices = vec![
         aml_device_pwrb(),
         aml_device_slpb(),
         aml_device_pci0(cfg),
         aml_device_hpet(cfg),
-        aml_device_rtc(),
-        aml_device_timr(),
     ];
     let sb = sb_devices.concat();
     aml_scope(*b"_SB_", &sb)
@@ -1142,10 +1183,9 @@ fn sys0_crs(cfg: &AcpiConfig) -> Vec<u8> {
     out.extend_from_slice(&io_port_descriptor(0x0022, 0x0022, 1, 2));
     // A20 gate port used by the platform A20 device.
     out.extend_from_slice(&io_port_descriptor(0x0092, 0x0092, 1, 1));
-    // PS/2 i8042 keyboard controller (data + status/command ports).
-    out.extend_from_slice(&io_port_descriptor(0x0060, 0x0060, 1, 5));
-    // Reset port used by the FADT ResetReg.
-    out.extend_from_slice(&io_port_descriptor(0x0CF9, 0x0CF9, 1, 1));
+    // Do not also reserve the FADT reset register at 0xCF9 here. It is inside
+    // PCI configuration mechanism 1's fixed 0xCF8..0xCFF resource, and a
+    // second consumer claim makes the two motherboard devices conflict.
     out.extend_from_slice(&[0x79, 0x00]); // EndTag
     out
 }
@@ -1153,7 +1193,6 @@ fn sys0_crs(cfg: &AcpiConfig) -> Vec<u8> {
 fn aml_device_sys0(cfg: &AcpiConfig) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&aml_name_eisa_id(*b"_HID", "PNP0C02"));
-    body.extend_from_slice(&aml_name_integer(*b"_UID", 0));
     body.extend_from_slice(&aml_name_integer(*b"_STA", 0x0F));
     body.extend_from_slice(&aml_name_buffer(*b"_CRS", &sys0_crs(cfg)));
     aml_device(*b"SYS0", &body)
@@ -1181,8 +1220,29 @@ fn aml_device_pci0(cfg: &AcpiConfig) -> Vec<u8> {
     if pcie {
         body.extend_from_slice(&aml_method_osc());
     }
+    body.extend_from_slice(&aml_device_ich9_isa(cfg));
 
     aml_device(*b"PCI0", &body)
+}
+
+fn aml_device_ich9_isa(cfg: &AcpiConfig) -> Vec<u8> {
+    let mut body = Vec::new();
+    // Aero's canonical platform bridge is the ICH9 LPC function at 00:1f.0.
+    // The PIIX3 function at 00:01.0 exists only to anchor its legacy IDE/UHCI
+    // functions, so fixed ISA devices must not be attached to that auxiliary
+    // bridge in the ACPI namespace.
+    body.extend_from_slice(&aml_name_integer(*b"_ADR", 0x001F_0000));
+    // Fixed legacy devices consume resources from PCI0's producer windows. Keep
+    // them beneath the LPC bridge so Windows' root-resource arbiter sees the
+    // producer/consumer relationship instead of conflicting sibling claims.
+    body.extend_from_slice(&aml_device_sys0(cfg));
+    body.extend_from_slice(&aml_device_rtc());
+    body.extend_from_slice(&aml_device_timr());
+    if cfg.enable_i8042 {
+        body.extend_from_slice(&aml_device_i8042_keyboard());
+        body.extend_from_slice(&aml_device_i8042_mouse());
+    }
+    aml_device(*b"ISA_", &body)
 }
 
 fn aml_device_hpet(cfg: &AcpiConfig) -> Vec<u8> {
@@ -1198,7 +1258,6 @@ fn aml_device_rtc() -> Vec<u8> {
     // Matches typical PC/AT RTC resources (ports 0x70-0x71, IRQ8).
     let mut body = Vec::new();
     body.extend_from_slice(&aml_name_eisa_id(*b"_HID", "PNP0B00"));
-    body.extend_from_slice(&aml_name_integer(*b"_UID", 0));
     body.extend_from_slice(&aml_name_integer(*b"_STA", 0x0F));
     body.extend_from_slice(&aml_name_buffer(*b"_CRS", &rtc_crs()));
     aml_device(*b"RTC_", &body)
@@ -1208,10 +1267,25 @@ fn aml_device_timr() -> Vec<u8> {
     // Matches typical PC/AT PIT resources (ports 0x40-0x43, IRQ0).
     let mut body = Vec::new();
     body.extend_from_slice(&aml_name_eisa_id(*b"_HID", "PNP0100"));
-    body.extend_from_slice(&aml_name_integer(*b"_UID", 0));
     body.extend_from_slice(&aml_name_integer(*b"_STA", 0x0F));
     body.extend_from_slice(&aml_name_buffer(*b"_CRS", &timr_crs()));
     aml_device(*b"TIMR", &body)
+}
+
+fn aml_device_i8042_keyboard() -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&aml_name_eisa_id(*b"_HID", "PNP0303"));
+    body.extend_from_slice(&aml_name_integer(*b"_STA", 0x0F));
+    body.extend_from_slice(&aml_name_buffer(*b"_CRS", &i8042_keyboard_crs()));
+    aml_device(*b"KBD_", &body)
+}
+
+fn aml_device_i8042_mouse() -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&aml_name_eisa_id(*b"_HID", "PNP0F13"));
+    body.extend_from_slice(&aml_name_integer(*b"_STA", 0x0F));
+    body.extend_from_slice(&aml_name_buffer(*b"_CRS", &i8042_mouse_crs()));
+    aml_device(*b"MOU_", &body)
 }
 
 fn aml_device_pwrb() -> Vec<u8> {
@@ -1339,7 +1413,8 @@ fn pci0_crs(cfg: &AcpiConfig) -> Vec<u8> {
                                              // - Memory TypeSpecificFlags:
                                              //     bit0: ReadWrite (1=ReadWrite, 0=ReadOnly)
                                              //     bits1-2: Cacheability (00=NonCacheable, 01=Cacheable, 10=WriteCombining, 11=Prefetchable)
-    const PCI0_CRS_MMIO_TYPE_SPECIFIC_FLAGS: u8 = 0x03; // Cacheable, ReadWrite
+    const PCI0_CRS_MMIO_TYPE_SPECIFIC_FLAGS: u8 = 0x01; // NonCacheable, ReadWrite
+    const PCI0_CRS_VGA_TYPE_SPECIFIC_FLAGS: u8 = 0x03; // Cacheable, ReadWrite
 
     // Word Address Space Descriptor (Bus Number).
     let start_bus = u16::from(cfg.pcie_start_bus);
@@ -1395,6 +1470,24 @@ fn pci0_crs(cfg: &AcpiConfig) -> Vec<u8> {
             max: 0xFFFF,
             translation: 0x0000,
             length: 0xF300,
+        },
+    ));
+
+    // Legacy VGA memory aperture. Q35 firmware exposes this as a root-produced
+    // window because VGA-compatible PCI functions decode it independently of
+    // their relocatable BARs.
+    out.extend_from_slice(&dword_addr_space_descriptor(
+        AddrSpaceDescriptorHeader {
+            resource_type: 0x00,
+            general_flags: PCI0_CRS_GENERAL_FLAGS,
+            type_specific_flags: PCI0_CRS_VGA_TYPE_SPECIFIC_FLAGS,
+        },
+        AddrSpaceDescriptorRange {
+            granularity: 0x0000_0000,
+            min: 0x000A_0000,
+            max: 0x000B_FFFF,
+            translation: 0x0000_0000,
+            length: 0x0002_0000,
         },
     ));
 
@@ -1456,9 +1549,8 @@ fn pci0_crs(cfg: &AcpiConfig) -> Vec<u8> {
 }
 
 fn pci0_prt(cfg: &AcpiConfig) -> Vec<Vec<u8>> {
-    // Provide a simple static _PRT mapping for PCI INTx. We follow the common
-    // PIRQ swizzle used by many virtual platforms:
-    //   PIRQA-D -> GSIs 10,11,12,13.
+    // Provide a simple static _PRT mapping for PCI INTx. Aero's default maps
+    // the root-bus PIRQ group to Q35's dedicated APIC GSIs 20-23.
     let mut entries = Vec::new();
     for dev in 1u32..=31 {
         let addr = (dev << 16) | 0xFFFF;
@@ -1574,6 +1666,22 @@ fn timr_crs() -> Vec<u8> {
     // IRQNoFlags {0} => bitmask 1<<0 = 0x0001
     out.extend_from_slice(&[0x22, 0x01, 0x00]);
     out.extend_from_slice(&[0x79, 0x00]);
+    out
+}
+
+fn i8042_keyboard_crs() -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&io_port_descriptor(0x0060, 0x0060, 1, 1));
+    out.extend_from_slice(&io_port_descriptor(0x0064, 0x0064, 1, 1));
+    out.extend_from_slice(&[0x22, 0x02, 0x00]); // IRQNoFlags {1}
+    out.extend_from_slice(&[0x79, 0x00]); // EndTag
+    out
+}
+
+fn i8042_mouse_crs() -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&[0x22, 0x00, 0x10]); // IRQNoFlags {12}
+    out.extend_from_slice(&[0x79, 0x00]); // EndTag
     out
 }
 
@@ -1719,6 +1827,71 @@ mod tests {
         assert_eq!(eisa_id_to_u32("PNP0103"), Some(0x0301_D041));
         assert_eq!(eisa_id_to_u32("PNP0C0C"), Some(0x0C0C_D041));
         assert_eq!(eisa_id_to_u32("PNP0C0E"), Some(0x0E0C_D041));
+    }
+
+    #[test]
+    fn dsdt_advertises_i8042_keyboard_and_mouse_resources() {
+        let cfg = AcpiConfig::default();
+        let dsdt = build_dsdt(&cfg);
+
+        let mut keyboard_body = Vec::new();
+        keyboard_body.extend_from_slice(&aml_name_eisa_id(*b"_HID", "PNP0303"));
+        keyboard_body.extend_from_slice(&aml_name_integer(*b"_STA", 0x0F));
+        keyboard_body.extend_from_slice(&aml_name_buffer(*b"_CRS", &i8042_keyboard_crs()));
+        let keyboard = aml_device(*b"KBD_", &keyboard_body);
+
+        let mut mouse_body = Vec::new();
+        mouse_body.extend_from_slice(&aml_name_eisa_id(*b"_HID", "PNP0F13"));
+        mouse_body.extend_from_slice(&aml_name_integer(*b"_STA", 0x0F));
+        mouse_body.extend_from_slice(&aml_name_buffer(*b"_CRS", &i8042_mouse_crs()));
+        let mouse = aml_device(*b"MOU_", &mouse_body);
+
+        let isa = aml_device_ich9_isa(&cfg);
+
+        assert!(
+            contains_subslice(&dsdt, &keyboard),
+            "DSDT must expose the QEMU-compatible PNP0303 keyboard resources"
+        );
+        assert!(
+            contains_subslice(&dsdt, &mouse),
+            "DSDT must expose the QEMU-compatible PNP0F13 mouse resources"
+        );
+        assert!(
+            contains_subslice(&dsdt, &isa),
+            "i8042 devices must be children of the canonical ICH9 LPC bridge at PCI0.ISA, 00:1f.0"
+        );
+        assert_eq!(
+            u16::from_le_bytes(
+                build_fadt(&cfg, 0x10_0000, 0x11_0000)[109..111]
+                    .try_into()
+                    .unwrap()
+            ) & FADT_IAPC_BOOT_ARCH_8042,
+            FADT_IAPC_BOOT_ARCH_8042,
+            "FADT IA-PC boot architecture flags must advertise the physical i8042 controller"
+        );
+
+        let cfg_without_i8042 = AcpiConfig {
+            enable_i8042: false,
+            ..Default::default()
+        };
+        let dsdt_without_i8042 = build_dsdt(&cfg_without_i8042);
+        assert!(
+            !contains_subslice(&dsdt_without_i8042, &keyboard),
+            "DSDT must not expose a keyboard when i8042 is absent"
+        );
+        assert!(
+            !contains_subslice(&dsdt_without_i8042, &mouse),
+            "DSDT must not expose a mouse when i8042 is absent"
+        );
+        assert_eq!(
+            u16::from_le_bytes(
+                build_fadt(&cfg_without_i8042, 0x10_0000, 0x11_0000)[109..111]
+                    .try_into()
+                    .unwrap()
+            ) & FADT_IAPC_BOOT_ARCH_8042,
+            0,
+            "FADT must not advertise an i8042 controller when the machine omits it"
+        );
     }
 
     #[test]
@@ -1976,11 +2149,21 @@ mod tests {
                 let desc = &crs[i..i + total];
                 assert_eq!(desc[3], 0x00, "expected Memory address space descriptor");
                 assert_eq!(desc[4], 0x0C, "unexpected general flags");
-                assert_eq!(desc[5], 0x03, "unexpected type-specific flags");
-
                 let min = u32::from_le_bytes(desc[10..14].try_into().unwrap());
                 let max = u32::from_le_bytes(desc[14..18].try_into().unwrap());
                 let length = u32::from_le_bytes(desc[22..26].try_into().unwrap());
+                if (min, max, length) == (0x000A_0000, 0x000B_FFFF, 0x0002_0000) {
+                    assert_eq!(
+                        desc[5], 0x03,
+                        "legacy VGA aperture should be Cacheable, ReadWrite"
+                    );
+                    i += total;
+                    continue;
+                }
+                assert_eq!(
+                    desc[5], 0x01,
+                    "PCI MMIO windows should be NonCacheable, ReadWrite"
+                );
                 out.push((min, max, length));
             }
 
@@ -2042,7 +2225,7 @@ mod tests {
     }
 
     #[test]
-    fn pci0_crs_emits_resource_producer_windows_and_cacheable_rw_mmio() {
+    fn pci0_crs_emits_resource_producer_windows_and_q35_memory_attributes() {
         let cfg = AcpiConfig::default();
         let crs = pci0_crs(&cfg);
 
@@ -2081,16 +2264,44 @@ mod tests {
             !mmio.is_empty(),
             "expected PCI0._CRS to contain at least one DWord memory descriptor"
         );
-        for d in mmio {
+        for d in &mmio {
             assert_eq!(
                 d.general_flags, 0x0C,
                 "unexpected DWord memory descriptor general flags"
             );
-            assert_eq!(
-                d.type_specific_flags, 0x03,
-                "unexpected DWord memory descriptor type-specific flags"
-            );
         }
+        assert_eq!(
+            mmio.iter()
+                .filter(|descriptor| descriptor.type_specific_flags == 0x03)
+                .count(),
+            1,
+            "expected exactly one Cacheable, ReadWrite VGA aperture"
+        );
+        assert!(
+            mmio.iter()
+                .filter(|descriptor| descriptor.type_specific_flags != 0x03)
+                .all(|descriptor| descriptor.type_specific_flags == 0x01),
+            "relocatable PCI MMIO windows must be NonCacheable, ReadWrite"
+        );
+
+        let vga = dword_addr_space_descriptor(
+            AddrSpaceDescriptorHeader {
+                resource_type: 0x00,
+                general_flags: 0x0C,
+                type_specific_flags: 0x03,
+            },
+            AddrSpaceDescriptorRange {
+                granularity: 0,
+                min: 0x000A_0000,
+                max: 0x000B_FFFF,
+                translation: 0,
+                length: 0x0002_0000,
+            },
+        );
+        assert!(
+            contains_subslice(&crs, &vga),
+            "PCI0._CRS must expose the legacy VGA memory aperture"
+        );
     }
 
     #[test]
@@ -2160,7 +2371,7 @@ mod tests {
             AddrSpaceDescriptorHeader {
                 resource_type: 0x00,
                 general_flags: 0x0C,
-                type_specific_flags: 0x03,
+                type_specific_flags: 0x01,
             },
             AddrSpaceDescriptorRange {
                 granularity: 0,
@@ -2174,7 +2385,7 @@ mod tests {
             AddrSpaceDescriptorHeader {
                 resource_type: 0x00,
                 general_flags: 0x0C,
-                type_specific_flags: 0x03,
+                type_specific_flags: 0x01,
             },
             AddrSpaceDescriptorRange {
                 granularity: 0,

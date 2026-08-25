@@ -5,7 +5,7 @@
 //! incrementally.
 //!
 //! The primary consumers of this module are:
-//! - The xHCI controller MMIO/PCI integration in `crates/emulator` (`emulator::io::usb::xhci`)
+//! - The xHCI controller MMIO/PCI integration provided by the machine's device wiring
 //! - Unit tests for the core xHCI data structures (`trb`, `ring`, `context`)
 //!
 //! The controller implementation here is intentionally small; it currently provides:

@@ -55,6 +55,7 @@ const STATUS_OBF: u8 = 0x01; // Output buffer full.
 const STATUS_IBF: u8 = 0x02; // Input buffer full.
 const STATUS_SYS: u8 = 0x04; // System flag.
 const STATUS_A2: u8 = 0x08; // Last write to command port.
+const STATUS_UNLOCKED: u8 = 0x10; // Keyboard lock is not modeled.
 const STATUS_AUX_OBF: u8 = 0x20; // Mouse output buffer full.
 
 // i8042 output port bits.
@@ -66,6 +67,21 @@ const OUTPUT_PORT_A20: u8 = 0x02; // A20 gate.
 /// This queue holds bytes that have been produced by the PS/2 devices or the controller itself,
 /// but have not yet been loaded into the guest-visible output buffer.
 pub const MAX_PENDING_OUTPUT: usize = 4096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct I8042DiagnosticState {
+    pub status: u8,
+    pub command_byte: u8,
+    pub output_port: u8,
+    pub output_buffer: Option<u8>,
+    pub output_buffer_is_mouse: bool,
+    pub pending_output_len: usize,
+    pub keyboard_has_output: bool,
+    pub mouse_has_output: bool,
+    pub keyboard_port_enabled: bool,
+    pub mouse_port_enabled: bool,
+    pub mouse_reporting_enabled: bool,
+}
 
 #[derive(Debug, Clone, Copy)]
 enum PendingWrite {
@@ -262,7 +278,7 @@ impl I8042Controller {
         //  - translation enabled (Set-2 -> Set-1)
         let command_byte = 0x45;
         Self {
-            status: STATUS_SYS,
+            status: STATUS_SYS | STATUS_UNLOCKED,
             command_byte,
             // Platform dependent; bit0 is typically deasserted (1), A20 typically disabled.
             output_port: OUTPUT_PORT_RESET,
@@ -457,6 +473,34 @@ impl I8042Controller {
         self.dropped_output_bytes
     }
 
+    pub fn diagnostic_state(&self) -> I8042DiagnosticState {
+        let mut status = self.status;
+        if self.last_write_was_command {
+            status |= STATUS_A2;
+        } else {
+            status &= !STATUS_A2;
+        }
+        I8042DiagnosticState {
+            status,
+            command_byte: self.command_byte,
+            output_port: self.output_port_for_guest(),
+            output_buffer: self.output_buffer.map(|out| out.value),
+            output_buffer_is_mouse: matches!(
+                self.output_buffer,
+                Some(OutputByte {
+                    source: OutputSource::Mouse,
+                    ..
+                })
+            ),
+            pending_output_len: self.pending_output.len(),
+            keyboard_has_output: self.keyboard.has_output(),
+            mouse_has_output: self.mouse.has_output(),
+            keyboard_port_enabled: self.keyboard_port_enabled(),
+            mouse_port_enabled: self.mouse_port_enabled(),
+            mouse_reporting_enabled: self.mouse.reporting_enabled(),
+        }
+    }
+
     fn read_status(&mut self) -> u8 {
         let mut status = self.status;
         if self.last_write_was_command {
@@ -472,8 +516,17 @@ impl I8042Controller {
             return 0x00;
         };
 
+        let is_mouse = matches!(out.source, OutputSource::Mouse);
         self.status &= !STATUS_OBF;
         self.status &= !STATUS_AUX_OBF;
+
+        if std::env::var_os("AERO_I8042_TRACE").is_some() {
+            eprintln!(
+                "AERO_I8042_TRACE: read_data {:#04x} mouse={is_mouse} pending={}",
+                out.value,
+                self.pending_output.len()
+            );
+        }
 
         // Immediately load any queued bytes and potentially raise the next IRQ.
         self.service_output();
@@ -586,6 +639,7 @@ impl I8042Controller {
                     self.set_output_port(value);
                 }
                 PendingWrite::WriteToMouse => {
+                    self.command_byte &= !0x20;
                     self.mouse.receive_byte(value);
                 }
                 PendingWrite::WriteToOutputBufferKeyboard => {
@@ -611,6 +665,7 @@ impl I8042Controller {
         }
 
         // Default: send to keyboard.
+        self.command_byte &= !0x10;
         self.keyboard.receive_byte(value);
         self.status &= !STATUS_IBF;
         self.service_output();
@@ -928,7 +983,7 @@ impl IoSnapshot for I8042Controller {
         r.ensure_device_major(Self::DEVICE_VERSION.major)?;
 
         // Start from a deterministic baseline for forward-compatible snapshots that may omit fields.
-        self.status = STATUS_SYS;
+        self.status = STATUS_SYS | STATUS_UNLOCKED;
         self.command_byte = 0x45;
         self.output_port = OUTPUT_PORT_RESET;
         self.pending_output.clear();
@@ -1026,13 +1081,13 @@ impl IoSnapshot for I8042Controller {
         //
         // For valid snapshots this is a no-op because the bits are already consistent.
         const STATUS_KNOWN_MASK: u8 =
-            STATUS_OBF | STATUS_IBF | STATUS_SYS | STATUS_A2 | STATUS_AUX_OBF;
+            STATUS_OBF | STATUS_IBF | STATUS_SYS | STATUS_A2 | STATUS_UNLOCKED | STATUS_AUX_OBF;
         self.status &= STATUS_KNOWN_MASK;
         // The input buffer fullness is transient in this device model (writes are processed
         // synchronously), so clear it to avoid a corrupted snapshot permanently wedging the guest.
         self.status &= !STATUS_IBF;
         // The system bit should always be set once the controller has initialized.
-        self.status |= STATUS_SYS;
+        self.status |= STATUS_SYS | STATUS_UNLOCKED;
         // Derive OBF/AUX bits from the restored output buffer.
         self.status &= !(STATUS_OBF | STATUS_AUX_OBF | STATUS_A2);
         if let Some(out) = self.output_buffer {

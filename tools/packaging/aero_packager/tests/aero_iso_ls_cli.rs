@@ -38,4 +38,3 @@ fn aero_iso_ls_cli_lists_joliet_file_paths() -> anyhow::Result<()> {
 
     Ok(())
 }
-

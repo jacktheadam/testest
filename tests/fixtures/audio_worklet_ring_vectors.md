@@ -6,7 +6,7 @@ AudioWorklet playback ring buffer index math.
 The same semantics are implemented in two places:
 
 - Rust: `crates/platform/src/audio/worklet_bridge.rs`
-- JS (AudioWorklet-safe): `web/src/platform/audio_worklet_ring_layout.js`
+- JS (AudioWorklet-safe): `apps/web/src/platform/audio_worklet_ring_layout.js`
 
 The fields in each test case are `u32` frame counters (wrapping at `2^32`):
 

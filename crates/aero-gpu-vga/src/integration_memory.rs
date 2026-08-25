@@ -111,5 +111,37 @@ impl MmioHandler for VgaLfbMmioHandler {
         let end = lfb_off + end_in_fb;
         let bytes = value.to_le_bytes();
         vram[start..end].copy_from_slice(&bytes[..len]);
+
+        // Bring-up: prove whether guest GDI/bootvid ever touches the VBE LFB.
+        // `AERO_COUNT_LFB_WRITES=1` tallies stores; first 16 also log offset/size/rip-less.
+        lfb_write_note(offset, len as u64, value);
     }
+}
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+
+static LFB_WRITE_COUNT: AtomicU64 = AtomicU64::new(0);
+static LFB_WRITE_LOGGED: AtomicU64 = AtomicU64::new(0);
+static LFB_WRITE_ENABLED: OnceLock<bool> = OnceLock::new();
+
+/// Env-gated LFB store counter for Win7 paint-wall diagnosis.
+fn lfb_write_note(offset: u64, len: u64, value: u64) {
+    if !*LFB_WRITE_ENABLED.get_or_init(|| std::env::var_os("AERO_COUNT_LFB_WRITES").is_some()) {
+        return;
+    }
+    let n = LFB_WRITE_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    let logged = LFB_WRITE_LOGGED.load(Ordering::Relaxed);
+    if logged < 16
+        && LFB_WRITE_LOGGED
+            .compare_exchange(logged, logged + 1, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    {
+        eprintln!("[lfb-write] #{n} off={offset:#x} len={len} val={value:#x}");
+    }
+}
+
+/// Snapshot of LFB MMIO write count since process start (0 unless `AERO_COUNT_LFB_WRITES` set).
+pub fn lfb_write_count() -> u64 {
+    LFB_WRITE_COUNT.load(Ordering::Relaxed)
 }

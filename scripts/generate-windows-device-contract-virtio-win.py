@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Generate `docs/windows-device-contract-virtio-win.json` from the canonical
-`docs/windows-device-contract.json`.
+Generate `protocol-vectors/windows-device-contract-virtio-win.json` from the canonical
+`protocol-vectors/windows-device-contract.json`.
 
 Why:
 - The virtio-win variant is used when packaging Guest Tools with upstream
@@ -28,8 +28,8 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONTRACT_PATH = REPO_ROOT / "docs/windows-device-contract.json"
-DEFAULT_OUTPUT_PATH = REPO_ROOT / "docs/windows-device-contract-virtio-win.json"
+DEFAULT_CONTRACT_PATH = REPO_ROOT / "protocol-vectors/windows-device-contract.json"
+DEFAULT_OUTPUT_PATH = REPO_ROOT / "protocol-vectors/windows-device-contract-virtio-win.json"
 
 VIRTIO_WIN_CONTRACT_NAME = "aero-windows-pci-device-contract-virtio-win"
 
@@ -152,13 +152,13 @@ def main(argv: list[str]) -> int:
         "--contract",
         type=Path,
         default=DEFAULT_CONTRACT_PATH,
-        help="Path to docs/windows-device-contract.json (default: repo copy).",
+        help="Path to protocol-vectors/windows-device-contract.json (default: repo copy).",
     )
     parser.add_argument(
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT_PATH,
-        help="Path to docs/windows-device-contract-virtio-win.json (default: repo copy).",
+        help="Path to protocol-vectors/windows-device-contract-virtio-win.json (default: repo copy).",
     )
     parser.add_argument(
         "--check",
@@ -185,7 +185,7 @@ def main(argv: list[str]) -> int:
             )
             sys.stderr.write(diff if diff else "virtio-win contract file is out of date\n")
             sys.stderr.write(
-                "\nERROR: docs/windows-device-contract-virtio-win.json is out of sync with docs/windows-device-contract.json.\n"
+                "\nERROR: protocol-vectors/windows-device-contract-virtio-win.json is out of sync with protocol-vectors/windows-device-contract.json.\n"
                 "Run: python3 scripts/generate-windows-device-contract-virtio-win.py\n"
             )
             return 1

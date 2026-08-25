@@ -10,11 +10,7 @@ pub enum UnattendMode {
     Full,
 }
 
-pub fn render_autounattend(
-    arch: Arch,
-    driver_dir_rel: &str,
-    mode: UnattendMode,
-) -> Result<String> {
+pub fn render_autounattend(arch: Arch, driver_dir_rel: &str, mode: UnattendMode) -> Result<String> {
     match mode {
         UnattendMode::None => Err(anyhow!("UnattendMode::None does not render a file")),
         UnattendMode::DriversOnly => Ok(render_drivers_only(arch, driver_dir_rel)),
@@ -107,4 +103,3 @@ mod tests {
         assert!(xml.contains("processorArchitecture=\"amd64\""));
     }
 }
-

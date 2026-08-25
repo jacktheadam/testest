@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { serializeError } from "../src/errors.js";
+import { serializeError } from "../apps/web/src/errors.js";
 
 test("serializeError: does not throw on hostile error-like objects", () => {
   const e = new Error("hello\n\tworld");

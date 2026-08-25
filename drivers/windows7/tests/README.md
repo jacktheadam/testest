@@ -15,7 +15,7 @@ Non-goals:
 
 See also:
 
-- virtio-input end-to-end test plan (device model + driver + web runtime): [`docs/virtio-input-test-plan.md`](../../../docs/virtio-input-test-plan.md)
+- virtio-input end-to-end test plan (device model + driver + web runtime): [`wiki/areas/usb-input.md`](wiki/areas/usb-input.md#94-validation-ladder)
 
 ## Layout
 
@@ -462,7 +462,7 @@ The provisioning media generator (`host-harness/New-AeroWin7TestImage.ps1`) can 
   - Exits with `0` on PASS, non-zero on FAIL/timeout.
 
 The harness also sets the PCI **Revision ID** (`x-pci-revision=0x01`) to match the
-[`AERO-W7-VIRTIO` v1 contract](../../../docs/windows7-virtio-driver-contract.md). Newer Aero drivers may refuse to bind
+[`AERO-W7-VIRTIO` v1 contract](wiki/areas/drivers-windows.md#the-aero-w7-virtio-device-contract-v1). Newer Aero drivers may refuse to bind
 if the Revision ID does not match.
 
 To catch QEMU/device-arg misconfiguration early (for example, if your QEMU build ignores `x-pci-revision=0x01` and still

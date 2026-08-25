@@ -17,7 +17,7 @@ Important:
   - `THIRD_PARTY_NOTICES.md` (see `drivers/virtio/THIRD_PARTY_NOTICES.md`)
   - `licenses/virtio-win/` (best-effort copy of upstream LICENSE/NOTICE files when using `make-driver-pack.ps1`)
 
-See `docs/virtio-windows-drivers.md` for installation steps and signing notes.
+See `wiki/areas/drivers-windows.md` for installation steps and signing notes.
 
 ## Building a mountable “drivers ISO”
 

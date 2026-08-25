@@ -188,9 +188,10 @@ fn sm4_gs_packed_varying_o2_translates_to_expanded_vertex_location2() {
 }
 
 #[test]
-fn sm4_gs_packed_varying_missing_output_register_defaults_to_zero() {
+fn sm4_gs_packed_varying_missing_output_register_defaults_to_d3d_fill() {
     // The shader never writes `o5`, but the packed layout requests it. The translator should still
-    // declare `o5` (zero-initialized) and pack it into the expanded-vertex buffer.
+    // declare `o5` initialized to the D3D default fill (0,0,0,1) and pack it into the
+    // expanded-vertex buffer.
     let module = Sm4Module {
         stage: ShaderStage::Geometry,
         model: ShaderModel { major: 4, minor: 0 },
@@ -227,8 +228,8 @@ fn sm4_gs_packed_varying_missing_output_register_defaults_to_zero() {
     let wgsl =
         translate_gs_module_to_wgsl_compute_prepass_packed(&module, &[5]).expect("translate");
     assert!(
-        wgsl.contains("var o5: vec4<f32> = vec4<f32>(0.0);"),
-        "expected output register o5 to be declared/zero-initialized:\n{wgsl}"
+        wgsl.contains("var o5: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);"),
+        "expected output register o5 to be declared with the D3D default fill (0,0,0,1):\n{wgsl}"
     );
     assert!(
         wgsl.contains("out_vertices.data[vtx_idx].v0 = o5;"),

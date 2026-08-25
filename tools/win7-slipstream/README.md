@@ -19,7 +19,7 @@ No Windows files are shipped in this repository. The tool only transforms user-p
 
 Related documentation:
 
-- `docs/win7-bcd-offline-patching.md` (BCD element IDs, object selection, and verification recipes)
+- `wiki/areas/drivers-windows.md` (BCD element IDs, object selection, and verification recipes)
 
 ## Build
 

@@ -1,7 +1,7 @@
 # Driver package template
 
 This folder is not packaged by CI. It exists as a reference for the per-driver manifest
-used by the Windows driver packaging pipeline (`ci/make-catalogs.ps1`).
+used by the Windows driver packaging pipeline (`drivers/build/make-catalogs.ps1`).
 
 ## Manifest
 
@@ -27,11 +27,11 @@ The manifest can declare:
 - whether the driver needs a WDF coinstaller (`wdfCoInstaller`, explicit opt-in)
 
 See `ci-package.README.md` in this directory for a short field reference, and the canonical
-doc at `docs/16-driver-packaging-and-signing.md` for details.
+doc at `wiki/areas/drivers-windows.md` for details.
 
 ## Files
 
-- `ci-package.README.md`: field-by-field reference (canonical documentation lives under `docs/16-driver-packaging-and-signing.md`).
+- `ci-package.README.md`: field-by-field reference (canonical documentation lives under `wiki/areas/drivers-windows.md`).
 - `ci-package.json`: starter template (this file is required for CI build+packaging in real driver directories). Replace `infFiles` placeholder `REPLACE_ME.inf` (or remove `infFiles` to enable CI auto-discovery) and update `wow64Files` as needed.
 - `ci-package.inf-wow64-example.json`: example manifest showing `infFiles` + `wow64Files` usage (explicit INF selection + WOW64 payload DLLs).
 - `ci-package.tools-example.json`: example manifest showing `infFiles` + `toolFiles` usage (ship helper `.exe` without abusing `additionalFiles`).

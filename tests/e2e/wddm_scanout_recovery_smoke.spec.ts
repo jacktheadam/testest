@@ -10,7 +10,7 @@ test("wddm scanout recovery: survives WebGL2 context loss + re-presents from gue
 }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/wddm-scanout-smoke.html", { waitUntil: "load" });
+  await page.goto("/apps/web/wddm-scanout-smoke.html", { waitUntil: "load" });
   await waitForReady(page);
 
   const result = await page.evaluate(async () => {

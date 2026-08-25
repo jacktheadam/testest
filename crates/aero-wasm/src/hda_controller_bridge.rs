@@ -622,8 +622,10 @@ mod tests {
             sd.cbl = pcm_len_bytes;
             sd.lvi = 0;
             sd.fmt = fmt_raw;
-            // SRST | RUN | IOCE | stream number 1.
-            sd.ctl = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 20);
+            // RUN | IOCE | stream number 1. SRST must stay clear: the engine treats a set
+            // SRST as "held in reset" and would not run the stream at all, which would make
+            // this test pass without ever attempting the out-of-bounds DMA it is about.
+            sd.ctl = (1 << 1) | (1 << 2) | (1 << 20);
         }
 
         // The call should complete without panicking even though the DMA address is invalid.
@@ -772,8 +774,9 @@ mod tests {
             sd.cbl = buf_len;
             sd.lvi = 0;
             sd.fmt = 0x0010; // 48kHz, 16-bit, mono
-            // SRST | RUN | stream number 2.
-            sd.ctl = (1 << 0) | (1 << 1) | (2 << 20);
+            // RUN | stream number 2. SRST must stay clear — see the note on the playback
+            // stream above; with it set the capture engine never runs.
+            sd.ctl = (1 << 1) | (2 << 20);
         }
 
         let mut capture = SilenceCaptureSource;

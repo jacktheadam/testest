@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createUsbProxyRingBuffer, UsbProxyRing } from "../web/src/usb/usb_proxy_ring.ts";
+import { createUsbProxyRingBuffer, UsbProxyRing } from "../apps/web/src/usb/usb_proxy_ring.ts";
 
 test("usb proxy ring: error completion messages are single-line and byte-bounded", () => {
   const sab = createUsbProxyRingBuffer(64 * 1024);

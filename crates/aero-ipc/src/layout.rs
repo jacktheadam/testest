@@ -83,7 +83,7 @@ pub mod queue_desc {
 /// Aero IPC buffer.
 ///
 /// Keep in sync with:
-/// - `docs/ipc-protocol.md` (queue kinds table)
+/// - the platform and firmware area page (queue kinds table)
 /// - `web/src/runtime/shared_layout.ts` (`IO_IPC_*_QUEUE_KIND`)
 pub mod queue_kind {
     pub const CMD: u32 = 0;

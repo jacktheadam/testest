@@ -44,9 +44,9 @@ async function assertPerfExportAvailable(url: string, page: import('@playwright/
 }
 
 test('perf export works on dev server', async ({ page }) => {
-  await assertPerfExportAvailable('/', page);
+  await assertPerfExportAvailable('/apps/web/', page);
 });
 
 test('perf export works on preview server', async ({ page }) => {
-  await assertPerfExportAvailable(`${PREVIEW_ORIGIN}/`, page);
+  await assertPerfExportAvailable(`${PREVIEW_ORIGIN}/apps/web/`, page);
 });

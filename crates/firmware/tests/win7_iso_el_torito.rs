@@ -61,7 +61,7 @@ impl CdromDevice for FileCdrom {
 /// Minimal BIOS bus for firmware integration tests.
 struct TestBus {
     a20_enabled: bool,
-    inner: PhysicalMemoryBus,
+    inner: PhysicalMemoryBus<memory::DenseMemory>,
 }
 
 impl TestBus {
@@ -69,7 +69,7 @@ impl TestBus {
         let ram = DenseMemory::new(size).expect("guest RAM allocation failed");
         Self {
             a20_enabled: false,
-            inner: PhysicalMemoryBus::new(Box::new(ram)),
+            inner: PhysicalMemoryBus::new(ram),
         }
     }
 

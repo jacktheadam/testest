@@ -2,13 +2,13 @@
 //! and basic USB HID devices.
 //!
 //! This crate is the canonical USB implementation for Aero's browser/WASM runtime
-//! (see `docs/adr/0015-canonical-usb-stack.md`).
+//! (see `wiki/decisions/0015-canonical-usb-stack.md`).
 //!
 //! The main consumer is the browser-based emulator, which exposes an emulated UHCI (USB 1.1)
 //! controller and USB HID devices (keyboard/mouse/gamepad/consumer-control + passthrough). There is also an
 //! in-progress xHCI (USB 3.x) controller model with a limited MMIO register set, root hub ports,
 //! ERST-backed event ring delivery, and a subset of command + transfer processing (bring-up quality;
-//! see `docs/usb-xhci.md`).
+//! see the USB and input area page).
 //!
 //! ## Snapshot/restore
 //!

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { formatOneLineError, formatOneLineUtf8 } from "../../src/text.js";
+import { formatOneLineError, formatOneLineUtf8 } from "../../packages/transport-safety/src/text.js";
 
 const MAX_ERROR_MESSAGE_BYTES = 512;
 const MAX_ERROR_POINTER_BYTES = 256;

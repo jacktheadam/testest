@@ -4,7 +4,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
-import { formatOneLineError } from "../src/text.js";
+import { formatOneLineError } from "../packages/transport-safety/src/text.js";
 
 function parseArgs(argv) {
   const options = {

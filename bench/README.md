@@ -188,8 +188,7 @@ The `storage_io` scenario loads `web/storage_bench.html` in Chromium via Playwri
 Note: IndexedDB is async-only and does not currently back the synchronous Rust disk/controller path
 (`aero_storage::{StorageBackend, VirtualDisk}`); see:
 
-- [`docs/19-indexeddb-storage-story.md`](../docs/19-indexeddb-storage-story.md)
-- [`docs/20-storage-trait-consolidation.md`](../docs/20-storage-trait-consolidation.md)
+- [`wiki/areas/storage.md`](wiki/areas/storage.md)
 
 The benchmark uses a fixed `random_seed` so random I/O patterns are repeatable across runs.
 
@@ -245,7 +244,7 @@ npm run compare:storage:legacy -- --help
 
 ## Gateway benchmark suite (backend networking)
 
-`backend/aero-gateway/bench/run.mjs` runs local loopback-only benchmarks for:
+`services/gateway/bench/run.mjs` runs local loopback-only benchmarks for:
 
 - TCP proxy RTT (p50/p90/p99)
 - TCP proxy throughput (MiB/s)
@@ -255,7 +254,7 @@ npm run compare:storage:legacy -- --help
 
 ```bash
 npm ci
-npm -w backend/aero-gateway run bench
+npm -w services/gateway run bench
 ```
 
 ### Comparing two runs (PR smoke style)

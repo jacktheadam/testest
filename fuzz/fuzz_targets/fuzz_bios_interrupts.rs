@@ -7,7 +7,7 @@ use libfuzzer_sys::fuzz_target;
 
 use aero_cpu_core::state::{gpr, CpuMode, CpuState, Segment};
 use firmware::bios::{A20Gate, Bios, BiosConfig, FirmwareMemory, InMemoryDisk, BIOS_ALIAS_BASE, BIOS_BASE, BIOS_SIZE};
-use memory::{DenseMemory, MapError, MemoryBus, PhysicalMemoryBus};
+use memory::{DenseMemory, GuestMemory, MapError, MemoryBus, PhysicalMemoryBus};
 
 const RAM_SIZES: &[u64] = &[
     4 * 1024 * 1024,  // Smallest size that can still hold the largest built-in VBE LFB mode.
@@ -66,7 +66,7 @@ fn is_range_within(start: u64, len: usize, base: u64, size: u64) -> bool {
 
 struct CheckedBus {
     a20_enabled: bool,
-    inner: PhysicalMemoryBus,
+    inner: PhysicalMemoryBus<memory::DenseMemory>,
     oob_access: bool,
 }
 
@@ -77,7 +77,7 @@ impl CheckedBus {
         let ram = DenseMemory::new(ram_size).expect("DenseMemory allocation failed");
         Self {
             a20_enabled: false,
-            inner: PhysicalMemoryBus::new(Box::new(ram)),
+            inner: PhysicalMemoryBus::new(ram),
             oob_access: false,
         }
     }

@@ -3757,7 +3757,7 @@ fn aerogpu_cmd_renders_with_texture_load_ps() {
 }
 
 #[test]
-fn aerogpu_cmd_renders_with_texture_load_nonzero_coord_ps() {
+fn aerogpu_cmd_texture_load_treats_float_encoded_coord_as_raw_bits() {
     pollster::block_on(async {
         let mut exec = match AerogpuD3d11Executor::new_for_tests().await {
             Ok(exec) => exec,
@@ -3805,8 +3805,17 @@ fn aerogpu_cmd_renders_with_texture_load_nonzero_coord_ps() {
         }];
 
         let dxbc_vs = load_fixture("vs_passthrough.dxbc");
-        // Force a non-zero coordinate encoded as a numeric float (1.0f32), not raw integer bits.
-        // This catches regressions where `ld` coordinates are recovered via `bitcast<i32>` only.
+        // Encode the `ld` coordinate as a numeric float (1.0f32) rather than raw integer bits.
+        //
+        // DXBC register files are untyped: `ld` consumes *integer* texel coordinates stored as raw
+        // 32-bit patterns in the same lanes the translator otherwise models as `f32`. A shader that
+        // writes a numeric float there is malformed, and the translator recovers the coordinate by
+        // strict `bitcast<i32>` with no float-to-int heuristic — so 1.0f32 reads as its bit pattern,
+        // 1065353216, which is far outside a 2x2 texture.
+        //
+        // This test pins that behaviour. A heuristic that "helpfully" reinterpreted an exact-looking
+        // float would sample texel (1,0) and turn a malformed shader into a silently plausible
+        // result, which is worse than a visibly empty one.
         let dxbc_ps = build_ps_ld_t0_f32_coord_dxbc(1.0, 0.0, 0.0);
         let ilay = load_fixture("ilay_pos3_color.bin");
 
@@ -4019,8 +4028,11 @@ fn aerogpu_cmd_renders_with_texture_load_nonzero_coord_ps() {
 
         let pixels = exec.read_texture_rgba8(RT).await.unwrap();
         assert_eq!(pixels.len(), 4 * 4 * 4);
+        // Out-of-range `textureLoad` yields zero in WGSL, so the draw contributes nothing and the
+        // render target keeps its cleared value. Seeing the texture's green texel (0, 255, 0, 255)
+        // here would mean the float lane had been reinterpreted numerically.
         for px in pixels.chunks_exact(4) {
-            assert_eq!(px, &[0, 255, 0, 255]);
+            assert_eq!(px, &[0, 0, 0, 0]);
         }
     });
 }

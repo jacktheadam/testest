@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const PREVIEW_ORIGIN = process.env.AERO_PLAYWRIGHT_PREVIEW_ORIGIN ?? "http://127.0.0.1:4173";
 
-const THREADED_AERO_WASM_BINARY_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url));
-const THREADED_AERO_WASM_JS_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
-const THREADED_AERO_WASM_BINARY_DEV = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url));
-const THREADED_AERO_WASM_JS_DEV = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url));
+const THREADED_AERO_WASM_BINARY_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url));
+const THREADED_AERO_WASM_JS_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
+const THREADED_AERO_WASM_BINARY_DEV = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url));
+const THREADED_AERO_WASM_JS_DEV = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url));
 const HAS_THREADED_AERO_WASM_BINARY =
   (existsSync(THREADED_AERO_WASM_BINARY_RELEASE) && existsSync(THREADED_AERO_WASM_JS_RELEASE)) ||
   (existsSync(THREADED_AERO_WASM_BINARY_DEV) && existsSync(THREADED_AERO_WASM_JS_DEV));
@@ -35,7 +35,7 @@ test("HDA capture consumes synthetic mic ring and DMA-writes PCM into guest RAM"
   test.skip(!HAS_THREADED_AERO_WASM_BINARY, "Requires threaded aero-wasm package (npm -w web run wasm:build:threaded).");
   page.setDefaultTimeout(90_000);
 
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: "load" });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: "load" });
 
   await page.click("#init-audio-hda-capture-synthetic");
 

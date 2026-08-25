@@ -219,7 +219,7 @@ pub fn cmd(args: Vec<String>) -> Result<()> {
             .as_ref()
             .expect("node dir should be resolved when TS tests are enabled");
 
-        let mut cmd = tools::npm();
+        let mut cmd = tools::package_manager();
         cmd.current_dir(node_dir)
             .env("AERO_REQUIRE_WEBGPU", &require_webgpu)
             .args(["run", "test:unit"]);
@@ -243,7 +243,7 @@ pub fn cmd(args: Vec<String>) -> Result<()> {
             .as_ref()
             .expect("node dir should be resolved when E2E tests are enabled");
 
-        let mut cmd = tools::npm();
+        let mut cmd = tools::package_manager();
         cmd.current_dir(node_dir)
             .env("AERO_REQUIRE_WEBGPU", &require_webgpu)
             .args(["run", "test:e2e", "--"]);

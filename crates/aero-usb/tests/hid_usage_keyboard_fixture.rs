@@ -21,7 +21,7 @@ fn parse_hex_u8(s: &str) -> u8 {
 #[test]
 fn keyboard_code_to_usage_matches_shared_fixture() {
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/fixtures/hid_usage_keyboard.json");
+        .join("../../protocol-vectors/hid_usage_keyboard.json");
     let text = fs::read_to_string(&fixture_path)
         .unwrap_or_else(|e| panic!("failed to read fixture {fixture_path:?}: {e}"));
     let entries: Vec<FixtureEntry> = serde_json::from_str(&text)

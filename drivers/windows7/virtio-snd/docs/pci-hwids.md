@@ -10,7 +10,7 @@ Authoritative references:
 
 - `docs/windows7-virtio-driver-contract.md` (definitive virtio transport + device contract)
 - `drivers/windows7/virtio-snd/inf/aero_virtio_snd.inf` (actual INF match strings)
-- `docs/windows-device-contract.{md,json}` (consolidated IDs for Guest Tools; must remain consistent with `AERO-W7-VIRTIO`)
+- `docs/windows-device-contract.md` / `protocol-vectors/windows-device-contract.json` (consolidated IDs for Guest Tools; must remain consistent with `AERO-W7-VIRTIO`)
 
 ## Contract v1 PCI identity
 
@@ -47,7 +47,7 @@ To validate contract-v1 driver binding under QEMU, your QEMU build must support:
 
 The Aero Windows device/driver contract uses stable subsystem IDs derived from the virtio device type and encodes the
 contract major version in the PCI **Revision ID**. Automation (Guest Tools, CI) should prefer revision-gated forms
-(`...&REV_01`) as described in `docs/windows-device-contract.md`, even though `docs/windows-device-contract.json` also
+(`...&REV_01`) as described in `docs/windows-device-contract.md`, even though `protocol-vectors/windows-device-contract.json` also
 includes non-revision-gated patterns for tooling convenience.
 
 CI packaging stages only `inf/aero_virtio_snd.inf` (see `ci-package.json`) to avoid shipping multiple INFs that match

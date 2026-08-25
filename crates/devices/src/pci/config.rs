@@ -177,6 +177,15 @@ impl PciConfigSpace {
         }
     }
 
+    /// Host-side rewrite of the model-defined Vendor/Device ID (config offsets 0x00/0x02).
+    ///
+    /// Guest BAR/command writes cannot change these bytes; this is for device-model construction
+    /// (e.g. AeroGPU bring-up reporting Bochs/QEMU Standard VGA IDs for direct comparison).
+    pub fn set_vendor_device_id(&mut self, vendor_id: u16, device_id: u16) {
+        self.bytes[0x00..0x02].copy_from_slice(&vendor_id.to_le_bytes());
+        self.bytes[0x02..0x04].copy_from_slice(&device_id.to_le_bytes());
+    }
+
     pub fn class_code(&self) -> PciClassCode {
         PciClassCode {
             revision_id: self.bytes[0x08],
@@ -288,6 +297,37 @@ impl PciConfigSpace {
         }
 
         self.bars[index].def = Some(def);
+        self.bars[index].base = 0;
+        self.bars[index].probe = false;
+        self.write_bar_base_to_bytes(index, 0);
+    }
+
+    /// Remove a BAR so config reads return 0 (unimplemented region).
+    pub fn clear_bar_definition(&mut self, index: u8) {
+        let index = usize::from(index);
+        assert!(index < self.bars.len());
+        // If this slot is the high dword of a 64-bit BAR, refuse the low slot first.
+        if index > 0
+            && matches!(
+                self.bars[index - 1].def,
+                Some(PciBarDefinition::Mmio64 { .. })
+            )
+        {
+            panic!(
+                "BAR{index} is the high dword of 64-bit BAR{}; clear BAR{} instead",
+                index - 1,
+                index - 1
+            );
+        }
+        if matches!(self.bars[index].def, Some(PciBarDefinition::Mmio64 { .. }))
+            && index + 1 < self.bars.len()
+        {
+            self.bars[index + 1].def = None;
+            self.bars[index + 1].base = 0;
+            self.bars[index + 1].probe = false;
+            self.write_bar_base_to_bytes(index + 1, 0);
+        }
+        self.bars[index].def = None;
         self.bars[index].base = 0;
         self.bars[index].probe = false;
         self.write_bar_base_to_bytes(index, 0);
@@ -783,7 +823,10 @@ impl PciConfigSpace {
 
         let bar = &self.bars[bar_index];
         let Some(def) = bar.def else {
-            return self.read_u32_from_bytes(0x10 + bar_index * 4);
+            // Undefined BAR: per PCI spec, writes are ignored and reads
+            // always return 0 (size = 0 = unused). Returning the raw stored
+            // bytes would make Win7 see a phantom IO BAR from a sizing probe.
+            return 0;
         };
 
         if bar.probe {
@@ -876,9 +919,7 @@ impl PciConfigSpace {
         }
 
         let Some(def) = self.bars[bar_index].def else {
-            // Unknown BAR type, just store raw.
-            let offset = 0x10 + bar_index * 4;
-            self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+            // Undefined BAR: ignore writes (per PCI spec, size=0=unused).
             return (bar_index, PciBarChange::Unchanged);
         };
 
@@ -965,15 +1006,6 @@ impl PciConfigSpace {
                 },
             )
         }
-    }
-
-    fn read_u32_from_bytes(&self, offset: usize) -> u32 {
-        u32::from_le_bytes([
-            self.bytes[offset],
-            self.bytes[offset + 1],
-            self.bytes[offset + 2],
-            self.bytes[offset + 3],
-        ])
     }
 }
 
@@ -1654,5 +1686,174 @@ mod tests {
                 prefetchable: false,
             },
         );
+    }
+
+    /// Win7 sizes unused BAR slots by writing 0xFFFFFFFF then reading the mask.
+    /// After we hide BAR1 (STDVGA single-BAR), that probe must stay size-0 —
+    /// a leftover probe flag or raw mask byte would resurrect a phantom aperture.
+    #[test]
+    fn clear_bar_survives_guest_sizing_probe_and_does_not_decode() {
+        let mut cfg = PciConfigSpace::new(0x1234, 0x1111);
+        cfg.set_bar_definition(
+            0,
+            PciBarDefinition::Mmio32 {
+                size: 16 * 1024 * 1024,
+                prefetchable: true,
+            },
+        );
+        cfg.set_bar_definition(
+            1,
+            PciBarDefinition::Mmio32 {
+                size: 64 * 1024 * 1024,
+                prefetchable: true,
+            },
+        );
+        cfg.set_bar_base(0, 0xe100_0000);
+        cfg.set_bar_base(1, 0xe000_0000);
+        // Guest enumerator sizes BAR1, then firmware hides it.
+        cfg.write(0x14, 4, 0xFFFF_FFFF);
+        assert_ne!(cfg.read(0x14, 4), 0, "pre-clear probe must report a size");
+        cfg.clear_bar_definition(1);
+
+        assert_eq!(cfg.bar_definition(1), None);
+        assert_eq!(cfg.bar_range(1), None);
+        // Probe again the way Win7 does: write all-ones, read mask.
+        cfg.write(0x14, 4, 0xFFFF_FFFF);
+        assert_eq!(
+            cfg.read(0x14, 4),
+            0,
+            "cleared BAR must not return a size mask after 0xFFFFFFFF probe"
+        );
+        // Programming a base into a dead slot must not create a range.
+        cfg.write(0x14, 4, 0xe000_0000);
+        assert_eq!(cfg.bar_range(1), None);
+        assert_eq!(cfg.read(0x14, 4), 0);
+        // Sub-dword read of the dead slot (BIOS often does 16-bit config).
+        assert_eq!(cfg.read(0x14, 2), 0);
+        assert_eq!(cfg.read(0x15, 1), 0);
+        // Sibling BAR0 still decodes.
+        assert_eq!(cfg.bar_range(0).unwrap().base, 0xe100_0000);
+        assert_eq!(cfg.bar_range(0).unwrap().size, 16 * 1024 * 1024);
+    }
+
+    /// Snapshot of a live 64MiB BAR1 (mid-probe) restored onto a STDVGA-shaped
+    /// config that has BAR1 cleared must not leak the old size mask.
+    #[test]
+    fn restore_of_probed_bar_onto_cleared_slot_stays_unused() {
+        let mut live = PciConfigSpace::new(0xa3a0, 0x0001);
+        live.set_bar_definition(
+            1,
+            PciBarDefinition::Mmio32 {
+                size: 64 * 1024 * 1024,
+                prefetchable: true,
+            },
+        );
+        live.write(0x14, 4, 0xFFFF_FFFF);
+        let mut state = live.snapshot_state();
+        // Hostile extra: plant a prefetchable-MMIO-looking dword in the raw image.
+        state.bytes[0x14..0x18].copy_from_slice(&0xF000_0008u32.to_le_bytes());
+        state.bar_probe[1] = true;
+        state.bar_base[1] = 0xe000_0000;
+
+        let mut stdvga = PciConfigSpace::new(0x1234, 0x1111);
+        stdvga.set_bar_definition(
+            0,
+            PciBarDefinition::Mmio32 {
+                size: 16 * 1024 * 1024,
+                prefetchable: true,
+            },
+        );
+        // BAR1 intentionally undefined (single-BAR layout).
+        stdvga.restore_state(&state);
+
+        assert_eq!(stdvga.bar_definition(1), None);
+        assert_eq!(stdvga.bar_range(1), None);
+        assert_eq!(
+            stdvga.read(0x14, 4),
+            0,
+            "restore must not expose snapshot BAR1 probe mask on a cleared slot"
+        );
+        // Re-defining after that restore must start a fresh 16MiB decode, not
+        // the 64MiB mask that was in the snapshot probe flag.
+        stdvga.set_bar_definition(
+            1,
+            PciBarDefinition::Mmio32 {
+                size: 16 * 1024 * 1024,
+                prefetchable: true,
+            },
+        );
+        stdvga.write(0x14, 4, 0xFFFF_FFFF);
+        let mask = stdvga.read(0x14, 4);
+        let decoded_size = (!(mask & 0xFFFF_FFF0)).wrapping_add(1);
+        assert_eq!(
+            decoded_size,
+            16 * 1024 * 1024,
+            "re-enabled BAR after hostile restore must size as the new definition, got mask {mask:#x}"
+        );
+    }
+
+    /// Clearing a 64-bit BAR while its high dword is mid-probe must zero both
+    /// slots so a later 32-bit BAR1 definition is not the leftover high dword.
+    #[test]
+    fn clear_64bit_bar_while_high_dword_is_probed() {
+        let mut cfg = PciConfigSpace::new(0x1234, 0x5678);
+        cfg.set_bar_definition(
+            0,
+            PciBarDefinition::Mmio64 {
+                size: 0x1_0000_0000,
+                prefetchable: false,
+            },
+        );
+        cfg.write(0x10, 4, 0xFFFF_FFFF);
+        cfg.write(0x14, 4, 0xFFFF_FFFF);
+        assert_ne!(cfg.read(0x14, 4), 0);
+
+        cfg.clear_bar_definition(0);
+        assert_eq!(cfg.bar_definition(0), None);
+        assert_eq!(cfg.bar_definition(1), None);
+        assert_eq!(cfg.read(0x10, 4), 0);
+        assert_eq!(cfg.read(0x14, 4), 0);
+
+        cfg.write(0x14, 4, 0xFFFF_FFFF);
+        assert_eq!(
+            cfg.read(0x14, 4),
+            0,
+            "former 64-bit high dword must not still be a probeable BAR"
+        );
+
+        cfg.set_bar_definition(
+            1,
+            PciBarDefinition::Mmio32 {
+                size: 0x1000,
+                prefetchable: false,
+            },
+        );
+        cfg.set_bar_base(1, 0x2000);
+        assert_eq!(cfg.bar_range(1).unwrap().base, 0x2000);
+        assert_eq!(cfg.bar_range(1).unwrap().size, 0x1000);
+    }
+
+    #[test]
+    #[should_panic(expected = "high dword")]
+    fn cannot_clear_high_dword_of_64bit_bar_independently() {
+        let mut cfg = PciConfigSpace::new(0x1234, 0x5678);
+        cfg.set_bar_definition(
+            0,
+            PciBarDefinition::Mmio64 {
+                size: 0x4000,
+                prefetchable: false,
+            },
+        );
+        cfg.clear_bar_definition(1);
+    }
+
+    #[test]
+    fn clear_of_already_empty_bar_is_idempotent() {
+        let mut cfg = PciConfigSpace::new(0x1234, 0x5678);
+        cfg.clear_bar_definition(3);
+        cfg.clear_bar_definition(3);
+        cfg.write(0x1c, 4, 0xFFFF_FFFF);
+        assert_eq!(cfg.read(0x1c, 4), 0);
+        assert_eq!(cfg.bar_range(3), None);
     }
 }

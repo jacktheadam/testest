@@ -6,7 +6,7 @@ fn device_contract_path() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }
 
@@ -172,4 +172,3 @@ fn packaging_succeeds_when_expected_addservice_is_present_in_utf16le_inf() -> an
     aero_packager::package_guest_tools(&config)?;
     Ok(())
 }
-

@@ -10,7 +10,7 @@ test("shared framebuffer smoke: CPU publishes frames via SharedArrayBuffer and G
 }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/shared-framebuffer-smoke.html", { waitUntil: "load" });
+  await page.goto("/apps/web/shared-framebuffer-smoke.html", { waitUntil: "load" });
   await waitForReady(page);
 
   const result = await page.evaluate(() => {

@@ -63,12 +63,13 @@
 //! assert_eq!(inst.length, 1);
 //! ```
 
-use aero_cpu_decoder::{decode_instruction, DecodeMode};
+use aero_cpu_decoder::{decode_instruction, DecodeError as DecoderError, DecodeMode};
 
 pub use aero_cpu_decoder::{Code, Instruction, MemorySize, Mnemonic, OpKind, Register};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeError {
+    UnexpectedEof,
     InvalidInstruction,
 }
 
@@ -86,7 +87,10 @@ pub fn decode(bytes: &[u8], ip: u64, bitness: u32) -> Result<DecodedInst, Decode
         _ => return Err(DecodeError::InvalidInstruction),
     };
 
-    let instr = decode_instruction(mode, ip, bytes).map_err(|_| DecodeError::InvalidInstruction)?;
+    let instr = decode_instruction(mode, ip, bytes).map_err(|err| match err {
+        DecoderError::EmptyInput | DecoderError::UnexpectedEof => DecodeError::UnexpectedEof,
+        DecoderError::InvalidInstruction => DecodeError::InvalidInstruction,
+    })?;
     Ok(DecodedInst {
         len: instr.len() as u8,
         instr,

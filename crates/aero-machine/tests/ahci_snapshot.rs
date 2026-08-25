@@ -119,21 +119,18 @@ fn snapshot_restore_roundtrips_ahci_state_and_redrives_intx_level() {
     let (gsi, expected_vector) = {
         let bdf = profile::SATA_AHCI_ICH9.bdf;
         let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let gsi_u8 = u8::try_from(gsi).expect("gsi must fit in ISA IRQ range for legacy PIC");
-        assert!(
-            gsi_u8 < 16,
-            "test assumes AHCI routes to a legacy PIC IRQ (0-15); got GSI {gsi}"
-        );
-        let vector = if gsi_u8 < 8 {
-            0x20u8.wrapping_add(gsi_u8)
+        let pic_irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+            .expect("Q35 PCI GSI should have a compatibility PIC route");
+        let vector = if pic_irq < 8 {
+            0x20u8.wrapping_add(pic_irq)
         } else {
-            0x28u8.wrapping_add(gsi_u8.wrapping_sub(8))
+            0x28u8.wrapping_add(pic_irq.wrapping_sub(8))
         };
 
         let mut ints = interrupts.borrow_mut();
         ints.pic_mut().set_offsets(0x20, 0x28);
         ints.pic_mut().set_masked(2, false); // unmask cascade
-        ints.pic_mut().set_masked(gsi_u8, false); // unmask routed IRQ (GSI 10-13)
+        ints.pic_mut().set_masked(pic_irq, false);
 
         (gsi, vector)
     };

@@ -3,14 +3,14 @@ This directory contains a **small unprivileged TCP relay** that makes it possibl
 
 Browsers cannot open raw TCP sockets. The only browser‑legal option is a WebSocket to a relay, which then opens TCP sockets on behalf of the browser.
 
-> Note: For local development, prefer [`net-proxy/`](../../net-proxy/) which provides the full local-dev relay surface:
+> Note: For local development, prefer [`services/net-proxy/`](../../services/net-proxy/) which provides the full local-dev relay surface:
 > `/tcp`, `/tcp-mux` (subprotocol `aero-tcp-mux-v1`), `/udp`, plus DoH `/dns-query` + `/dns-json`. It also uses the
 > same `AERO_PROXY_OPEN` / `AERO_PROXY_ALLOW` policy model as the repo’s other dev networking relays. This
 > `tools/net-proxy-server` package remains useful as a standalone mux relay for `?token=` auth compatibility testing.
 
 ## Features
 - Single **multiplexed** WebSocket session carries many logical TCP streams
-- Speaks the canonical **`aero-tcp-mux-v1`** framing used by `backend/aero-gateway`
+- Speaks the canonical **`aero-tcp-mux-v1`** framing used by `services/gateway`
   - `OPEN`, `DATA`, `CLOSE`, `ERROR`, `PING`, `PONG`
 - **Backpressure**: pauses TCP reads when the WebSocket send buffer grows too large
 - Security:
@@ -51,7 +51,7 @@ ws.binaryType = "arraybuffer";
 
 For a full browser-side implementation (stream parsing + backpressure + PING/PONG handling), see:
 
-- `web/src/net/tcpMuxProxy.ts` (`WebSocketTcpMuxProxyClient`)
+- `apps/web/src/net/tcpMuxProxy.ts` (`WebSocketTcpMuxProxyClient`)
 
 ## Security model
 This server is **powerful**: it can connect to any TCP endpoint that the host machine can reach.
@@ -74,8 +74,8 @@ This tool implements the same `/tcp-mux` framing as the production gateway.
 
 For the authoritative contract, see:
 
-- [`docs/backend/01-aero-gateway-api.md`](../../docs/backend/01-aero-gateway-api.md)
-- [`backend/aero-gateway/src/protocol/tcpMux.ts`](../../backend/aero-gateway/src/protocol/tcpMux.ts)
+- [`wiki/history/retirements.md`](wiki/history/retirements.md)
+- [`services/gateway/src/protocol/tcpMux.ts`](../../services/gateway/src/protocol/tcpMux.ts)
 
 ### Transport model
 

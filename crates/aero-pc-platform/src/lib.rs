@@ -417,12 +417,12 @@ impl PciDevice for Piix3IsaPciConfigDevice {
 impl IdePciConfigDevice {
     fn new() -> Self {
         let mut config = aero_devices::pci::profile::IDE_PIIX3.build_config_space();
-        // Legacy IDE compatibility ports.
-        config.set_bar_base(0, PRIMARY_PORTS.cmd_base as u64);
-        config.set_bar_base(1, 0x3F4); // alt-status/dev-ctl at +2 => 0x3F6
-        config.set_bar_base(2, SECONDARY_PORTS.cmd_base as u64);
-        config.set_bar_base(3, 0x374); // alt-status/dev-ctl at +2 => 0x376
+        // Only BAR4 is a PCI BAR (BMIDE). Command/control blocks are hardwired.
         config.set_bar_base(4, u64::from(Piix3IdePciDevice::DEFAULT_BUS_MASTER_BASE));
+        // PIIX3 IDETIM: bit 15 = channel decode enable. intelide.sys skips
+        // channels whose IDETIM is 0.
+        config.write(0x40, 2, 0x8000);
+        config.write(0x42, 2, 0x8000);
         Self { config }
     }
 }
@@ -1082,7 +1082,7 @@ fn sync_msix_capability_into_config(
 /// LAPIC instances so firmware can publish SMP-capable ACPI/SMBIOS tables), but the canonical
 /// integrations are still single-threaded and do not yet execute/schedule APs end-to-end.
 ///
-/// See `docs/21-smp.md` for the SMP bring-up plan/progress tracker.
+/// See the CPU and JIT area page for the SMP bring-up plan/progress tracker.
 pub struct PcPlatform {
     pub chipset: ChipsetState,
     pub io: IoPortBus,
@@ -1261,7 +1261,7 @@ impl PcPlatform {
     /// - AHCI HDD on `00:02.0` (port 0)
     /// - IDE/ATAPI on `00:01.1` (secondary master is typically used for the install ISO)
     ///
-    /// See also: `docs/05-storage-topology-win7.md` (canonical PCI BDFs + media attachment mapping).
+    /// See also: `wiki/areas/storage.md` (canonical PCI BDFs + media attachment mapping).
     pub fn new_with_win7_storage(ram_size: usize) -> Self {
         Self::new_with_config(
             ram_size,
@@ -1291,7 +1291,7 @@ impl PcPlatform {
     /// - AHCI HDD on `00:02.0` (port 0)
     /// - IDE/ATAPI CD-ROM on `00:01.1` (secondary channel, master drive)
     ///
-    /// For the normative contract, see: `docs/05-storage-topology-win7.md`.
+    /// For the normative contract, see: `wiki/areas/storage.md`.
     pub fn new_with_windows7_storage_topology(
         ram_size: usize,
         storage: Windows7StorageTopologyConfig,
@@ -1439,9 +1439,8 @@ impl PcPlatform {
                 // share the RAM backing store and construct a minimal `PhysicalMemoryBus` for the
                 // controller's DMA path.
                 let shared_ram = SharedGuestMemory::new(ram);
-                let dma_bus: Rc<RefCell<dyn memory::MemoryBus>> = Rc::new(RefCell::new(
-                    PhysicalMemoryBus::new(Box::new(shared_ram.clone())),
-                ));
+                let dma_bus: Rc<RefCell<dyn memory::MemoryBus>> =
+                    Rc::new(RefCell::new(PhysicalMemoryBus::new(shared_ram.clone())));
 
                 let memory = match dirty_page_size {
                     Some(page_size) => {
@@ -1932,6 +1931,10 @@ impl PcPlatform {
                     .expect("in-memory IDE disk should be 512-byte aligned");
                 ide.borrow_mut().controller.attach_primary_master_ata(drive);
             }
+            ide.borrow_mut().attach_irq_lines(
+                Box::new(ide_irq14_line.clone()),
+                Box::new(ide_irq15_line.clone()),
+            );
 
             let profile = aero_devices::pci::profile::IDE_PIIX3;
             let bdf = profile.bdf;
@@ -2453,6 +2456,14 @@ impl PcPlatform {
         pm.trigger_power_button();
     }
 
+    /// Latch only `PM1_STS.PWRBTN_STS` (no `WAK_STS`).
+    ///
+    /// Needed for Win7 HAL fixed-feature power-button polls that require bit 0x100 set and
+    /// bit 0x8000 clear.
+    pub fn acpi_power_button(&mut self) {
+        self.acpi_pm.borrow_mut().trigger_power_button();
+    }
+
     pub fn has_e1000(&self) -> bool {
         self.e1000.is_some()
     }
@@ -2815,6 +2826,36 @@ impl PcPlatform {
         if let Some(cfg) = self.pci_cfg.borrow_mut().bus_mut().device_config_mut(bdf) {
             if let Some(msi) = cfg.capability_mut::<MsiCapability>() {
                 msi.set_pending_bits(pending_bits);
+            }
+        }
+    }
+
+    /// Ensure both PIIX3 IDE channels have IDETIM decode-enable set in the
+    /// guest-visible PCI config (the bus copy intelide.sys actually reads).
+    ///
+    /// Older snapshots store those registers as 0. Without this, Win7 starts
+    /// `intelide` with no channel PDOs and never sees the ATAPI CD-ROM.
+    pub fn enable_piix3_ide_channel_decode(&mut self) {
+        let bdf = aero_devices::pci::profile::IDE_PIIX3.bdf;
+        if let Some(cfg) = self.pci_cfg.borrow_mut().bus_mut().device_config_mut(bdf) {
+            let primary = cfg.read(0x40, 2) as u16;
+            let secondary = cfg.read(0x42, 2) as u16;
+            if primary & 0x8000 == 0 {
+                cfg.write(0x40, 2, 0x8000);
+            }
+            if secondary & 0x8000 == 0 {
+                cfg.write(0x42, 2, 0x8000);
+            }
+        }
+        if let Some(ide) = &self.ide {
+            let mut ide = ide.borrow_mut();
+            let primary = ide.config_mut().read(0x40, 2) as u16;
+            let secondary = ide.config_mut().read(0x42, 2) as u16;
+            if primary & 0x8000 == 0 {
+                ide.config_mut().write(0x40, 2, 0x8000);
+            }
+            if secondary & 0x8000 == 0 {
+                ide.config_mut().write(0x42, 2, 0x8000);
             }
         }
     }

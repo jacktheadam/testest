@@ -978,6 +978,10 @@ fn alu_result(op: AluOp, lhs: u64, rhs: u64, cf_in: bool, size: usize) -> u64 {
         AluOp::And => (lhs & rhs) & mask,
         AluOp::Or => (lhs | rhs) & mask,
         AluOp::Xor => (lhs ^ rhs) & mask,
+        AluOp::Imul => lhs.wrapping_mul(rhs) & mask,
+        AluOp::Shl | AluOp::Shr | AluOp::Sar => {
+            unreachable!("shift AluOp is not used on the atomic path")
+        }
     }
 }
 
@@ -990,6 +994,10 @@ fn apply_alu(cpu: &mut Cpu, op: AluOp, lhs: u64, rhs: u64, cf_in: bool, size: us
         AluOp::And => alu::logic_with_flags(&mut cpu.rflags, lhs & rhs, size),
         AluOp::Or => alu::logic_with_flags(&mut cpu.rflags, lhs | rhs, size),
         AluOp::Xor => alu::logic_with_flags(&mut cpu.rflags, lhs ^ rhs, size),
+        AluOp::Imul => lhs.wrapping_mul(rhs) & mask_for_size(size),
+        AluOp::Shl | AluOp::Shr | AluOp::Sar => {
+            unreachable!("shift AluOp is not used on the atomic path")
+        }
     }
 }
 

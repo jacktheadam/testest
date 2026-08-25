@@ -35,7 +35,7 @@ fn disk_error_to_io(err: crate::DiskError) -> io::Error {
 ///
 /// This trait is a small, `std::io`-oriented helper and is **not** the repo's canonical random-access
 /// storage abstraction. Prefer `aero_storage::StorageBackend` / `aero_storage::VirtualDisk` for the
-/// main synchronous disk/controller stack (see `docs/20-storage-trait-consolidation.md`).
+/// main synchronous disk/controller stack (see `wiki/areas/storage.md`).
 pub trait OpfsSyncFileHandle {
     fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<usize>;
     fn write_at(&mut self, offset: u64, buf: &[u8]) -> io::Result<usize>;

@@ -301,7 +301,8 @@ fn reset_is_deterministic_and_preserves_ram_allocation() {
     // pending IRQ despite the call.
     assert_eq!(plat.interrupts.borrow().get_pending(), None);
     let gsi = plat.pci_intx.gsi_for_intx(uhci_bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("PCI INTx GSI should fit in an ISA IRQ number");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
     {
         let mut interrupts = plat.interrupts.borrow_mut();
         interrupts.pic_mut().set_offsets(0x20, 0x28);

@@ -1,7 +1,7 @@
 //! Guards the canonical Windows 7 storage PCI topology against accidental drift.
 //!
 //! If you update any of these values, also update:
-//! - `docs/05-storage-topology-win7.md`
+//! - `wiki/areas/storage.md`
 //! - `crates/devices/tests/win7_storage_topology.rs`
 //! - `crates/aero-machine/tests/machine_win7_storage_topology.rs`
 //! - `crates/aero-pc-platform/tests/pc_platform_win7_storage.rs`
@@ -20,7 +20,7 @@ use aero_machine::{Machine, MachineConfig};
 fn machine_win7_storage_topology_has_stable_bdfs_and_interrupt_lines() {
     // Freeze the canonical BDFs (bus:device.function) for the Win7 storage topology.
     //
-    // This is the contract documented in `docs/05-storage-topology-win7.md`; if any of these
+    // This is the contract documented in `wiki/areas/storage.md`; if any of these
     // change, Windows 7 installation/boot behavior (and snapshot + frontend expectations) may
     // drift.
     const ISA_BDF: PciBdf = PciBdf::new(0, 1, 0);
@@ -77,18 +77,18 @@ fn machine_win7_storage_topology_has_stable_bdfs_and_interrupt_lines() {
     // --- Interrupt Line values match the default router swizzle ---
     //
     // Under `PciIntxRouterConfig::default()`:
-    // - PIRQ[A-D] -> GSI[10,11,12,13]
+    // - Q35 root-bus PIRQ group -> GSI[20,21,22,23]
     // - Root-bus swizzle: PIRQ = (INTx + device_number) mod 4
     let router = PciIntxRouter::new(PciIntxRouterConfig::default());
 
-    // IDE 00:01.1 INTA -> GSI 11.
+    // IDE 00:01.1 INTA -> GSI 21.
     {
         let cfg = bus
             .device_config_mut(IDE_BDF)
             .expect("IDE_PIIX3 config function missing from PCI bus");
 
         let expected_gsi = router.gsi_for_intx(IDE_BDF, PciInterruptPin::IntA);
-        assert_eq!(expected_gsi, 11, "IDE expected GSI drifted");
+        assert_eq!(expected_gsi, 21, "IDE expected GSI drifted");
         assert_eq!(
             cfg.interrupt_line(),
             expected_gsi as u8,
@@ -107,31 +107,13 @@ fn machine_win7_storage_topology_has_stable_bdfs_and_interrupt_lines() {
             "IDE_PIIX3 BAR4 definition drifted"
         );
 
-        // Freeze legacy-compat BAR base assignments so firmware/OSes that assume PC-like port
-        // layouts continue to work. These are documented in `docs/05-storage-topology-win7.md`.
-        //
-        // Note: These are hard-coded numeric constants (not derived from device-model constants)
-        // so this test truly freezes the canonical Windows 7 ABI.
-        assert_eq!(
-            cfg.bar_range(0).map(|r| (r.kind, r.base, r.size)),
-            Some((PciBarKind::Io, 0x1F0, 8)),
-            "IDE_PIIX3 BAR0 (primary cmd block) drifted"
-        );
-        assert_eq!(
-            cfg.bar_range(1).map(|r| (r.kind, r.base, r.size)),
-            Some((PciBarKind::Io, 0x3F4, 4)),
-            "IDE_PIIX3 BAR1 (primary control block base) drifted"
-        );
-        assert_eq!(
-            cfg.bar_range(2).map(|r| (r.kind, r.base, r.size)),
-            Some((PciBarKind::Io, 0x170, 8)),
-            "IDE_PIIX3 BAR2 (secondary cmd block) drifted"
-        );
-        assert_eq!(
-            cfg.bar_range(3).map(|r| (r.kind, r.base, r.size)),
-            Some((PciBarKind::Io, 0x374, 4)),
-            "IDE_PIIX3 BAR3 (secondary control block base) drifted"
-        );
+        // QEMU PIIX3 ABI: command/control blocks are hardwired, not PCI BARs.
+        // Only BAR4 (BMIDE at 0xC000) is guest-visible. Documented in
+        // `wiki/areas/storage.md`.
+        assert_eq!(cfg.bar_definition(0), None, "IDE_PIIX3 BAR0 must stay unimplemented");
+        assert_eq!(cfg.bar_definition(1), None, "IDE_PIIX3 BAR1 must stay unimplemented");
+        assert_eq!(cfg.bar_definition(2), None, "IDE_PIIX3 BAR2 must stay unimplemented");
+        assert_eq!(cfg.bar_definition(3), None, "IDE_PIIX3 BAR3 must stay unimplemented");
         assert_eq!(
             cfg.bar_range(4).map(|r| (r.kind, r.base, r.size)),
             Some((PciBarKind::Io, 0xC000, 16)),
@@ -139,14 +121,14 @@ fn machine_win7_storage_topology_has_stable_bdfs_and_interrupt_lines() {
         );
     }
 
-    // AHCI 00:02.0 INTA -> GSI 12.
+    // AHCI 00:02.0 INTA -> GSI 22.
     {
         let cfg = bus
             .device_config_mut(AHCI_BDF)
             .expect("SATA_AHCI_ICH9 config function missing from PCI bus");
 
         let expected_gsi = router.gsi_for_intx(AHCI_BDF, PciInterruptPin::IntA);
-        assert_eq!(expected_gsi, 12, "AHCI expected GSI drifted");
+        assert_eq!(expected_gsi, 22, "AHCI expected GSI drifted");
         assert_eq!(
             cfg.interrupt_line(),
             expected_gsi as u8,
@@ -197,7 +179,7 @@ fn machine_win7_storage_topology_nvme_enabled_has_canonical_bdf_and_interrupt_li
     let bus = pci_cfg.bus_mut();
 
     // Under `PciIntxRouterConfig::default()`:
-    // - PIRQ[A-D] -> GSI[10,11,12,13]
+    // - Q35 root-bus PIRQ group -> GSI[20,21,22,23]
     // - Root-bus swizzle: PIRQ = (INTx + device_number) mod 4
     let router = PciIntxRouter::new(PciIntxRouterConfig::default());
 
@@ -232,9 +214,9 @@ fn machine_win7_storage_topology_nvme_enabled_has_canonical_bdf_and_interrupt_li
     assert_ne!(bar0.base, 0);
     assert_eq!(bar0.base & (NVME_BAR0_SIZE - 1), 0);
 
-    // NVMe 00:03.0 INTA -> GSI 13.
+    // NVMe 00:03.0 INTA -> GSI 23.
     let expected_gsi = router.gsi_for_intx(NVME_BDF, PciInterruptPin::IntA);
-    assert_eq!(expected_gsi, 13, "NVMe expected GSI drifted");
+    assert_eq!(expected_gsi, 23, "NVMe expected GSI drifted");
     assert_eq!(
         cfg.interrupt_line(),
         expected_gsi as u8,

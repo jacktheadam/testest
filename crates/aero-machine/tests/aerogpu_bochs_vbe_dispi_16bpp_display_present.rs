@@ -30,6 +30,10 @@ fn aerogpu_bochs_vbe_dispi_16bpp_display_present_respects_offsets_and_stride() {
     m.io_write(0x01CF, 2, 2); // yres
     m.io_write(0x01CE, 2, 0x0003);
     m.io_write(0x01CF, 2, 16); // bpp
+
+    // Bochs resets virtual geometry on the disabled-to-enabled edge.
+    m.io_write(0x01CE, 2, 0x0004);
+    m.io_write(0x01CF, 2, 0x0041); // enable + lfb
     m.io_write(0x01CE, 2, 0x0006);
     m.io_write(0x01CF, 2, 4); // virt_width
     m.io_write(0x01CE, 2, 0x0007);
@@ -38,8 +42,6 @@ fn aerogpu_bochs_vbe_dispi_16bpp_display_present_respects_offsets_and_stride() {
     m.io_write(0x01CF, 2, 1); // x_offset
     m.io_write(0x01CE, 2, 0x0009);
     m.io_write(0x01CF, 2, 1); // y_offset
-    m.io_write(0x01CE, 2, 0x0004);
-    m.io_write(0x01CF, 2, 0x0041); // enable + lfb
 
     let base = m.vbe_lfb_base();
 
@@ -83,6 +85,10 @@ fn aerogpu_bochs_vbe_dispi_32bpp_display_present_respects_offsets_and_stride() {
     m.io_write(0x01CF, 2, 2); // yres
     m.io_write(0x01CE, 2, 0x0003);
     m.io_write(0x01CF, 2, 32); // bpp
+
+    // Bochs resets virtual geometry on the disabled-to-enabled edge.
+    m.io_write(0x01CE, 2, 0x0004);
+    m.io_write(0x01CF, 2, 0x0041); // enable + lfb
     m.io_write(0x01CE, 2, 0x0006);
     m.io_write(0x01CF, 2, 4); // virt_width
     m.io_write(0x01CE, 2, 0x0007);
@@ -91,8 +97,6 @@ fn aerogpu_bochs_vbe_dispi_32bpp_display_present_respects_offsets_and_stride() {
     m.io_write(0x01CF, 2, 1); // x_offset
     m.io_write(0x01CE, 2, 0x0009);
     m.io_write(0x01CF, 2, 1); // y_offset
-    m.io_write(0x01CE, 2, 0x0004);
-    m.io_write(0x01CF, 2, 0x0041); // enable + lfb
 
     let base = m.vbe_lfb_base();
 

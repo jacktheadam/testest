@@ -1390,7 +1390,7 @@ mod wasm {
             let (framebuffer_texture, framebuffer_view) =
                 create_framebuffer_texture(&device, fb_w, fb_h);
 
-            // Default present policy (docs/04-graphics-subsystem.md):
+            // Default present policy (wiki/areas/graphics.md):
             // - input framebuffer is linear RGBA8 (rgba8unorm)
             // - output is sRGB
             // - alpha is forced opaque
@@ -1860,7 +1860,7 @@ mod wasm {
             let Some(frame) =
                 acquire_surface_frame(&mut self.surface, device, &self.config, self.backend_kind)?
             else {
-                // docs/04-graphics-subsystem.md: SurfaceError::Timeout drops the frame (warn) and
+                // wiki/areas/graphics.md: SurfaceError::Timeout drops the frame (warn) and
                 // continues without throwing.
                 return Ok(false);
             };
@@ -2376,7 +2376,7 @@ mod wasm {
             let Some(frame) =
                 acquire_surface_frame(&mut self.surface, device, &self.config, self.backend_kind)?
             else {
-                // SurfaceError::Timeout drops the frame (docs/04-graphics-subsystem.md).
+                // SurfaceError::Timeout drops the frame (wiki/areas/graphics.md).
                 return Ok(());
             };
             let view = frame
@@ -2442,7 +2442,7 @@ mod wasm {
             let Some(frame) =
                 acquire_surface_frame(&mut self.surface, device, &self.config, self.backend_kind)?
             else {
-                // SurfaceError::Timeout drops the frame (docs/04-graphics-subsystem.md).
+                // SurfaceError::Timeout drops the frame (wiki/areas/graphics.md).
                 return Ok(());
             };
             let view = frame
@@ -2588,7 +2588,7 @@ mod wasm {
     }
 
     fn choose_surface_format(formats: &[wgpu::TextureFormat]) -> wgpu::TextureFormat {
-        // Prefer an sRGB surface format (docs/04-graphics-subsystem.md).
+        // Prefer an sRGB surface format (wiki/areas/graphics.md).
         for &fmt in formats {
             if matches!(
                 fmt,
@@ -2676,7 +2676,7 @@ mod wasm {
         after_reconfigure: bool,
     ) -> Result<Option<F>, JsValue> {
         match err {
-            // docs/04-graphics-subsystem.md: timeouts should drop the frame (warn) and continue
+            // wiki/areas/graphics.md: timeouts should drop the frame (warn) and continue
             // without throwing. Do not reconfigure the surface.
             wgpu::SurfaceError::Timeout => {
                 push_gpu_event(
@@ -2705,7 +2705,7 @@ mod wasm {
                 Err(JsValue::from_str("Surface out of memory"))
             }
             // These are expected surface lifecycle events. If the recovery attempt fails, drop the
-            // frame (warn) rather than throwing (docs/04-graphics-subsystem.md).
+            // frame (warn) rather than throwing (wiki/areas/graphics.md).
             wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated => {
                 push_gpu_event(
                     GpuErrorEvent::now(
@@ -2728,7 +2728,7 @@ mod wasm {
         match surface.acquire() {
             Ok(frame) => Ok(Some(frame)),
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                // Reconfigure and retry once (docs/04-graphics-subsystem.md).
+                // Reconfigure and retry once (wiki/areas/graphics.md).
                 //
                 // Note: This is *surface* recovery (reconfigure + reacquire), not device-lost
                 // recovery. Only `surface_reconfigures` should be incremented here; the
@@ -3532,7 +3532,7 @@ mod wasm {
     /// Present an RGBA8888 frame and return whether it was actually presented.
     ///
     /// Returns `false` when the frame is intentionally dropped due to surface acquire failures
-    /// (e.g. timeout, lost/outdated after reconfigure), matching docs/04.
+    /// (e.g. timeout, lost/outdated after reconfigure), matching wiki/areas/graphics.md.
     #[wasm_bindgen]
     pub fn present_rgba8888_with_result(frame: &[u8], stride_bytes: u32) -> Result<bool, JsValue> {
         with_state_mut(|state| {

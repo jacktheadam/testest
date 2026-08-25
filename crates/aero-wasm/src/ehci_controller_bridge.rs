@@ -3,7 +3,7 @@
 //! The browser I/O worker exposes this as a PCI device with an MMIO BAR; MMIO reads/writes are
 //! forwarded into this bridge which updates a Rust EHCI model (`aero_usb::ehci::EhciController`).
 //!
-//! Design notes + emulator/runtime contracts: see `docs/usb-ehci.md`.
+//! Design notes + emulator/runtime contracts: see the USB and input area page.
 //!
 //! EHCI schedules (periodic/asynchronous lists, qTDs, etc.) live in guest RAM. In the browser
 //! runtime, guest physical address 0 begins at `guest_base` within the WASM linear memory; this

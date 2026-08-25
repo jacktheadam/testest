@@ -12,7 +12,7 @@ pub enum OpfsBackendMode {
     /// `aero_storage::{StorageBackend, VirtualDisk}` traits used by the boot-critical Rust
     /// controller path.
     ///
-    /// See `docs/19-indexeddb-storage-story.md` and `docs/20-storage-trait-consolidation.md`.
+    /// See `wiki/areas/storage.md`.
     IndexedDb,
 }
 
@@ -363,7 +363,7 @@ mod wasm {
     //
     // Higher layers in this repo avoid requiring `Send` on wasm32 for disk backends so browser
     // storage can plug into the synchronous `aero_storage::VirtualDisk` stack without an unsound
-    // `unsafe impl Send` shim. See `docs/20-storage-trait-consolidation.md`.
+    // `unsafe impl Send` shim. See `wiki/areas/storage.md`.
 
     impl core::fmt::Debug for OpfsBackend {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -1088,7 +1088,7 @@ mod wasm {
     /// (used by Aero's synchronous Rust AHCI/IDE controller path) in the same Worker, because
     /// IndexedDB does not provide synchronous read/write semantics.
     ///
-    /// See `docs/19-indexeddb-storage-story.md` and `docs/20-storage-trait-consolidation.md`.
+    /// See `wiki/areas/storage.md`.
     ///
     /// As a guardrail, this type intentionally does **not** implement
     /// [`aero_storage::StorageBackend`]:
@@ -1252,7 +1252,7 @@ mod wasm {
         /// `DiskError::NotSupported` instead of assuming `OpfsStorage::open(...).await.into_sync()`
         /// will succeed.
         ///
-        /// See `docs/20-storage-trait-consolidation.md` and `docs/19-indexeddb-storage-story.md`.
+        /// See `wiki/areas/storage.md`.
         pub async fn open(path: &str, create: bool, size_bytes: u64) -> DiskResult<Self> {
             match OpfsBackend::open(path, create, size_bytes).await {
                 Ok(backend) => Ok(Self::Sync(backend)),
@@ -1725,8 +1725,7 @@ mod native {
     /// IndexedDB is async-only and this type intentionally does **not** implement
     /// [`aero_storage::StorageBackend`]. See:
     ///
-    /// - `docs/19-indexeddb-storage-story.md`
-    /// - `docs/20-storage-trait-consolidation.md`
+    /// - `wiki/areas/storage.md`
     ///
     /// ```compile_fail,E0277
     /// use aero_storage::StorageBackend;

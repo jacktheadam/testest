@@ -1,4 +1,4 @@
-import { formatOneLineError as formatOneLineErrorShared } from "./_shared/text_one_line.js";
+import { formatOneLineError as formatOneLineErrorShared } from "../../packages/transport-safety/src/text.js";
 
 const ERROR_FMT_OPTS = Object.freeze({ includeNameFallback: true });
 

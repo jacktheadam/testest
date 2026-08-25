@@ -50,8 +50,8 @@ fn clearing_srst_resets_stream_engine_state() {
         sd.cbl = 0x4000;
         sd.lvi = 0;
         sd.fmt = fmt_raw;
-        // SRST | RUN | IOCE | stream number 1.
-        sd.ctl = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 20);
+        // RUN | IOCE | stream number 1 (SRST=0: reset complete).
+        sd.ctl = (1 << 1) | (1 << 2) | (1 << 20);
     }
 
     // Enable stream 0 interrupt + global interrupt.
@@ -64,8 +64,10 @@ fn clearing_srst_resets_stream_engine_state() {
     assert_ne!(hda.mmio_read(REG_SD0STS, 1) as u8 & SD_STS_BCIS, 0);
     assert_ne!(hda.mmio_read(REG_INTSTS, 4) as u32 & 1, 0);
 
-    // Clear SRST while keeping RUN set (write low byte: RUN=1, SRST=0).
-    hda.mmio_write(REG_SD0CTL, 1, 0x02);
+    // Assert SRST (bit 0), then clear it while keeping RUN set.
+    // The SRST 1→0 transition resets the stream engine state.
+    hda.mmio_write(REG_SD0CTL, 1, 0x03); // SRST=1 | RUN=1
+    hda.mmio_write(REG_SD0CTL, 1, 0x02); // SRST=0 | RUN=1
 
     assert_eq!(hda.stream_mut(0).lpib, 0);
     assert_eq!(hda.mmio_read(REG_SD0STS, 1) as u8 & SD_STS_BCIS, 0);

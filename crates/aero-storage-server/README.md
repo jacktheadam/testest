@@ -98,7 +98,7 @@ directory listing (development only).
 ## Chunked disk images (no-Range delivery)
 
 In addition to HTTP `Range` streaming, `aero-storage-server` can serve **pre-chunked** disk images
-using the chunked format described in [`docs/18-chunked-disk-image-format.md`](../../docs/18-chunked-disk-image-format.md).
+using the chunked format described in [`wiki/areas/storage.md`](wiki/areas/storage.md).
 
 On-disk layout under `--images-root`:
 

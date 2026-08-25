@@ -35,13 +35,16 @@ function gitFileMode(relPath) {
 function trackedShellScripts() {
   // Enumerate via git so the test doesn't accidentally recurse into large
   // untracked dirs (node_modules/, target/, etc.) in local checkouts.
+  // Skip files deleted in the working tree but not yet committed (purges are
+  // uncommitted by policy, so git ls-files still lists them).
   return execFileSync("git", ["ls-files"], {
     cwd: repoRoot,
     encoding: "utf8",
   })
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && line.endsWith(".sh"));
+    .filter((line) => line.length > 0 && line.endsWith(".sh"))
+    .filter((line) => fs.existsSync(path.join(repoRoot, line)));
 }
 
 function scriptsReferencedByDocs() {
@@ -68,6 +71,9 @@ function scriptsReferencedByDocs() {
   const missing = [];
   for (const relDocPath of markdownFiles) {
     const absDocPath = path.join(repoRoot, relDocPath);
+    // Skip files deleted in the working tree but not yet committed (purges are
+    // uncommitted by policy, so git ls-files still lists them).
+    if (!fs.existsSync(absDocPath)) continue;
     const content = fs.readFileSync(absDocPath, "utf8");
     for (const m of content.matchAll(re)) {
       const match = m[2];

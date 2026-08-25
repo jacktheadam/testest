@@ -65,7 +65,10 @@ fn pc_platform_gates_e1000_dma_on_pci_bus_master_enable() {
     let mut pc = PcPlatform::new_with_e1000(2 * 1024 * 1024);
     let bdf = NIC_E1000_82540EM.bdf;
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     let command = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x04) & 0xffff;
     assert_ne!(
@@ -165,7 +168,10 @@ fn pc_platform_gates_e1000_tx_dma_on_pci_bus_master_enable() {
     let mut pc = PcPlatform::new_with_e1000(2 * 1024 * 1024);
     let bdf = NIC_E1000_82540EM.bdf;
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     let command = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x04) & 0xffff;
     assert_ne!(

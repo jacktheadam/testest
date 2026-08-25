@@ -125,7 +125,7 @@ The `Element` values are encoded as the standard BCD element record:
 
 `[u32 element_type][u32 data_len][data...]`
 
-(See `docs/win7-bcd-offline-patching.md` for details.)
+(See `wiki/areas/drivers-windows.md` for details.)
 
 Both patches target the well-known BCD “library settings” objects which Win7 loader entries commonly inherit:
 
@@ -133,7 +133,7 @@ Both patches target the well-known BCD “library settings” objects which Win7
 - `{bootloadersettings}` (GUID `{6efb52bf-1766-41db-a6b3-0ee5eff72bd7}`)
 
 For maximum robustness across OEM media, you may also need to set these elements on the actual OS loader objects;
-see `docs/win7-bcd-offline-patching.md`.
+see `wiki/areas/drivers-windows.md`.
 
 ### Windows (reg.exe / reg import)
 

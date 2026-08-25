@@ -1387,55 +1387,67 @@ impl NetworkStack {
             None => return,
         };
 
-        let Ok(tcp_payload) = TcpSegmentBuilder {
-            src_port: remote_port,
-            dst_port: guest_port,
-            seq_number,
-            ack_number,
-            flags: TcpFlags::ACK | TcpFlags::PSH,
-            window_size: 65535,
-            urgent_pointer: 0,
-            options: &[],
-            payload: &data,
-        }
-        .build_vec(remote_ip, self.cfg.guest_ip) else {
-            return;
-        };
+        // Segment the data into MSS-sized chunks to avoid producing oversized
+        // Ethernet frames that would be silently dropped by the L2 encoder
+        // (2048-byte limit) or the E1000 RX path (1522-byte limit).
+        // Without segmentation, any data read larger than ~1460 bytes produces
+        // a frame that is dropped, but the send sequence was already advanced
+        // past it → permanent connection stall.
+        const TCP_MSS: usize = 1460;
+        for chunk_start in (0..data.len()).step_by(TCP_MSS) {
+            let chunk_end = (chunk_start + TCP_MSS).min(data.len());
+            let chunk = &data[chunk_start..chunk_end];
 
-        // Now that the segment is built, advance the send sequence number.
+            let Ok(tcp_payload) = TcpSegmentBuilder {
+                src_port: remote_port,
+                dst_port: guest_port,
+                seq_number: seq_number.wrapping_add(chunk_start as u32),
+                ack_number,
+                flags: TcpFlags::ACK | TcpFlags::PSH,
+                window_size: 65535,
+                urgent_pointer: 0,
+                options: &[],
+                payload: chunk,
+            }
+            .build_vec(remote_ip, self.cfg.guest_ip) else {
+                continue;
+            };
+
+            let Ok(ip) = Ipv4PacketBuilder {
+                dscp_ecn: 0,
+                identification: self.next_ipv4_ident(),
+                flags_fragment: 0x4000, // DF
+                ttl: 64,
+                protocol: Ipv4Protocol::TCP,
+                src_ip: remote_ip,
+                dst_ip: self.cfg.guest_ip,
+                options: &[],
+                payload: &tcp_payload,
+            }
+            .build_vec() else {
+                continue;
+            };
+
+            let Ok(eth) = EthernetFrameBuilder {
+                dest_mac: guest_mac,
+                src_mac: self.cfg.our_mac,
+                ethertype: EtherType::IPV4,
+                payload: &ip,
+            }
+            .build_vec() else {
+                continue;
+            };
+
+            out.push(Action::EmitFrame(eth));
+        }
+
+        // Now that all segments have been emitted, advance the send sequence.
         {
             let Some(conn) = self.tcp.get_mut(&key) else {
                 return;
             };
             conn.our_next_seq = conn.our_next_seq.wrapping_add(data.len() as u32);
         }
-
-        let Ok(ip) = Ipv4PacketBuilder {
-            dscp_ecn: 0,
-            identification: self.next_ipv4_ident(),
-            flags_fragment: 0x4000, // DF
-            ttl: 64,
-            protocol: Ipv4Protocol::TCP,
-            src_ip: remote_ip,
-            dst_ip: self.cfg.guest_ip,
-            options: &[],
-            payload: &tcp_payload,
-        }
-        .build_vec() else {
-            return;
-        };
-
-        let Ok(eth) = EthernetFrameBuilder {
-            dest_mac: guest_mac,
-            src_mac: self.cfg.our_mac,
-            ethertype: EtherType::IPV4,
-            payload: &ip,
-        }
-        .build_vec() else {
-            return;
-        };
-
-        out.push(Action::EmitFrame(eth));
     }
 
     fn emit_tcp_syn_ack(&mut self, conn: &TcpConn) -> Vec<Action> {

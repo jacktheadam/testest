@@ -48,8 +48,8 @@ msbuild .\drivers\aerogpu\aerogpu.sln /m /t:Build /p:Configuration=Release /p:Pl
 For a fully scripted/reproducible build (matching CI), see `drivers/aerogpu/build/README.md` and `docs/16-windows7-driver-build-and-signing.md`:
 
 ```powershell
-.\ci\install-wdk.ps1
-.\ci\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers aerogpu
+.\drivers\build\install-wdk.ps1
+.\drivers\build\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers aerogpu
 ```
 
 Note: CI scripts only build/package drivers that include `ci-package.json` at the driver root (explicit opt-in).

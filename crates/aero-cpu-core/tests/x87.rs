@@ -158,3 +158,39 @@ fn reverse_sub_and_div_variants_behave_plausibly() {
     fpu.fdivrp_sti_st0(1).unwrap(); // ST1 = ST0 / ST1; pop
     assert_eq!(fpu.st(0), Some(5.0));
 }
+
+#[test]
+fn fyl2x_f2xm1_fscale_fsqrt_frndint_match_ieee() {
+    let mut fpu = X87::default();
+    fpu.fld_f64(2.0).unwrap();
+    fpu.fld_f64(8.0).unwrap(); // ST0=8, ST1=2
+    fpu.fyl2x().unwrap(); // 2 * log2(8) = 6
+    assert_eq!(fpu.st(0), Some(6.0));
+
+    let mut fpu = X87::default();
+    fpu.fld_f64(1.0).unwrap();
+    fpu.f2xm1().unwrap(); // 2^1 - 1 = 1
+    assert_eq!(fpu.st(0), Some(1.0));
+
+    let mut fpu = X87::default();
+    fpu.fld_f64(3.0).unwrap();
+    fpu.fld_f64(1.5).unwrap(); // ST0=1.5, ST1=3
+    fpu.fscale().unwrap(); // 1.5 * 2^3 = 12
+    assert_eq!(fpu.st(0), Some(12.0));
+    assert_eq!(fpu.st(1), Some(3.0));
+
+    let mut fpu = X87::default();
+    fpu.fld_f64(9.0).unwrap();
+    fpu.fsqrt().unwrap();
+    assert_eq!(fpu.st(0), Some(3.0));
+
+    let mut fpu = X87::default();
+    fpu.fld_f64(2.4).unwrap();
+    fpu.frndint().unwrap(); // default RC = nearest-even
+    assert_eq!(fpu.st(0), Some(2.0));
+
+    let mut fpu = X87::default();
+    fpu.fldln2().unwrap();
+    let ln2 = fpu.st(0).unwrap();
+    assert!((ln2 - core::f64::consts::LN_2).abs() < 1e-15);
+}

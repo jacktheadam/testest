@@ -80,7 +80,7 @@ fn hpet_sync_levels_to_sink_does_not_deassert_unrelated_lines_for_irq_disabled_t
     // Enable HPET, but do not enable any timer interrupts (default timer2 route is GSI10).
     hpet.mmio_write(HPET_REG_GENERAL_CONFIG, 8, HPET_GEN_CONF_ENABLE, &mut sink);
 
-    // Simulate another device asserting GSI10 (e.g. PCI INTx).
+    // Simulate another platform source asserting GSI10.
     sink.raise_gsi(10);
     assert!(sink.is_asserted(10));
     sink.take_events();

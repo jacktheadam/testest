@@ -377,7 +377,7 @@ mod wasm {
     ) -> Result<FileSystemWritableFileStream, DiskError> {
         // Some browser implementations reject the `createWritable(options)` options-bag overload,
         // but still support `createWritable()` without arguments. Mirror the safe overwrite
-        // fallback pattern described in `docs/11-browser-apis.md`.
+        // fallback pattern described in `wiki/areas/web-host.md`.
         //
         // NOTE: Current callers all pass `keep_existing_data = true`. When we fall back to the
         // no-args overload, we assume it preserves existing data by default on these older

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { VmCoordinator } from "../src/emulator/vmCoordinator.js";
+import { VmCoordinator } from "../apps/web/src/emulator/vmCoordinator.js";
 import { withCustomEventOverride } from "./helpers/custom_event_env.js";
 
 test("emulator/vmCoordinator: _emitError does not throw on hostile proxy errors", () => {

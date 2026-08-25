@@ -76,4 +76,3 @@ fn aero_iso_cli_source_date_epoch_env_and_arg_are_deterministic() -> anyhow::Res
 
     Ok(())
 }
-

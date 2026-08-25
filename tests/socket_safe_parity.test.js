@@ -1,8 +1,18 @@
+/**
+ * The CommonJS surface really does expose what the ES module does.
+ *
+ * The implementation is the ES module; the `.cjs` file is a one-line `require()` of it, which the
+ * pinned Node can do synchronously. That makes divergence impossible in principle — but only if
+ * the wrapper actually re-exports, so these still check.
+ *
+ * Note the default import: a namespace import cannot see names through a `require()` wrapper,
+ * because the lexer has nothing static to read. `module.exports` arrives as the default.
+ */
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import * as esm from "../src/socket_safe.js";
-import * as cjs from "../src/socket_safe.cjs";
+import * as esm from "../packages/transport-safety/src/socket_safe.js";
+import cjs from "../packages/transport-safety/src/socket_safe.cjs";
 
 test("socket_safe: ESM/CJS parity for basic no-op behavior", () => {
   const obj = {};

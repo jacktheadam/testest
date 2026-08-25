@@ -410,8 +410,16 @@ impl SparseMemory {
     #[inline]
     fn chunk_index(&self, paddr: u64) -> GuestMemoryResult<(usize, usize)> {
         let chunk_size_u64 = self.chunk_size as u64;
-        let chunk = paddr / chunk_size_u64;
-        let offset = paddr - chunk * chunk_size_u64;
+        // `chunk_size` is a power of two in every real configuration (the default is
+        // 2 MiB), so take the shift/mask path instead of emitting a hardware divide
+        // per memory access. Fall back to a divide only for a (never-used) non-pow2
+        // chunk size so the public API contract is unchanged.
+        let (chunk, offset) = if chunk_size_u64.is_power_of_two() {
+            let shift = chunk_size_u64.trailing_zeros();
+            (paddr >> shift, paddr & (chunk_size_u64 - 1))
+        } else {
+            (paddr / chunk_size_u64, paddr % chunk_size_u64)
+        };
         let chunk_usize = usize::try_from(chunk).map_err(|_| GuestMemoryError::OutOfRange {
             paddr,
             len: 1,
@@ -507,6 +515,33 @@ impl GuestMemory for SparseMemory {
         }
         let chunk = self.chunks.get_mut(chunk_idx)?.as_mut()?;
         Some(&mut chunk[chunk_off..chunk_off + len])
+    }
+}
+
+impl<T: GuestMemory + ?Sized> GuestMemory for Box<T> {
+    #[inline]
+    fn size(&self) -> u64 {
+        (**self).size()
+    }
+
+    #[inline]
+    fn read_into(&self, paddr: u64, dst: &mut [u8]) -> GuestMemoryResult<()> {
+        (**self).read_into(paddr, dst)
+    }
+
+    #[inline]
+    fn write_from(&mut self, paddr: u64, src: &[u8]) -> GuestMemoryResult<()> {
+        (**self).write_from(paddr, src)
+    }
+
+    #[inline]
+    fn get_slice(&self, paddr: u64, len: usize) -> Option<&[u8]> {
+        (**self).get_slice(paddr, len)
+    }
+
+    #[inline]
+    fn get_slice_mut(&mut self, paddr: u64, len: usize) -> Option<&mut [u8]> {
+        (**self).get_slice_mut(paddr, len)
     }
 }
 

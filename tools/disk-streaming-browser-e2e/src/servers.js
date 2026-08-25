@@ -4,10 +4,10 @@ const fs = require('node:fs/promises');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
-const { formatOneLineError, formatOneLineUtf8 } = require('../../../scripts/_shared/text_one_line.cjs');
-const { tryWriteResponse } = require('../../../src/http_response_safe.cjs');
-const { tryGetProp, tryGetStringProp } = require('../../../src/safe_props.cjs');
-const { unrefBestEffort } = require('../../../src/unref_safe.cjs');
+const { formatOneLineError, formatOneLineUtf8, safeErrorMessageInput } = require('../../../scripts/_shared/text_one_line.cjs');
+const { tryWriteResponse } = require('../../../packages/transport-safety/src/http_response_safe.cjs');
+const { tryGetProp, tryGetStringProp } = require('../../../packages/transport-safety/src/safe_props.cjs');
+const { unrefBestEffort } = require('../../../packages/transport-safety/src/unref_safe.cjs');
 
 const MAX_REQUEST_URL_LEN = 8 * 1024;
 const MAX_PATHNAME_LEN = 4 * 1024;
@@ -409,7 +409,7 @@ async function startDiskGatewayServer({ appOrigin, publicFixturePath, privateFix
   const bind = `127.0.0.1:${port}`;
   const origin = `http://127.0.0.1:${port}`;
 
-  const diskGatewaySourceDir = path.join(getRepoRoot(), 'server', 'disk-gateway');
+  const diskGatewaySourceDir = path.join(getRepoRoot(), 'tools', 'disk-gateway');
 
   const outputLimit = 50_000;
   let output = '';

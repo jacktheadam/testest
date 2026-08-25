@@ -64,4 +64,3 @@ fn in_repo_packaging_specs_have_schema_and_parse() -> anyhow::Result<()> {
 
     Ok(())
 }
-

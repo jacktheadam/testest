@@ -17,11 +17,11 @@ test.describe("runtime disk worker (HTTP Range)", () => {
   });
 
   test("can open and read bytes via RuntimeDiskClient", async ({ page }) => {
-    await page.goto("/", { waitUntil: "load" });
+    await page.goto("/apps/web/", { waitUntil: "load" });
 
     const result = await page.evaluate(
       async ({ url }) => {
-        const { RuntimeDiskClient } = await import("/web/src/storage/runtime_disk_client.ts");
+        const { RuntimeDiskClient } = await import("/apps/web/src/storage/runtime_disk_client.ts");
 
         const io = new RuntimeDiskClient();
         let handle: number | null = null;

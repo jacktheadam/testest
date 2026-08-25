@@ -1881,7 +1881,10 @@ fn snapshot_restore_rejects_executor_state_with_invalid_pending_fence_kind() {
 
     let mut restored = new_test_device(cfg);
     let err = restored.load_state(&corrupted).unwrap_err();
-    assert_eq!(err, SnapshotError::InvalidFieldEncoding("pending_fences.kind"));
+    assert_eq!(
+        err,
+        SnapshotError::InvalidFieldEncoding("pending_fences.kind")
+    );
 }
 
 #[test]
@@ -2000,5 +2003,8 @@ fn snapshot_restore_rejects_executor_state_with_duplicate_in_flight_fence() {
 
     let mut restored = new_test_device(cfg);
     let err = restored.load_state(&corrupted).unwrap_err();
-    assert_eq!(err, SnapshotError::InvalidFieldEncoding("in_flight.duplicate_fence"));
+    assert_eq!(
+        err,
+        SnapshotError::InvalidFieldEncoding("in_flight.duplicate_fence")
+    );
 }

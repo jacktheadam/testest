@@ -1,7 +1,7 @@
 //! HTTP `Range` handling for disk image streaming.
 //!
 //! Aero's disk streaming contract only requires **single-range** `bytes` requests.
-//! Multi-range requests are rejected (see `docs/16-disk-image-streaming-auth.md`).
+//! Multi-range requests are rejected (see `wiki/areas/storage.md`).
 //!
 //! Parsing and RFC 7233/9110 resolution are delegated to `aero-http-range` so we
 //! keep one hardened implementation (header size limits, range-count limits,

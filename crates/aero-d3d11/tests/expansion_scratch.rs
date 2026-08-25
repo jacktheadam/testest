@@ -149,9 +149,13 @@ fn expansion_scratch_grows_when_segment_is_full() {
         scratch.begin_frame();
         scratch.begin_frame();
 
-        // Allocate exactly the segment size, then allocate anything else. This must exhaust the
-        // segment regardless of the device's storage-buffer alignment.
-        let fill = scratch.alloc_metadata(device, initial_cap, 1).unwrap();
+        // Fill the *storage* arena exactly, then allocate from it again.
+        //
+        // The allocator keeps two independent arenas — storage and metadata — backed by separate
+        // buffers. Filling the metadata arena would leave the storage arena untouched and trigger
+        // no growth at all, so the fill has to come from the same arena the next allocation draws
+        // from. `per_frame_capacity` reports the storage arena.
+        let fill = scratch.alloc_vertex_output(device, initial_cap).unwrap();
         assert_eq!(fill.offset, 0);
         assert_eq!(fill.size, initial_cap);
 

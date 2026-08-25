@@ -7,7 +7,7 @@
 //! - MMIO/I/O access through the machine buses
 //! - DMA into guest RAM
 //! - interrupt routing:
-//!   - AHCI via PCI INTx -> PciIntxRouter -> GSI12 -> PIC IRQ12
+//!   - AHCI via PCI INTx -> PciIntxRouter -> GSI22 -> compatibility PIC IRQ12
 //!   - PIIX3 IDE via ISA IRQ14/15 (not PCI INTx)
 
 use aero_devices::pci::{profile, PciBdf};

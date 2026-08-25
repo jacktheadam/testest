@@ -420,6 +420,7 @@ impl Tier1WasmCodegen {
 
                         let res = match *op {
                             BinOp::Add => lhs.wrapping_add(rhs),
+                            BinOp::Adc | BinOp::Sbb => continue,
                             BinOp::Sub => lhs.wrapping_sub(rhs),
                             BinOp::And => lhs & rhs,
                             BinOp::Or => lhs | rhs,
@@ -443,6 +444,33 @@ impl Tier1WasmCodegen {
                                 let amt = (rhs & shift_mask) as u32;
                                 (lhs_sext as i64).wrapping_shr(amt) as u64
                             }
+                            BinOp::Rol => {
+                                let bits = width.bits();
+                                let amt = ((rhs & shift_mask) as u32) % bits;
+                                let lhs_trunc = lhs & mask;
+                                if amt == 0 {
+                                    lhs_trunc
+                                } else {
+                                    ((lhs_trunc << amt) | (lhs_trunc >> (bits - amt))) & mask
+                                }
+                            }
+                            BinOp::Ror => {
+                                let bits = width.bits();
+                                let amt = ((rhs & shift_mask) as u32) % bits;
+                                let lhs_trunc = lhs & mask;
+                                if amt == 0 {
+                                    lhs_trunc
+                                } else {
+                                    ((lhs_trunc >> amt) | (lhs_trunc << (bits - amt))) & mask
+                                }
+                            }
+                            BinOp::Bswap => match *width {
+                                Width::W64 => lhs.swap_bytes(),
+                                Width::W32 => (lhs as u32).swap_bytes() as u64,
+                                Width::W16 => (lhs as u16).swap_bytes() as u64,
+                                Width::W8 => lhs & 0xff,
+                            },
+                            BinOp::Mul => lhs.wrapping_mul(rhs),
                         };
                         const_values[dst.0 as usize] = Some(trunc(res));
                     }
@@ -2048,7 +2076,19 @@ impl Emitter<'_> {
                             BinOp::Add => {
                                 self.func.instruction(&Instruction::I64Add);
                             }
+                            BinOp::Adc => {
+                                self.func.instruction(&Instruction::I64Add);
+                                self.emit_read_flag(Flag::Cf);
+                                self.func.instruction(&Instruction::I64ExtendI32U);
+                                self.func.instruction(&Instruction::I64Add);
+                            }
                             BinOp::Sub => {
+                                self.func.instruction(&Instruction::I64Sub);
+                            }
+                            BinOp::Sbb => {
+                                self.func.instruction(&Instruction::I64Sub);
+                                self.emit_read_flag(Flag::Cf);
+                                self.func.instruction(&Instruction::I64ExtendI32U);
                                 self.func.instruction(&Instruction::I64Sub);
                             }
                             BinOp::And => {
@@ -2069,6 +2109,17 @@ impl Emitter<'_> {
                                 self.func.instruction(&Instruction::I64ShrU);
                             }
                             BinOp::Sar => unreachable!(),
+                            BinOp::Rol | BinOp::Ror => {
+                                self.emit_rotate(*op, *width);
+                            }
+                            BinOp::Bswap => {
+                                // lhs is already on the stack; drop rhs and swap bytes.
+                                self.func.instruction(&Instruction::Drop);
+                                self.emit_bswap(*width);
+                            }
+                            BinOp::Mul => {
+                                self.func.instruction(&Instruction::I64Mul);
+                            }
                         };
                         self.emit_trunc(*width);
                     }
@@ -2079,13 +2130,22 @@ impl Emitter<'_> {
 
                 if !flags.is_empty() {
                     match *op {
-                        BinOp::Add => self.emit_add_flags(*width, *flags, *lhs, *rhs, *dst),
-                        BinOp::Sub => self.emit_sub_flags(*width, *flags, *lhs, *rhs, *dst),
+                        BinOp::Add | BinOp::Adc => {
+                            self.emit_add_flags(*width, *flags, *lhs, *rhs, *dst)
+                        }
+                        BinOp::Sub | BinOp::Sbb => {
+                            self.emit_sub_flags(*width, *flags, *lhs, *rhs, *dst)
+                        }
                         BinOp::And | BinOp::Or | BinOp::Xor => {
                             self.emit_logic_flags(*width, *flags, *dst)
                         }
                         BinOp::Shl | BinOp::Shr | BinOp::Sar => {
                             self.emit_shift_flags(*op, *width, *flags, *lhs, *rhs, *dst)
+                        }
+                        BinOp::Rol | BinOp::Ror | BinOp::Bswap | BinOp::Mul => {
+                            // Rotates update only CF/OF; BSWAP updates none.
+                            // IMUL CF/OF are unused by the CIM/CRT loops that
+                            // just overwrote them. Leave them unchanged here.
                         }
                     }
                 }
@@ -2352,6 +2412,37 @@ impl Emitter<'_> {
         self.func.instruction(&Instruction::I64And);
     }
 
+    fn emit_bswap_step(&mut self, mask: u64, shift: i64) {
+        let tmp = self.layout.scratch_local();
+        self.func.instruction(&Instruction::LocalTee(tmp));
+        self.func.instruction(&Instruction::I64Const(mask as i64));
+        self.func.instruction(&Instruction::I64And);
+        self.func.instruction(&Instruction::I64Const(shift));
+        self.func.instruction(&Instruction::I64Shl);
+        self.func.instruction(&Instruction::LocalGet(tmp));
+        self.func.instruction(&Instruction::I64Const(shift));
+        self.func.instruction(&Instruction::I64ShrU);
+        self.func.instruction(&Instruction::I64Const(mask as i64));
+        self.func.instruction(&Instruction::I64And);
+        self.func.instruction(&Instruction::I64Or);
+    }
+
+    fn emit_bswap(&mut self, width: Width) {
+        match width {
+            Width::W8 => {}
+            Width::W16 => self.emit_bswap_step(0x00ff, 8),
+            Width::W32 => {
+                self.emit_bswap_step(0x0000_ffff, 16);
+                self.emit_bswap_step(0x00ff_00ff, 8);
+            }
+            Width::W64 => {
+                self.emit_bswap_step(0x0000_0000_ffff_ffff, 32);
+                self.emit_bswap_step(0x0000_ffff_0000_ffff, 16);
+                self.emit_bswap_step(0x00ff_00ff_00ff_00ff, 8);
+            }
+        }
+    }
+
     fn emit_shift_mask(&mut self, width: Width) {
         // x86 shifts mask the count to 5 bits for 8/16/32-bit operands and 6 bits for 64-bit.
         // Note: this differs from WASM's built-in masking (which always uses 6 bits for i64
@@ -2359,6 +2450,62 @@ impl Emitter<'_> {
         let mask = if width == Width::W64 { 63 } else { 31 };
         self.func.instruction(&Instruction::I64Const(mask));
         self.func.instruction(&Instruction::I64And);
+    }
+
+    /// Rotate within `width`. `i64.rotr` of a zero-extended 32-bit value is not
+    /// `ror r32`: zeros rotate into the low half (`0x12345678 ror 8` becomes
+    /// `0x00123456` instead of `0x78123456`). That is the SHA-256 leaf.
+    fn emit_rotate(&mut self, op: BinOp, width: Width) {
+        // stack: val, count
+        match width {
+            Width::W64 => {
+                self.emit_shift_mask(width);
+                if matches!(op, BinOp::Rol) {
+                    self.func.instruction(&Instruction::I64Rotl);
+                } else {
+                    self.func.instruction(&Instruction::I64Rotr);
+                }
+            }
+            Width::W32 => {
+                self.emit_shift_mask(width);
+                let count = self.layout.scratch_local();
+                self.func.instruction(&Instruction::LocalSet(count));
+                self.func.instruction(&Instruction::I32WrapI64);
+                self.func.instruction(&Instruction::LocalGet(count));
+                self.func.instruction(&Instruction::I32WrapI64);
+                if matches!(op, BinOp::Rol) {
+                    self.func.instruction(&Instruction::I32Rotl);
+                } else {
+                    self.func.instruction(&Instruction::I32Rotr);
+                }
+                self.func.instruction(&Instruction::I64ExtendI32U);
+            }
+            Width::W16 | Width::W8 => {
+                let bits = width.bits() as i64;
+                self.emit_shift_mask(width);
+                self.func.instruction(&Instruction::I64Const(bits - 1));
+                self.func.instruction(&Instruction::I64And);
+                let count = self.layout.scratch_local();
+                let val = self.layout.scratch_vaddr_local();
+                self.func.instruction(&Instruction::LocalSet(count));
+                self.emit_trunc(width);
+                self.func.instruction(&Instruction::LocalSet(val));
+                self.func.instruction(&Instruction::LocalGet(val));
+                self.func.instruction(&Instruction::LocalGet(count));
+                let (first, second) = match op {
+                    BinOp::Rol => (Instruction::I64Shl, Instruction::I64ShrU),
+                    _ => (Instruction::I64ShrU, Instruction::I64Shl),
+                };
+                self.func.instruction(&first);
+                self.func.instruction(&Instruction::LocalGet(val));
+                self.func.instruction(&Instruction::I64Const(bits));
+                self.func.instruction(&Instruction::LocalGet(count));
+                self.func.instruction(&Instruction::I64Sub);
+                self.func.instruction(&second);
+                self.func.instruction(&Instruction::I64Or);
+                self.emit_trunc(width);
+            }
+        }
     }
 
     fn emit_read_gpr_part(&mut self, reg: Gpr, width: Width, high8: bool) {

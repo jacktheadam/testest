@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const thisDir = path.dirname(fileURLToPath(import.meta.url));
 
 test("gpu trace replays deterministically (triangle)", async ({ page }) => {
-  const toolPath = path.resolve(thisDir, "../../web/tools/gpu_trace_replay.ts");
+  const toolPath = path.resolve(thisDir, "../../apps/web/tools/gpu_trace_replay.ts");
   const tracePath = path.resolve(thisDir, "../fixtures/triangle.aerogputrace");
 
   const traceBytes = fs.readFileSync(tracePath);
@@ -59,7 +59,7 @@ test("gpu trace replays deterministically (triangle)", async ({ page }) => {
 });
 
 test("gpu trace replays deterministically (aerogpu cmd triangle)", async ({ page }) => {
-  const toolPath = path.resolve(thisDir, "../../web/tools/gpu_trace_replay.ts");
+  const toolPath = path.resolve(thisDir, "../../apps/web/tools/gpu_trace_replay.ts");
   const tracePath = path.resolve(thisDir, "../fixtures/aerogpu_cmd_triangle.aerogputrace");
 
   const traceBytes = fs.readFileSync(tracePath);
@@ -98,7 +98,7 @@ test("gpu trace replays deterministically (aerogpu cmd triangle)", async ({ page
 });
 
 test("gpu trace replays deterministically (AeroGPU A3A0 command stream clear-red)", async ({ page }) => {
-  const toolPath = path.resolve(thisDir, "../../web/tools/gpu_trace_replay.ts");
+  const toolPath = path.resolve(thisDir, "../../apps/web/tools/gpu_trace_replay.ts");
   const tracePath = path.resolve(thisDir, "../fixtures/aerogpu_a3a0_clear_red.aerogputrace");
 
   const traceBytes = fs.readFileSync(tracePath);

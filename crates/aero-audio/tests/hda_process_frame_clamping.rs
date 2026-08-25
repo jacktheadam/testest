@@ -34,7 +34,7 @@ fn hda_process_clamps_extreme_frame_counts_to_avoid_oom() {
         sd.lvi = 0;
         sd.fmt = fmt_raw;
         // SRST | RUN | stream number 1.
-        sd.ctl = (1 << 0) | (1 << 1) | (1 << 20);
+        sd.ctl = (1 << 1) | (1 << 20);
     }
 
     // Advancing by an extreme number of frames should not cause an OOM; the device should clamp

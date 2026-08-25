@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomInt } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
-import { unrefBestEffort } from "../../src/unref_safe.js";
+import { unrefBestEffort } from "../../packages/transport-safety/src/unref_safe.js";
 import { wsCloseSafe, wsSendSafe } from "../../scripts/_shared/ws_safe.js";
 import WebSocket from "../../tools/minimal_ws.js";
 import {
@@ -12,7 +12,7 @@ import {
   L2_TUNNEL_SUBPROTOCOL,
   L2_TUNNEL_TYPE_FRAME,
   L2_TUNNEL_TYPE_PING,
-} from "../../web/src/shared/l2TunnelProtocol.ts";
+} from "../../apps/web/src/shared/l2TunnelProtocol.ts";
 
 import {
   TCP_FLAGS,
@@ -31,7 +31,7 @@ import {
   parseIPv4,
   parseTCP,
   parseUDP,
-} from "../../prototype/nt-arch-rfc/packets.js";
+} from "./packets.js";
 
 const ETHERTYPE_ARP = 0x0806;
 const ETHERTYPE_IPV4 = 0x0800;

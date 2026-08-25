@@ -21,11 +21,11 @@ function findMatches(source, re) {
 }
 
 test("contract: web/net must use rtcSafe for RTCDataChannel/RTCPeerConnection close/send", async () => {
-  const files = await collectJsTsSourceFiles(repoRoot, ["web/src/net"]);
+  const files = await collectJsTsSourceFiles(repoRoot, ["apps/web/src/net"]);
 
   const allowlist = new Set([
     // Canonical wrappers for WebRTC close/send.
-    "web/src/net/rtcSafe.ts",
+    "apps/web/src/net/rtcSafe.ts",
   ]);
 
   const rules = [

@@ -10,7 +10,7 @@ fn repo_root() -> std::path::PathBuf {
 
 fn parse_windows_device_contract_json() -> serde_json::Value {
     // Be tolerant of UTF-8 BOMs produced by some editors/tools.
-    let contract = include_str!("../../../docs/windows-device-contract.json");
+    let contract = include_str!("../../../protocol-vectors/windows-device-contract.json");
     let contract = contract.strip_prefix('\u{feff}').unwrap_or(contract);
     serde_json::from_str(contract).expect("parse windows-device-contract.json")
 }

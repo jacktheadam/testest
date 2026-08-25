@@ -26,7 +26,7 @@ pub fn cmd(args: Vec<String>) -> Result<()> {
     let repo_root = paths::repo_root()?;
     let runner = Runner::new();
 
-    let web_build_script = repo_root.join("web/scripts/build_wasm.mjs");
+    let web_build_script = repo_root.join("apps/web/scripts/build_wasm.mjs");
 
     let variants: Vec<&str> = match variant.as_str() {
         "single" => vec!["single"],
@@ -67,7 +67,7 @@ pub fn cmd(args: Vec<String>) -> Result<()> {
     // Fallback: build directly with wasm-pack (single-threaded only).
     if variants.contains(&"threaded") {
         return Err(XtaskError::Message(
-            "threaded wasm builds require `web/scripts/build_wasm.mjs`".to_string(),
+            "threaded wasm builds require `apps/web/scripts/build_wasm.mjs`".to_string(),
         ));
     }
 

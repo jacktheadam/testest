@@ -12,7 +12,7 @@ import {
   setNoDelayRequired,
   tryGetMethodBestEffort,
   writeCaptureErrorBestEffort,
-} from "../src/socket_safe.js";
+} from "../packages/transport-safety/src/socket_safe.js";
 
 test("socket_safe: does not throw on hostile method getters", () => {
   const hostile = new Proxy(

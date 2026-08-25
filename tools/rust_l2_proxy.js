@@ -4,7 +4,7 @@ import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { unrefBestEffort } from "../src/unref_safe.js";
+import { unrefBestEffort } from "../packages/transport-safety/src/unref_safe.js";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Keep enough stdout/stderr to surface useful errors without risking runaway logs in CI.

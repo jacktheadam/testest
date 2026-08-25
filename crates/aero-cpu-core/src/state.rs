@@ -858,6 +858,7 @@ impl CpuState {
     }
 
     /// Returns the current effective code bitness (16/32/64).
+    #[inline]
     pub fn bitness(&self) -> u32 {
         match self.mode {
             CpuMode::Long => 64,
@@ -951,19 +952,29 @@ impl CpuState {
     ///
     /// This is used by paging-aware [`crate::mem::CpuBus`] implementations to
     /// observe changes to CR0/CR3/CR4/EFER.
-    pub fn sync_mmu(&self, mmu: &mut aero_mmu::Mmu) {
+    #[inline]
+    /// Returns whether any control register actually changed, i.e. whether the
+    /// MMU may now translate differently than it did before the call. Callers
+    /// that memoise a translation use this to know when to drop it.
+    pub fn sync_mmu(&self, mmu: &mut aero_mmu::Mmu) -> bool {
+        let mut changed = false;
         if mmu.cr0() != self.control.cr0 {
             mmu.set_cr0(self.control.cr0);
+            changed = true;
         }
         if mmu.cr3() != self.control.cr3 {
             mmu.set_cr3(self.control.cr3);
+            changed = true;
         }
         if mmu.cr4() != self.control.cr4 {
             mmu.set_cr4(self.control.cr4);
+            changed = true;
         }
         if mmu.efer() != self.msr.efer {
             mmu.set_efer(self.msr.efer);
+            changed = true;
         }
+        changed
     }
 
     /// Apply architectural side effects of an exception raised by the interpreter.
@@ -1136,7 +1147,11 @@ impl CpuState {
     #[inline]
     pub fn set_rflags(&mut self, value: u64) {
         self.rflags = value | RFLAGS_RESERVED1;
-        self.lazy_flags.clear();
+        // LazyFlags is never activated on the interpreter hot path (only in
+        // tests). Guarding the clear avoids a 32-byte memset per ALU op.
+        if self.lazy_flags.is_active() {
+            self.lazy_flags.clear();
+        }
     }
 
     // ---- x87/SSE state management (FXSAVE/FXRSTOR, MXCSR) -----------------
@@ -1185,14 +1200,19 @@ impl CpuState {
         Ok(())
     }
 
-    /// Implements the legacy (32-bit) `FXSAVE m512byte` memory image.
+    /// Implements the legacy (non-REX.W) `FXSAVE m512byte` memory image.
     pub fn fxsave32(&self, dst: &mut [u8; FXSAVE_AREA_SIZE]) {
-        crate::fxsave::fxsave_legacy(&self.fpu, &self.sse, dst);
+        crate::fxsave::fxsave_legacy(&self.fpu, &self.sse, self.mode == CpuMode::Long, dst);
     }
 
-    /// Implements the legacy (32-bit) `FXRSTOR m512byte` memory image.
+    /// Implements the legacy (non-REX.W) `FXRSTOR m512byte` memory image.
     pub fn fxrstor32(&mut self, src: &[u8; FXSAVE_AREA_SIZE]) -> Result<(), FxStateError> {
-        crate::fxsave::fxrstor_legacy(&mut self.fpu, &mut self.sse, src)
+        crate::fxsave::fxrstor_legacy(
+            &mut self.fpu,
+            &mut self.sse,
+            self.mode == CpuMode::Long,
+            src,
+        )
     }
 
     /// Backwards-compatible alias for `fxsave32`.
@@ -1298,6 +1318,7 @@ impl CpuState {
     ///
     /// In long mode, only FS/GS bases are used for linear address formation
     /// (other segment bases are treated as 0).
+    #[inline]
     pub fn seg_base_reg(&self, seg: Register) -> u64 {
         use Register::*;
         match self.mode {
@@ -1321,6 +1342,7 @@ impl CpuState {
     /// Reads a decoded register operand.
     ///
     /// The result is zero-extended to 64 bits.
+    #[inline]
     pub fn read_reg(&self, reg: Register) -> u64 {
         if let Some((idx, bits, high8)) = gpr_info(reg) {
             let full = self.gpr[idx];
@@ -1348,6 +1370,7 @@ impl CpuState {
     }
 
     /// Writes a decoded register operand.
+    #[inline]
     pub fn write_reg(&mut self, reg: Register, val: u64) {
         if let Some((idx, bits, high8)) = gpr_info(reg) {
             let cur = self.gpr[idx];
@@ -1410,7 +1433,7 @@ impl CpuState {
     }
 
     pub fn stack_ptr_reg(&self) -> Register {
-        match self.bitness() {
+        match self.stack_addr_bits() {
             16 => Register::SP,
             32 => Register::ESP,
             _ => Register::RSP,
@@ -1418,10 +1441,28 @@ impl CpuState {
     }
 
     pub fn stack_ptr_bits(&self) -> u32 {
-        match self.bitness() {
-            16 => 16,
-            32 => 32,
-            _ => 64,
+        self.stack_addr_bits()
+    }
+
+    /// The stack address size in bits. Per the Intel SDM this is governed by the
+    /// **B flag of the SS descriptor** in protected mode — *not* the CS D flag that
+    /// [`Self::bitness`] reports. The two normally agree, but a 16-bit code segment
+    /// running with a 32-bit stack segment (e.g. the Win7 boot stub holding a
+    /// 32-bit SS while still in a 16-bit CS) must still use ESP for
+    /// push/pop/call/ret/enter/leave. Deriving the width from the CS D flag
+    /// silently masks the stack pointer to 16 bits and corrupts the stack —
+    /// the root cause of a long Win7 bring-up divergence.
+    fn stack_addr_bits(&self) -> u32 {
+        match self.mode {
+            CpuMode::Long => 64,
+            CpuMode::Protected => {
+                if self.segments.ss.is_default_32bit() {
+                    32
+                } else {
+                    16
+                }
+            }
+            CpuMode::Real | CpuMode::Vm86 => 16,
         }
     }
 
@@ -1480,6 +1521,7 @@ fn gpr8_mapping(index: usize, rex_present: bool) -> (usize, u32) {
 }
 
 /// Returns a mask with the low `bits` bits set.
+#[inline]
 pub fn mask_bits(bits: u32) -> u64 {
     match bits {
         8 => 0xFF,

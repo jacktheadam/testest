@@ -566,6 +566,7 @@ mod tests {
         fn run(img: Vec<u8>) -> String {
             let mut bios = Bios::new(BiosConfig {
                 boot_drive: 0xE0,
+                enable_acpi: false,
                 ..BiosConfig::default()
             });
             let mut cpu = CpuState::new(CpuMode::Real);

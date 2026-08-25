@@ -79,17 +79,17 @@ test("detect-node-dir: prefers repo root when root + web exist", () => {
   try {
     writeJson(path.join(temp.repoRoot, "package.json"), { name: "root", version: "1.0.0" });
     writeJson(path.join(temp.repoRoot, "package-lock.json"), { lockfileVersion: 3 });
-    writeJson(path.join(temp.repoRoot, "web/package.json"), { name: "web", version: "0.0.0" });
+    writeJson(path.join(temp.repoRoot, "apps/web/package.json"), { name: "apps/web", version: "0.0.0" });
 
     const detected = runResolver(temp);
     assert.equal(detected.dir, ".");
     assert.equal(detected.lockfile, "package-lock.json");
     assert.equal(detected.package_name, "root");
 
-    const overridden = runResolver(temp, ["--node-dir", "web"]);
-    assert.equal(overridden.dir, "web");
+    const overridden = runResolver(temp, ["--node-dir", "apps/web"]);
+    assert.equal(overridden.dir, "apps/web");
     assert.equal(overridden.lockfile, "package-lock.json");
-    assert.equal(overridden.package_name, "web");
+    assert.equal(overridden.package_name, "apps/web");
   } finally {
     fs.rmSync(temp.repoRoot, { recursive: true, force: true });
   }
@@ -100,13 +100,13 @@ test("detect-node-dir: uses workspace lockfile when present", () => {
   try {
     writeJson(path.join(temp.repoRoot, "package.json"), { name: "root", version: "1.0.0" });
     writeJson(path.join(temp.repoRoot, "package-lock.json"), { lockfileVersion: 3 });
-    writeJson(path.join(temp.repoRoot, "web/package.json"), { name: "web", version: "0.0.0" });
-    writeJson(path.join(temp.repoRoot, "web/package-lock.json"), { lockfileVersion: 3 });
+    writeJson(path.join(temp.repoRoot, "apps/web/package.json"), { name: "apps/web", version: "0.0.0" });
+    writeJson(path.join(temp.repoRoot, "apps/web/package-lock.json"), { lockfileVersion: 3 });
 
-    const overridden = runResolver(temp, ["--node-dir", "web"]);
-    assert.equal(overridden.dir, "web");
-    assert.equal(overridden.lockfile, "web/package-lock.json");
-    assert.equal(overridden.package_name, "web");
+    const overridden = runResolver(temp, ["--node-dir", "apps/web"]);
+    assert.equal(overridden.dir, "apps/web");
+    assert.equal(overridden.lockfile, "apps/web/package-lock.json");
+    assert.equal(overridden.package_name, "apps/web");
   } finally {
     fs.rmSync(temp.repoRoot, { recursive: true, force: true });
   }
@@ -115,12 +115,12 @@ test("detect-node-dir: uses workspace lockfile when present", () => {
 test("detect-node-dir: falls back to web when repo root has no package.json", () => {
   const temp = setupTempRepo();
   try {
-    writeJson(path.join(temp.repoRoot, "web/package.json"), { name: "web", version: "0.0.0" });
-    writeJson(path.join(temp.repoRoot, "web/package-lock.json"), { lockfileVersion: 3 });
+    writeJson(path.join(temp.repoRoot, "apps/web/package.json"), { name: "apps/web", version: "0.0.0" });
+    writeJson(path.join(temp.repoRoot, "apps/web/package-lock.json"), { lockfileVersion: 3 });
 
     const detected = runResolver(temp);
-    assert.equal(detected.dir, "web");
-    assert.equal(detected.lockfile, "web/package-lock.json");
+    assert.equal(detected.dir, "apps/web");
+    assert.equal(detected.lockfile, "apps/web/package-lock.json");
   } finally {
     fs.rmSync(temp.repoRoot, { recursive: true, force: true });
   }

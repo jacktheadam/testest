@@ -95,7 +95,7 @@ Intended for packaging Guest Tools using a driver payload extracted from **virti
   - To fail fast on unexpected input directories (recommended in CI), set
     `fail_on_unlisted_driver_dirs=true`.
 - When packaging virtio-win drivers, `config/devices.cmd` must be generated from the **virtio-win**
-  Windows device contract (`docs/windows-device-contract-virtio-win.json`) so:
+  Windows device contract (`protocol-vectors/windows-device-contract-virtio-win.json`) so:
   - `AERO_VIRTIO_*_SERVICE` matches the upstream INF `AddService` names (`viostor`, `netkvm`, ...)
   - `guest-tools/setup.cmd` can validate and pre-seed boot-critical storage without `/skipstorage`.
   `drivers/scripts/make-guest-tools-from-virtio-win.ps1` uses the virtio-win contract by default.
@@ -112,7 +112,7 @@ Same as `win7-virtio-win.json`, but also declares optional drivers:
 Intended for packaging Guest Tools media from **Aero-built** (in-repo) Windows 7 driver packages
 (the output of the Win7 driver CI pipeline under `out/packages/`).
 
-This spec is the default used by `ci/package-guest-tools.ps1` and aims to match what
+This spec is the default used by `drivers/build/package-guest-tools.ps1` and aims to match what
 `guest-tools/setup.cmd` expects for a full "switch to virtio + Aero GPU" installation.
 
 - Requires: `aerogpu` + `virtio-blk` + `virtio-net` + `virtio-input`
@@ -177,12 +177,12 @@ expected HWIDs from `guest-tools/config/devices.cmd` (via `expected_hardware_ids
 so CI can validate driver binding stays in sync with the device contract without hardcoding regexes here.
 
 This spec is used by the Win7 driver CI/release workflows when packaging Guest Tools from the signed
-packages produced by `ci/make-catalogs.ps1` + `ci/sign-drivers.ps1`.
+packages produced by `drivers/build/make-catalogs.ps1` + `drivers/build/sign-drivers.ps1`.
 
 To reproduce CI-style Guest Tools packaging locally (assuming you already have `out/packages/` + `out/certs/`):
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File ci/package-guest-tools.ps1 -SpecPath tools/packaging/specs/win7-signed.json
+pwsh -NoProfile -ExecutionPolicy Bypass -File drivers/build/package-guest-tools.ps1 -SpecPath tools/packaging/specs/win7-signed.json
 ```
 
 ## `win7-aero-virtio.json`

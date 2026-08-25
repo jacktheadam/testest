@@ -6,26 +6,26 @@ const PREVIEW_ORIGIN = process.env.AERO_PLAYWRIGHT_PREVIEW_ORIGIN ?? 'http://127
 const ENTRY_RIP = 0x1000;
 
 const THREADED_AERO_WASM_BINARY_RELEASE = fileURLToPath(
-  new URL('../../web/src/wasm/pkg-threaded/aero_wasm_bg.wasm', import.meta.url),
+  new URL('../../apps/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm', import.meta.url),
 );
 const THREADED_AERO_WASM_BINARY_DEV = fileURLToPath(
-  new URL('../../web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm', import.meta.url),
+  new URL('../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm', import.meta.url),
 );
-const THREADED_AERO_WASM_JS_RELEASE = fileURLToPath(new URL('../../web/src/wasm/pkg-threaded/aero_wasm.js', import.meta.url));
-const THREADED_AERO_WASM_JS_DEV = fileURLToPath(new URL('../../web/src/wasm/pkg-threaded-dev/aero_wasm.js', import.meta.url));
+const THREADED_AERO_WASM_JS_RELEASE = fileURLToPath(new URL('../../apps/web/src/wasm/pkg-threaded/aero_wasm.js', import.meta.url));
+const THREADED_AERO_WASM_JS_DEV = fileURLToPath(new URL('../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm.js', import.meta.url));
 const HAS_THREADED_AERO_WASM_BINARY =
   (existsSync(THREADED_AERO_WASM_BINARY_RELEASE) && existsSync(THREADED_AERO_WASM_JS_RELEASE)) ||
   (existsSync(THREADED_AERO_WASM_BINARY_DEV) && existsSync(THREADED_AERO_WASM_JS_DEV));
 
 const JIT_WASM_BINARY_RELEASE = fileURLToPath(
-  new URL('../../web/src/wasm/pkg-jit-single/aero_jit_wasm_bg.wasm', import.meta.url),
+  new URL('../../apps/web/src/wasm/pkg-jit-single/aero_jit_wasm_bg.wasm', import.meta.url),
 );
 const JIT_WASM_BINARY_DEV = fileURLToPath(
-  new URL('../../web/src/wasm/pkg-jit-single-dev/aero_jit_wasm_bg.wasm', import.meta.url),
+  new URL('../../apps/web/src/wasm/pkg-jit-single-dev/aero_jit_wasm_bg.wasm', import.meta.url),
 );
-const JIT_WASM_JS_RELEASE = fileURLToPath(new URL('../../web/src/wasm/pkg-jit-single/aero_jit_wasm.js', import.meta.url));
+const JIT_WASM_JS_RELEASE = fileURLToPath(new URL('../../apps/web/src/wasm/pkg-jit-single/aero_jit_wasm.js', import.meta.url));
 const JIT_WASM_JS_DEV = fileURLToPath(
-  new URL('../../web/src/wasm/pkg-jit-single-dev/aero_jit_wasm.js', import.meta.url),
+  new URL('../../apps/web/src/wasm/pkg-jit-single-dev/aero_jit_wasm.js', import.meta.url),
 );
 const HAS_JIT_WASM_BINARY =
   (existsSync(JIT_WASM_BINARY_RELEASE) && existsSync(JIT_WASM_JS_RELEASE)) ||

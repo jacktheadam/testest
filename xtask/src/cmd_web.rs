@@ -40,7 +40,7 @@ pub fn cmd(args: Vec<String>) -> Result<()> {
         }
     };
 
-    let mut cmd = tools::npm();
+    let mut cmd = tools::package_manager();
     cmd.current_dir(&node_dir).args(["run", &script]);
     if !opts.extra_args.is_empty() {
         cmd.arg("--");

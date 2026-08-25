@@ -34,6 +34,14 @@ use aero_x86::{DecodedInst, Mnemonic};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tier0Config {
     pub features: CpuFeatureSet,
+    /// Whether a Tier-0 batch returns to its caller on a taken branch.
+    ///
+    /// Defaults to `true` (historical behaviour: every branch ends the batch).
+    /// `Machine::run_slice` sets this to `false` so branch-dense boot code does not
+    /// force a full device re-poll + paging-bus rebuild after nearly every branch
+    /// (the dominant native-interpreter cost); see `exec.rs`. Callers that drive the
+    /// batch as a "run until branch" loop (most tests) leave this `true`.
+    pub exit_on_branch: bool,
 }
 
 impl Tier0Config {
@@ -45,6 +53,7 @@ impl Tier0Config {
     pub fn from_cpuid(features: &CpuFeatures) -> Self {
         Self {
             features: features.feature_set(),
+            exit_on_branch: true,
         }
     }
 }
@@ -55,6 +64,7 @@ impl Default for Tier0Config {
             // Tier-0 defaults to the minimum viable Win7 x86-64 profile.
             // Individual tests can override this to exercise optional features.
             features: CpuFeatureSet::win7_minimum(),
+            exit_on_branch: true,
         }
     }
 }
@@ -130,6 +140,99 @@ fn atomic_rmw_sized<B: CpuBus, R>(
     Ok(ret)
 }
 
+/// Which `ops_*` module owns a mnemonic.
+///
+/// Resolving this used to mean walking every module's `handles_mnemonic` in
+/// order on every instruction: a `mov` paid five of those calls and an SSE op
+/// paid all nine, each one re-deriving the same answer. The classification only
+/// depends on the mnemonic, so it is computed once per mnemonic and memoised.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+enum OpsGroup {
+    Atomics = 1,
+    Cf,
+    Atomic,
+    Data,
+    Alu,
+    Fx,
+    X87,
+    /// `MOVSD`/`CMPSD` name both a string and an SSE instruction, so a mnemonic
+    /// match is not enough: try the operand-aware string check, then SSE.
+    StringThenSse,
+    Sse,
+    /// Handled by the tail `match` (privileged/system instructions and assists).
+    Tail,
+}
+
+const OPS_GROUP_UNCLASSIFIED: u8 = 0;
+
+impl OpsGroup {
+    fn from_repr(raw: u8) -> Option<Self> {
+        Some(match raw {
+            1 => Self::Atomics,
+            2 => Self::Cf,
+            3 => Self::Atomic,
+            4 => Self::Data,
+            5 => Self::Alu,
+            6 => Self::Fx,
+            7 => Self::X87,
+            8 => Self::StringThenSse,
+            9 => Self::Sse,
+            10 => Self::Tail,
+            _ => return None,
+        })
+    }
+}
+
+/// The original dispatch chain, in its original order, as a pure function.
+fn classify_mnemonic(mnem: Mnemonic) -> OpsGroup {
+    if ops_atomics::handles_mnemonic(mnem) {
+        OpsGroup::Atomics
+    } else if ops_cf::handles_mnemonic(mnem) {
+        OpsGroup::Cf
+    } else if ops_atomic::handles_mnemonic(mnem) {
+        OpsGroup::Atomic
+    } else if ops_data::handles_mnemonic(mnem) {
+        OpsGroup::Data
+    } else if ops_alu::handles_mnemonic(mnem) {
+        OpsGroup::Alu
+    } else if ops_fx::handles_mnemonic(mnem) {
+        OpsGroup::Fx
+    } else if ops_x87::handles_mnemonic(mnem) {
+        OpsGroup::X87
+    } else if ops_string::handles_mnemonic(mnem) {
+        OpsGroup::StringThenSse
+    } else if ops_sse::handles_mnemonic(mnem) {
+        OpsGroup::Sse
+    } else {
+        OpsGroup::Tail
+    }
+}
+
+/// Comfortably above the iced mnemonic count; a mnemonic outside it falls back
+/// to computing the group directly, so the bound is a memory cap, not a limit.
+const OPS_GROUP_TABLE_LEN: usize = 4096;
+
+static OPS_GROUP_TABLE: [core::sync::atomic::AtomicU8; OPS_GROUP_TABLE_LEN] =
+    [const { core::sync::atomic::AtomicU8::new(OPS_GROUP_UNCLASSIFIED) }; OPS_GROUP_TABLE_LEN];
+
+#[inline]
+fn ops_group(mnem: Mnemonic) -> OpsGroup {
+    use core::sync::atomic::Ordering;
+
+    let idx = mnem as usize;
+    let Some(slot) = OPS_GROUP_TABLE.get(idx) else {
+        return classify_mnemonic(mnem);
+    };
+    if let Some(group) = OpsGroup::from_repr(slot.load(Ordering::Relaxed)) {
+        return group;
+    }
+    // Racing threads compute the same value, so an unsynchronised store is fine.
+    let group = classify_mnemonic(mnem);
+    slot.store(group as u8, Ordering::Relaxed);
+    group
+}
+
 fn exec_decoded<B: CpuBus>(
     cfg: &Tier0Config,
     state: &mut CpuState,
@@ -142,32 +245,24 @@ fn exec_decoded<B: CpuBus>(
     if decoded.instr.has_lock_prefix() && !mnemonic_allows_lock_prefix(mnem) {
         return Err(Exception::InvalidOpcode);
     }
-    if ops_atomics::handles_mnemonic(mnem) {
-        return ops_atomics::exec(state, bus, decoded, next_ip);
-    }
-    if ops_cf::handles_mnemonic(mnem) {
-        return ops_cf::exec(state, bus, decoded, next_ip);
-    }
-    if ops_atomic::handles_mnemonic(mnem) {
-        return ops_atomic::exec(state, bus, decoded, next_ip);
-    }
-    if ops_data::handles_mnemonic(mnem) {
-        return ops_data::exec(state, bus, decoded, next_ip);
-    }
-    if ops_alu::handles_mnemonic(mnem) {
-        return ops_alu::exec(state, bus, decoded, next_ip);
-    }
-    if ops_fx::handles_mnemonic(mnem) {
-        return ops_fx::exec(state, bus, decoded, next_ip);
-    }
-    if ops_x87::handles_mnemonic(mnem) {
-        return ops_x87::exec(state, bus, decoded, next_ip);
-    }
-    if ops_string::handles(&decoded.instr) {
-        return ops_string::exec(state, bus, decoded, next_ip, addr_size_override);
-    }
-    if ops_sse::handles_mnemonic(mnem) {
-        return ops_sse::exec(cfg, state, bus, decoded, next_ip);
+    match ops_group(mnem) {
+        OpsGroup::Atomics => return ops_atomics::exec(state, bus, decoded, next_ip),
+        OpsGroup::Cf => return ops_cf::exec(state, bus, decoded, next_ip),
+        OpsGroup::Atomic => return ops_atomic::exec(state, bus, decoded, next_ip),
+        OpsGroup::Data => return ops_data::exec(state, bus, decoded, next_ip),
+        OpsGroup::Alu => return ops_alu::exec(state, bus, decoded, next_ip),
+        OpsGroup::Fx => return ops_fx::exec(state, bus, decoded, next_ip),
+        OpsGroup::X87 => return ops_x87::exec(state, bus, decoded, next_ip),
+        OpsGroup::StringThenSse => {
+            if ops_string::handles(&decoded.instr) {
+                return ops_string::exec(state, bus, decoded, next_ip, addr_size_override);
+            }
+            if ops_sse::handles_mnemonic(mnem) {
+                return ops_sse::exec(cfg, state, bus, decoded, next_ip);
+            }
+        }
+        OpsGroup::Sse => return ops_sse::exec(cfg, state, bus, decoded, next_ip),
+        OpsGroup::Tail => {}
     }
 
     match mnem {
@@ -219,12 +314,19 @@ fn exec_decoded<B: CpuBus>(
         | Mnemonic::Lmsw
         | Mnemonic::Smsw
         | Mnemonic::Invlpg
+        | Mnemonic::Wbinvd
+        | Mnemonic::Invd
         | Mnemonic::Swapgs
         | Mnemonic::Syscall
         | Mnemonic::Sysret
+        | Mnemonic::Sysretq // REX.W SYSRET (48 0F 07); iced treats separately from Sysret
         | Mnemonic::Sysenter
         | Mnemonic::Sysexit
-        | Mnemonic::Rsm => Ok(ExecOutcome::Assist(AssistReason::Privileged)),
+        | Mnemonic::Rsm
+        // LAR/LSL: unprivileged descriptor-table probes used by ntdll (e.g. LSL
+        // EAX,EAX). Missing → #UD → STATUS_ILLEGAL_INSTRUCTION in smss.
+        | Mnemonic::Lar
+        | Mnemonic::Lsl => Ok(ExecOutcome::Assist(AssistReason::Privileged)),
         Mnemonic::Rdtsc
         | Mnemonic::Rdtscp
         | Mnemonic::Lfence
@@ -299,4 +401,64 @@ pub(super) fn exec_wait(state: &mut CpuState) -> Result<(), Exception> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod ops_group_tests {
+    use super::*;
+
+    /// The memo must agree with the chain it replaces, including on the second
+    /// lookup that reads the cached value rather than recomputing it.
+    #[test]
+    fn memoised_group_matches_the_dispatch_chain() {
+        for mnem in [
+            Mnemonic::Mov,
+            Mnemonic::Add,
+            Mnemonic::Cmp,
+            Mnemonic::Jmp,
+            Mnemonic::Call,
+            Mnemonic::Ret,
+            Mnemonic::Push,
+            Mnemonic::Xchg,
+            Mnemonic::Cmpxchg,
+            Mnemonic::Fld,
+            Mnemonic::Fxsave,
+            Mnemonic::Movsb,
+            Mnemonic::Movsd,
+            Mnemonic::Cmpsd,
+            Mnemonic::Scasq,
+            Mnemonic::Addsd,
+            Mnemonic::Punpckhqdq,
+            Mnemonic::Hlt,
+            Mnemonic::Cpuid,
+            Mnemonic::Lgdt,
+        ] {
+            let expected = classify_mnemonic(mnem);
+            assert_eq!(ops_group(mnem), expected, "first lookup for {mnem:?}");
+            assert_eq!(ops_group(mnem), expected, "cached lookup for {mnem:?}");
+        }
+    }
+
+    /// `MOVSD`/`CMPSD` are shared between the string and SSE encodings, so they
+    /// must land in the group that tries the operand-aware string check first.
+    #[test]
+    fn shared_string_and_sse_mnemonics_take_the_operand_aware_path() {
+        assert_eq!(ops_group(Mnemonic::Movsd), OpsGroup::StringThenSse);
+        assert_eq!(ops_group(Mnemonic::Cmpsd), OpsGroup::StringThenSse);
+        // A string-only mnemonic uses the same group and simply falls through to
+        // the tail when the operands are not string-shaped.
+        assert_eq!(ops_group(Mnemonic::Movsb), OpsGroup::StringThenSse);
+        // An SSE-only mnemonic never reaches the string check.
+        assert_eq!(ops_group(Mnemonic::Addsd), OpsGroup::Sse);
+    }
+
+    /// A mnemonic beyond the memo table must still classify correctly.
+    #[test]
+    fn out_of_table_mnemonic_falls_back_to_direct_classification() {
+        assert!(
+            OPS_GROUP_TABLE_LEN > Mnemonic::Wbinvd as usize,
+            "table should cover the real mnemonic range"
+        );
+        assert_eq!(classify_mnemonic(Mnemonic::Add), OpsGroup::Alu);
+    }
 }

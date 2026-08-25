@@ -25,7 +25,7 @@
 
 ### Interrupts (INTx vs MSI/MSI-X)
 
-Per the [`AERO-W7-VIRTIO` v1 contract](../../../docs/windows7-virtio-driver-contract.md) (§1.8), **INTx is required** and MSI/MSI-X is an optional enhancement.
+Per the [`AERO-W7-VIRTIO` v1 contract](wiki/areas/drivers-windows.md#the-aero-w7-virtio-device-contract-v1), **INTx is required** and MSI/MSI-X is an optional enhancement.
 
 The miniport supports both:
 
@@ -96,7 +96,7 @@ You can also use `aero-virtio-selftest.exe`:
     - If provisioning via `drivers/windows7/tests/host-harness/New-AeroWin7TestImage.ps1`, bake this into the scheduled task with `-ExpectBlkMsi`.
 - See `../tests/guest-selftest/README.md` for how to build/run the tool.
 
-See also: [`docs/windows/virtio-pci-modern-interrupt-debugging.md`](../../../docs/windows/virtio-pci-modern-interrupt-debugging.md).
+See also: [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md#features-virtqueues-interrupts) (virtio-pci modern interrupt notes).
 
 ### Runtime resize (dynamic capacity change)
 
@@ -134,8 +134,8 @@ From a Windows host with the WDK installed:
 
 ```powershell
 # From the repo root:
-.\ci\install-wdk.ps1
-.\ci\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers windows7/virtio-blk
+.\drivers\build\install-wdk.ps1
+.\drivers\build\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers windows7/virtio-blk
 ```
 
 Build outputs are staged under:

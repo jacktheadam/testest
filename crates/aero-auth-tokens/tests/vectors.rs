@@ -82,17 +82,24 @@ fn session_token_vectors() {
     let secret = vf.aero_session.secret.as_bytes();
     let now_ms = vf.aero_session.now_ms;
 
-    let valid = verify_gateway_session_token_checked(&vf.aero_session.tokens.valid.token, secret, now_ms)
-        .expect("expected valid session token to verify");
+    let valid =
+        verify_gateway_session_token_checked(&vf.aero_session.tokens.valid.token, secret, now_ms)
+            .expect("expected valid session token to verify");
     assert_eq!(valid.sid, vf.aero_session.tokens.valid.claims.sid);
     assert_eq!(valid.exp_unix, vf.aero_session.tokens.valid.claims.exp);
 
     assert!(
-        verify_gateway_session_token_checked(&vf.aero_session.tokens.expired.token, secret, now_ms).is_err(),
+        verify_gateway_session_token_checked(&vf.aero_session.tokens.expired.token, secret, now_ms)
+            .is_err(),
         "expected expired session token to be rejected"
     );
     assert!(
-        verify_gateway_session_token_checked(&vf.aero_session.tokens.bad_signature.token, secret, now_ms).is_err(),
+        verify_gateway_session_token_checked(
+            &vf.aero_session.tokens.bad_signature.token,
+            secret,
+            now_ms
+        )
+        .is_err(),
         "expected bad signature session token to be rejected"
     );
 }
@@ -119,7 +126,8 @@ fn jwt_vectors() {
         "expected expired jwt to be rejected"
     );
     assert!(
-        verify_hs256_jwt_checked(&vf.udp_relay_jwt.tokens.bad_signature.token, secret, now).is_err(),
+        verify_hs256_jwt_checked(&vf.udp_relay_jwt.tokens.bad_signature.token, secret, now)
+            .is_err(),
         "expected bad signature jwt to be rejected"
     );
 }
@@ -139,7 +147,6 @@ fn mint_rejects_oversized_tokens() {
         aud: None,
         iss: None,
     };
-    let err = mint_hs256_jwt(&claims, b"secret")
-        .expect_err("expected oversized jwt mint to fail");
+    let err = mint_hs256_jwt(&claims, b"secret").expect_err("expected oversized jwt mint to fail");
     assert_eq!(err, MintError::TooLong);
 }

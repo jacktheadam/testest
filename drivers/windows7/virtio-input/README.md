@@ -5,9 +5,9 @@ packaging/signing helpers needed to produce an installable driver package.
 
 End-to-end validation plan (device model + driver + web runtime):
 
-- [`docs/virtio-input-test-plan.md`](../../../docs/virtio-input-test-plan.md)
+- [`wiki/areas/usb-input.md`](wiki/areas/usb-input.md)
 
-Canonical naming (see [`docs/adr/0016-win7-virtio-driver-naming.md`](../../../docs/adr/0016-win7-virtio-driver-naming.md)):
+Canonical naming (see [`wiki/decisions/0016-win7-virtio-driver-naming.md`](wiki/decisions/0016-win7-virtio-driver-naming.md)):
 
 - SYS: `aero_virtio_input.sys`
 - Service: `aero_virtio_input`
@@ -183,7 +183,7 @@ To confirm the IDs on Windows 7:
 
 ### Interrupts: INTx baseline, optional MSI/MSI-X
 
-Per the [`AERO-W7-VIRTIO` v1 contract](../../../docs/windows7-virtio-driver-contract.md) (§1.8), **INTx is required**
+Per the [`AERO-W7-VIRTIO` v1 contract](wiki/areas/drivers-windows.md) (§1.8), **INTx is required**
 and MSI/MSI-X is an optional enhancement.
 
 MSI/MSI-X must not be required for functionality: if Windows does not allocate MSI/MSI-X, the driver is expected to
@@ -204,7 +204,7 @@ Notes:
 - `MessageNumberLimit` is a request; Windows may allocate fewer messages than requested.
 - If MSI/MSI-X allocation fails (or the device has no MSI/MSI-X capability), Windows will provide an **INTx** interrupt resource.
 
-For background, see [`docs/windows/virtio-pci-modern-interrupts.md`](../../../docs/windows/virtio-pci-modern-interrupts.md) (§5).
+For background, see [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md) (§5).
 
 #### Expected vector mapping
 
@@ -296,8 +296,8 @@ From a Windows host with the WDK installed:
 
 ```powershell
 # From the repo root:
-.\ci\install-wdk.ps1
-.\ci\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers windows7/virtio-input
+.\drivers\build\install-wdk.ps1
+.\drivers\build\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers windows7/virtio-input
 ```
 
 Build outputs are staged under:
@@ -681,7 +681,7 @@ The driver and INF are intentionally strict and are **not** intended to be “ge
 | Fixed BAR0 virtio-pci modern layout (contract v1) | **Required** | `VirtioPciModernValidateAeroContractV1FixedLayout` in `src/device.c` (expects BAR0 `len >= 0x4000`, caps at offsets `0x0000/0x1000/0x2000/0x3000`, `notify_off_multiplier = 4`) |
 | Required virtqueues | **2 queues** (`eventq` + `statusq`) | `src/device.c` (expects 64/64 and `queue_notify_off` of `0/1`) |
 | Virtqueue/ring feature negotiation | **Split ring only** | `src/device.c` requires `VIRTIO_F_VERSION_1` + `VIRTIO_F_RING_INDIRECT_DESC` and refuses to negotiate `VIRTIO_F_RING_EVENT_IDX` (no EVENT_IDX / packed rings in contract v1). |
-| Required advertised event types/codes (`EV_BITS`) | **Required** | `src/device.c` enforces a minimum `EV_BITS` subset per device kind to fail fast on misconfigured devices. The **normative** Aero device-model requirements are defined in `docs/windows7-virtio-driver-contract.md` (§3.3.5). In strict contract mode, Aero tablet (`EV_ABS`) devices require `ABS_X/ABS_Y` and `ABS_INFO` ranges; for EV_BITS-inferred tablets and in compat mode, `ABS_INFO` is best-effort. |
+| Required advertised event types/codes (`EV_BITS`) | **Required** | `src/device.c` enforces a minimum `EV_BITS` subset per device kind to fail fast on misconfigured devices. The **normative** Aero device-model requirements are defined in `wiki/areas/drivers-windows.md` (§3.3.5). In strict contract mode, Aero tablet (`EV_ABS`) devices require `ABS_X/ABS_Y` and `ABS_INFO` ranges; for EV_BITS-inferred tablets and in compat mode, `ABS_INFO` is best-effort. |
 | Device identification strings | **Required (strict by default)** | `src/device.c` enforces Aero `ID_NAME` strings + contract `ID_DEVIDS` and cross-checks them against the PCI subsystem device ID when present. Opt-in compat mode (`CompatIdName=1`) accepts common QEMU `ID_NAME` strings, relaxes `ID_DEVIDS`, and can infer kind from `EV_BITS`. |
 
 ### QEMU compatibility expectations
@@ -733,7 +733,7 @@ described above.
 For authoritative PCI-ID and contract rules, see:
 
 - `docs/pci-hwids.md`
-- `../../../docs/windows7-virtio-driver-contract.md`
+- `wiki/areas/drivers-windows.md`
 
 ## Power management notes (Win7 HID idle)
 

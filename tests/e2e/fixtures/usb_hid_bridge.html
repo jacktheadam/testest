@@ -20,9 +20,9 @@
   <body>
     <canvas id="emu" width="640" height="480"></canvas>
     <script type="module">
-      import { InputCapture } from "/web/src/input/input_capture.ts";
-      import { InputEventType } from "/web/src/input/event_queue.ts";
-      import { initWasm } from "/web/src/runtime/wasm_loader.ts";
+      import { InputCapture } from "/apps/web/src/input/input_capture.ts";
+      import { InputEventType } from "/apps/web/src/input/event_queue.ts";
+      import { initWasm } from "/apps/web/src/runtime/wasm_loader.ts";
 
       const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("emu"));
 

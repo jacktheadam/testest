@@ -1,6 +1,6 @@
 import net from "node:net";
 
-import { unrefBestEffort } from "../../src/unref_safe.js";
+import { unrefBestEffort } from "../../packages/transport-safety/src/unref_safe.js";
 
 function parseHttpResponseHead(headText) {
   const lines = headText.split("\r\n");

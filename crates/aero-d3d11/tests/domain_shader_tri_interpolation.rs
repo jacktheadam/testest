@@ -1,5 +1,6 @@
 mod common;
 
+use aero_d3d11::binding_model::EXPANDED_VERTEX_MAX_VARYINGS;
 use aero_d3d11::sm4::{decode_program, opcode::*};
 use aero_d3d11::{
     parse_signatures, translate_sm4_module_to_wgsl, translate_sm4_module_to_wgsl_ds_eval, DxbcFile,
@@ -17,6 +18,26 @@ const FOURCC_OSGN: FourCC = FourCC(*b"OSGN");
 const D3D_NAME_POSITION: u32 = 1;
 const D3D_NAME_PRIMITIVE_ID: u32 = 7;
 const D3D_NAME_DOMAIN_LOCATION: u32 = 12;
+
+/// Control points are addressed at a fixed *register* stride, not packed one `vec4` apart:
+/// control point `c`'s register `r` lives at `vec4` index `c * DS_CP_IN_STRIDE + r`, where the
+/// stride is the same `pos + EXPANDED_VERTEX_MAX_VARYINGS` record the rest of the tessellation
+/// path uses. Packing control points contiguously puts them where the shader never looks, and the
+/// bounds-checked loads then read back as zero rather than failing loudly.
+const DS_CP_IN_STRIDE: usize = 1 + EXPANDED_VERTEX_MAX_VARYINGS as usize;
+
+/// Lay out register 0 of each control point at the stride the translated shader reads.
+fn pack_control_points(control_points: &[[f32; 4]]) -> Vec<u8> {
+    let mut bytes = vec![0u8; control_points.len() * DS_CP_IN_STRIDE * 16];
+    for (index, cp) in control_points.iter().enumerate() {
+        let base = index * DS_CP_IN_STRIDE * 16;
+        for (component, value) in cp.iter().enumerate() {
+            let at = base + component * 4;
+            bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+    bytes
+}
 
 fn build_dxbc(chunks: &[(FourCC, Vec<u8>)]) -> Vec<u8> {
     dxbc_test_utils::build_container_owned(chunks)
@@ -387,19 +408,11 @@ fn wgpu_domain_shader_tri_interpolates_control_points() {
         let verts_per_patch: u32 = (4 + 1) * (4 + 2) / 2;
         assert_eq!(verts_per_patch, 15);
 
-        // HS output control points: 3 control points, 1 register each.
+        // HS output control points: 3 control points, register 0 each.
         let cp0 = [1.0f32, 0.0, 0.0, 1.0];
         let cp1 = [0.0f32, 1.0, 0.0, 1.0];
         let cp2 = [0.0f32, 0.0, 1.0, 1.0];
-        // The translator indexes control points with a fixed DS_MAX_CONTROL_POINTS=32 stride.
-        // Populate the first 3 entries and leave the rest zeroed.
-        let mut cp_bytes = Vec::<u8>::with_capacity(32 * 16);
-        for cp in [cp0, cp1, cp2] {
-            for f in cp {
-                cp_bytes.extend_from_slice(&f.to_le_bytes());
-            }
-        }
-        cp_bytes.resize(32 * 16, 0);
+        let cp_bytes = pack_control_points(&[cp0, cp1, cp2]);
 
         let ds_in_cp = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ds test ds_in_cp"),
@@ -638,16 +651,11 @@ fn wgpu_domain_shader_ds_eval_links_into_tessellation_domain_eval_wrapper() {
         });
         queue.write_buffer(&patch_meta, 0, &meta_bytes);
 
-        // HS outputs: 3 control points (one vec4 per control point).
+        // HS outputs: 3 control points, register 0 each.
         let cp0 = [1.0f32, 0.0, 0.0, 1.0];
         let cp1 = [0.0f32, 1.0, 0.0, 1.0];
         let cp2 = [0.0f32, 0.0, 1.0, 1.0];
-        let mut cp_bytes = Vec::<u8>::with_capacity(3 * 16);
-        for cp in [cp0, cp1, cp2] {
-            for f in cp {
-                cp_bytes.extend_from_slice(&f.to_le_bytes());
-            }
-        }
+        let cp_bytes = pack_control_points(&[cp0, cp1, cp2]);
         let hs_control_points = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ds_eval hs_control_points"),
             size: cp_bytes.len() as u64,

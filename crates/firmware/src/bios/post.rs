@@ -38,7 +38,11 @@ impl Bios {
         //
         // Note: `BIOS_ALIAS_BASE` is outside typical guest RAM. Bus implementations that only
         // model RAM may need to treat ROM mappings as sparse.
-        let rom_image: Arc<[u8]> = rom::build_bios_rom().into();
+        let rom_image: Arc<[u8]> = rom::build_bios_rom_with_vbe(
+            self.video.vbe.lfb_base,
+            self.video.vbe.total_memory_64kb_blocks,
+        )
+        .into();
         bus.map_rom(BIOS_BASE, rom_image.clone());
         bus.map_rom(BIOS_ALIAS_BASE, rom_image);
 
@@ -74,6 +78,7 @@ impl Bios {
 
         // 3) Interrupt Vector Table.
         ivt::init_ivt(bus);
+        self.sync_vbe_rom_lfb(bus);
 
         // 4) SMBIOS: publish the SMBIOS EPS in the EBDA so Windows can discover it.
         //
@@ -106,12 +111,26 @@ impl Bios {
                 self.config.memory_size_bytes,
                 self.config.cpu_count,
                 self.config.pirq_to_gsi,
+                self.config.enable_i8042,
                 self.config.acpi_placement,
             ) {
                 Ok(info) => {
                     self.rsdp_addr = Some(info.rsdp_addr);
                     self.acpi_reclaimable = Some(info.reclaimable);
                     self.acpi_nvs = Some(info.nvs);
+
+                    // Copy the RSDP into the F-segment (0xE0000–0xFFFFF) where
+                    // Windows bootmgr scans for it. The primary RSDP stays in
+                    // the EBDA; this is a duplicate at 0xE0000 that Windows
+                    // actually discovers.
+                    //
+                    // The RSDP is 36 bytes (ACPI 2.0+). We copy it verbatim
+                    // from the EBDA location.
+                    const FSEG_RSDP_ADDR: u64 = 0xE0000;
+                    let mut buf = [0u8; 36];
+                    bus.read_physical(info.rsdp_addr, &mut buf);
+                    bus.write_physical(FSEG_RSDP_ADDR, &buf);
+                    self.push_tty_bytes(b"BIOS: RSDP duplicated to F-segment (0xE0000)\n");
                 }
                 Err(err) => {
                     let msg = format!("BIOS: ACPI build failed: {err}");

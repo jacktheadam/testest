@@ -46,7 +46,6 @@ mod upload;
 mod wgpu_async;
 mod wgpu_integration;
 
-mod acmd_executor;
 pub mod bc_decompress;
 mod packed_16bit;
 mod readback;
@@ -71,7 +70,6 @@ pub mod protocol_d3d11;
 pub mod protocol_d3d9;
 pub mod stats;
 
-pub use acmd_executor::{AeroGpuAcmdExecutor, AeroGpuAcmdExecutorError};
 pub use aerogpu_d3d9_executor::{
     AerogpuD3d9Error, AerogpuD3d9Executor, AerogpuD3d9ExecutorConfig, PresentedScanout,
 };

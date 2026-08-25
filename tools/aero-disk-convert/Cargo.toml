@@ -1,8 +1,8 @@
 [package]
 name = "aero-disk-convert"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
 publish = false
 default-run = "aero-disk-convert"
 
@@ -15,6 +15,7 @@ anyhow = "1"
 aero-storage = { path = "../../crates/aero-storage" }
 clap = { version = "4", features = ["derive"] }
 indicatif = "0.17"
+workspace-hack = { version = "0.1", path = "../../crates/workspace-hack" }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 assert_cmd = "2"
 tempfile = "3"

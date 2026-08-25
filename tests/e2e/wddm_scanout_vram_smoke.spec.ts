@@ -7,11 +7,11 @@ async function waitForReady(page: Page) {
 test("wddm scanout smoke: presents from VRAM aperture base_paddr (BGRX->RGBA, alpha=255)", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/wddm-scanout-vram-smoke.html", { waitUntil: "load" });
+  await page.goto("/apps/web/wddm-scanout-vram-smoke.html", { waitUntil: "load" });
   await waitForReady(page);
 
   const result = await page.evaluate(async () => {
-    const scanout = await import("/web/src/ipc/scanout_state.ts");
+    const scanout = await import("/apps/web/src/ipc/scanout_state.ts");
     const api = (window as any).__aeroTest;
     if (!api) throw new Error("__aeroTest missing");
     if (api.error) throw new Error(api.error);

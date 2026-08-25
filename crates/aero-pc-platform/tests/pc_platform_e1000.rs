@@ -504,7 +504,10 @@ fn pc_platform_respects_pci_interrupt_disable_bit_for_e1000_intx() {
     let bdf = NIC_E1000_82540EM.bdf;
     let bar0_base = read_e1000_bar0_base(&mut pc);
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {
@@ -562,7 +565,10 @@ fn pc_platform_resyncs_e1000_pci_command_before_polling_intx_level() {
     let bdf = NIC_E1000_82540EM.bdf;
     let bar0_base = read_e1000_bar0_base(&mut pc);
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {

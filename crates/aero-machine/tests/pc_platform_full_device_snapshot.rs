@@ -64,7 +64,7 @@ fn snapshot_restore_preserves_full_pc_platform_device_state() {
 
     // Configure IOAPIC redirection entries:
     // - PIT (ISA IRQ0 is mapped to GSI2 by default via ACPI ISO) => edge-triggered, unmasked.
-    // - PCI INTx (PIRQ[A-D] defaults to GSIs 10-13; use device 0 INTA# => GSI10) => active-low,
+    // - PCI INTx (Q35 root group defaults to GSIs 20-23; device 0 INTA# => GSI20) => active-low,
     //   level-triggered, masked.
     // - HPET timer0 => route to GSI4 => active-high, level-triggered, masked.
     let pit_vector = 0x40u8;
@@ -72,7 +72,7 @@ fn snapshot_restore_preserves_full_pc_platform_device_state() {
     let hpet_vector = 0x42u8;
 
     let gsi_pit = 2u32;
-    let gsi_intx = 10u32;
+    let gsi_intx = 20u32;
     let gsi_hpet = 4u32;
 
     program_ioapic_entry(&mut src, gsi_pit, u32::from(pit_vector), 0);
@@ -139,7 +139,7 @@ fn snapshot_restore_preserves_full_pc_platform_device_state() {
     assert_eq!(expected_cf8, cfg_addr);
     assert_eq!(expected_cfc, command);
 
-    // Assert a PCI INTx line via the router (00:00.0 INTA# => GSI10).
+    // Assert a PCI INTx line via the router (00:00.0 INTA# => GSI20).
     let interrupts = src.platform_interrupts().expect("pc platform enabled");
     let pci_intx = src.pci_intx_router().expect("pc platform enabled");
     {

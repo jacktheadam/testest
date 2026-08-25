@@ -1,4 +1,4 @@
-import { isValidHttpTokenPart } from "./httpTokens.js";
+import { isValidHttpTokenPart } from "../../../packages/transport-safety/src/http_tokens.js";
 
 export function hasWebSocketSubprotocol(header, required) {
   if (!header) return { ok: true, has: false };

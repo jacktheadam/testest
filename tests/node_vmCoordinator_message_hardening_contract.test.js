@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { VmCoordinator } from '../src/vmCoordinator.js';
+import { VmCoordinator } from './node_vm_harness/vm_coordinator.js';
 import { withCustomEventOverride } from './helpers/custom_event_env.js';
 
 test('node VmCoordinator: _onWorkerMessage does not throw on hostile proxy messages', () => {

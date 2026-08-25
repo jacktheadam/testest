@@ -82,8 +82,8 @@ pub fn run_until_halt(m: &mut Machine) {
 pub fn ioapic_default_polarity_low(gsi: u32) -> bool {
     // Keep this logic in sync with `aero_interrupts::apic::IoApic` default PC wiring assumptions:
     // - SCI (GSI9) is active-low
-    // - PCI INTx GSIs (10-13) are active-low
-    // - GSIs >= 16 are also treated as active-low by default.
+    // - legacy PCI INTx GSIs (10-13) are active-low
+    // - the Q35 PCI APIC window at GSIs >= 16 is also active-low by default.
     gsi == 9 || (10..=13).contains(&gsi) || gsi >= 16
 }
 

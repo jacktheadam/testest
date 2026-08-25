@@ -54,9 +54,9 @@ These vectors are referenced by tests in:
 - Rust: `crates/aero-l2-protocol/tests/test_vectors.rs`
 - Rust: `crates/aero-l2-proxy/tests/auth_vectors.rs` and `crates/aero-l2-proxy/src/server.rs` (unit tests)
 - Rust: `crates/aero-auth-tokens/tests/vectors.rs` (auth token verification)
-- TypeScript (web): `web/src/shared/l2TunnelProtocol.test.ts`
-- TypeScript (web): `web/test/l2TunnelProtocolVectors.test.ts` (Node conformance check)
-- Node (gateway): `backend/aero-gateway/test/sessionToken.vectors.test.ts` and `backend/aero-gateway/test/udpRelayJwt.vectors.test.ts`
+- TypeScript (web): `apps/web/src/shared/l2TunnelProtocol.test.ts`
+- TypeScript (web): `apps/web/test/l2TunnelProtocolVectors.test.ts` (Node conformance check)
+- Node (gateway): `services/gateway/test/sessionToken.vectors.test.ts` and `services/gateway/test/udpRelayJwt.vectors.test.ts`
 - Go (relay): `proxy/webrtc-udp-relay/internal/auth/jwt_vectors_test.go`
 - Go (relay): `proxy/webrtc-udp-relay/internal/l2tunnel/protocol_test.go`
 

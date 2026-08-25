@@ -9,7 +9,7 @@
 #   NOTE: `cargo deny check sources` lints registries and git sources; path dependencies
 #   are local to the repo/workspace and aren't covered by the sources check.
 #
-# Docs context: see `docs/13-legal-considerations.md` (license compatibility and audits).
+# Docs context: see `wiki/history/retirements.md` (license compatibility and audits).
 
 [graph]
 # Check the full feature graph so optional feature flags can't accidentally

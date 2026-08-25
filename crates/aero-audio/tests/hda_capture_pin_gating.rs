@@ -40,7 +40,7 @@ fn setup_basic_capture(
         sd.lvi = 0;
         sd.fmt = fmt_raw;
         // SRST | RUN | stream number 2.
-        sd.ctl = (1 << 0) | (1 << 1) | (2 << 20);
+        sd.ctl = (1 << 1) | (2 << 20);
     }
 
     (pcm_base, pcm_len_bytes)

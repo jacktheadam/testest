@@ -4,7 +4,7 @@
 //!
 //! This crate provides a canonical Rust implementation of the TCP mux framing used by Aero.
 //! The normative reference implementations live in:
-//! - `backend/aero-gateway/src/protocol/tcpMux.ts`
+//! - `services/gateway/src/protocol/tcpMux.ts`
 //! - `tools/net-proxy-server/src/protocol.js`
 //! - `web/src/net/tcpMuxProxy.ts` (client-side usage)
 //!
@@ -25,7 +25,7 @@ pub const TCP_MUX_SUBPROTOCOL: &str = "aero-tcp-mux-v1";
 
 pub const TCP_MUX_HEADER_LEN: usize = 9;
 
-// Keep in sync with `backend/aero-gateway/src/protocol/tcpMux.ts`.
+// Keep in sync with `services/gateway/src/protocol/tcpMux.ts`.
 pub const TCP_MUX_MSG_TYPE_OPEN: u8 = 1;
 pub const TCP_MUX_MSG_TYPE_DATA: u8 = 2;
 pub const TCP_MUX_MSG_TYPE_CLOSE: u8 = 3;
@@ -33,7 +33,7 @@ pub const TCP_MUX_MSG_TYPE_ERROR: u8 = 4;
 pub const TCP_MUX_MSG_TYPE_PING: u8 = 5;
 pub const TCP_MUX_MSG_TYPE_PONG: u8 = 6;
 
-// These match `backend/aero-gateway/src/config.ts` defaults.
+// These match `services/gateway/src/config.ts` defaults.
 pub const TCP_MUX_DEFAULT_MAX_PAYLOAD_LEN: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

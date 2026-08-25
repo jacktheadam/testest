@@ -2,7 +2,7 @@
 import { randomInt } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { formatOneLineError, formatOneLineUtf8 } from '../../src/text.js';
+import { formatOneLineError, formatOneLineUtf8 } from '../../packages/transport-safety/src/text.js';
 
 /**
  * Range Harness

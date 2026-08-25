@@ -67,11 +67,7 @@ fn program_ioapic_entry(
     let redtbl_low = 0x10u32 + gsi * 2;
     let redtbl_high = redtbl_low + 1;
     ints.ioapic_mmio_write(0x00, redtbl_low);
-    // Match typical PCI INTx wiring: active-low, edge-triggered.
-    //
-    // Note: for GSI10-13, `aero_interrupts::apic::IoApic` assumes active-low board wiring; guests
-    // should therefore set the redirection table polarity bit (bit13) so the IOAPIC interprets a
-    // low electrical level as an asserted interrupt.
+    // Match Q35 PCI INTx wiring: active-low, edge-triggered.
     ints.ioapic_mmio_write(0x10, u32::from(vector) | (1 << 13));
     ints.ioapic_mmio_write(0x00, redtbl_high);
     ints.ioapic_mmio_write(0x10, 0);
@@ -80,7 +76,7 @@ fn program_ioapic_entry(
 #[test]
 fn machine_snapshot_roundtrip_preserves_imcr_apic_mode_and_pending_ioapic_interrupt() {
     const RAM_SIZE: u64 = 2 * 1024 * 1024;
-    const GSI: u32 = 10;
+    const GSI: u32 = 20;
     const APIC_VECTOR: u8 = 0x60;
     const PIC_VECTOR: u8 = 0x21; // IRQ1 with PIC base 0x20.
 

@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { createRequire } from "node:module";
-import { formatOneLineError } from "../src/text.js";
+import { formatOneLineError } from "../packages/transport-safety/src/text.js";
 
 const require = createRequire(import.meta.url);
 

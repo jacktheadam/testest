@@ -203,7 +203,9 @@ fn aerogpu_vbe_lfb_fastpath_honors_panning_and_stride() {
     // - ignoring stride (using row_bytes instead of bytes_per_scan_line).
     //
     // Then we assert the (0,0) output pixel matches only the correct base computation.
-    let bytes_per_scan_line = 4101u16;
+    // Bochs exposes pitch as a whole-pixel virtual width; use an exactly representable non-default
+    // pitch, matching SeaBIOS' 4F06 behavior.
+    let bytes_per_scan_line = 4100u16;
     let x_off = 1u16;
     let y_off = 4u16;
     let boot = build_vbe_mode_118_with_stride_and_display_start_boot_sector(

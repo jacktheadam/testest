@@ -742,6 +742,17 @@ pub fn divsd(cpu: &mut CpuState, bus: &mut impl Bus, dst: XmmReg, src: XmmOperan
     scalar_f64_op(cpu, bus, dst, src, |a, b| a / b)
 }
 
+pub fn sqrtsd(cpu: &mut CpuState, bus: &mut impl Bus, dst: XmmReg, src: XmmOperand) -> Result<()> {
+    let dst_old = cpu.sse.xmm[dst.index()];
+    let src_bits = read_xmm_operand_u64(cpu, bus, src);
+    let val = f64::from_bits(src_bits);
+    if val < 0.0 {
+        or_mxcsr_flags(cpu, MXCSR_IE);
+    }
+    cpu.sse.xmm[dst.index()] = u128_set_low_u64_preserve(dst_old, val.sqrt().to_bits());
+    Ok(())
+}
+
 fn scalar_f64_op(
     cpu: &mut CpuState,
     bus: &mut impl Bus,
@@ -773,6 +784,15 @@ pub fn mulpd(cpu: &mut CpuState, bus: &mut impl Bus, dst: XmmReg, src: XmmOperan
 
 pub fn divpd(cpu: &mut CpuState, bus: &mut impl Bus, dst: XmmReg, src: XmmOperand) -> Result<()> {
     packed_f64_op(cpu, bus, dst, src, |a, b| a / b)
+}
+
+pub fn sqrtpd(cpu: &mut CpuState, bus: &mut impl Bus, dst: XmmReg, src: XmmOperand) -> Result<()> {
+    let b = u128_to_f64x2(read_xmm_operand_128(cpu, bus, src));
+    if b[0] < 0.0 || b[1] < 0.0 {
+        or_mxcsr_flags(cpu, MXCSR_IE);
+    }
+    cpu.sse.xmm[dst.index()] = f64x2_to_u128([b[0].sqrt(), b[1].sqrt()]);
+    Ok(())
 }
 
 fn packed_f64_op(

@@ -83,4 +83,3 @@ fn hs_translation_reflects_internal_stage_interface_buffers() {
         );
     }
 }
-

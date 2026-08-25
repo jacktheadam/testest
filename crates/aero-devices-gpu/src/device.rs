@@ -31,7 +31,7 @@ impl Default for AeroGpuBar0MmioDeviceConfig {
 ///
 /// Vblank semantics are documented in:
 /// - `drivers/aerogpu/protocol/vblank.md`, and
-/// - `docs/graphics/win7-vblank-present-requirements.md`.
+/// - `wiki/areas/graphics.md`.
 pub struct AeroGpuBar0MmioDevice {
     pub regs: AeroGpuRegs,
     executor: AeroGpuExecutor,

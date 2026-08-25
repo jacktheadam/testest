@@ -34,8 +34,8 @@ fn vga_transitional_stub_profile_matches_aero_gpu_vga_constants() {
 #[test]
 fn vga_pci_stub_does_not_collide_with_canonical_aerogpu_bdf() {
     // This test exists to guard the Windows driver binding contract documented in:
-    // - docs/abi/aerogpu-pci-identity.md
-    // - docs/pci-device-compatibility.md
+    // - wiki/areas/graphics.md
+    // - the platform and firmware area page
     //
     // `00:07.0` is reserved for AeroGPU (A3A0:0001). Ensure no non-AeroGPU identity ever occupies
     // this BDF (which would break the Windows driver binding contract).

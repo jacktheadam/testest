@@ -15,7 +15,7 @@ function alu32ExpectedChecksum(iters: number): string {
 }
 
 test('guest cpu bench smoke test', async ({ page }) => {
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: 'load' });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: 'load' });
 
   await page.waitForFunction(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

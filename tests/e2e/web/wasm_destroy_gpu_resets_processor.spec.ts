@@ -4,26 +4,26 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 test("aero-gpu-wasm: destroy_gpu resets submit_aerogpu command processor state", async ({ page }) => {
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
 
   const thisDir = dirname(fileURLToPath(import.meta.url));
   const repoRoot = dirname(dirname(dirname(thisDir)));
   const bundles = [
     {
-      js: join(repoRoot, "web", "src", "wasm", "pkg-single-gpu", "aero_gpu_wasm.js"),
-      wasm: join(repoRoot, "web", "src", "wasm", "pkg-single-gpu", "aero_gpu_wasm_bg.wasm"),
+      js: join(repoRoot, "apps/web", "src", "wasm", "pkg-single-gpu", "aero_gpu_wasm.js"),
+      wasm: join(repoRoot, "apps/web", "src", "wasm", "pkg-single-gpu", "aero_gpu_wasm_bg.wasm"),
     },
     {
-      js: join(repoRoot, "web", "src", "wasm", "pkg-threaded-gpu", "aero_gpu_wasm.js"),
-      wasm: join(repoRoot, "web", "src", "wasm", "pkg-threaded-gpu", "aero_gpu_wasm_bg.wasm"),
+      js: join(repoRoot, "apps/web", "src", "wasm", "pkg-threaded-gpu", "aero_gpu_wasm.js"),
+      wasm: join(repoRoot, "apps/web", "src", "wasm", "pkg-threaded-gpu", "aero_gpu_wasm_bg.wasm"),
     },
     {
-      js: join(repoRoot, "web", "src", "wasm", "pkg-single-gpu-dev", "aero_gpu_wasm.js"),
-      wasm: join(repoRoot, "web", "src", "wasm", "pkg-single-gpu-dev", "aero_gpu_wasm_bg.wasm"),
+      js: join(repoRoot, "apps/web", "src", "wasm", "pkg-single-gpu-dev", "aero_gpu_wasm.js"),
+      wasm: join(repoRoot, "apps/web", "src", "wasm", "pkg-single-gpu-dev", "aero_gpu_wasm_bg.wasm"),
     },
     {
-      js: join(repoRoot, "web", "src", "wasm", "pkg-threaded-gpu-dev", "aero_gpu_wasm.js"),
-      wasm: join(repoRoot, "web", "src", "wasm", "pkg-threaded-gpu-dev", "aero_gpu_wasm_bg.wasm"),
+      js: join(repoRoot, "apps/web", "src", "wasm", "pkg-threaded-gpu-dev", "aero_gpu_wasm.js"),
+      wasm: join(repoRoot, "apps/web", "src", "wasm", "pkg-threaded-gpu-dev", "aero_gpu_wasm_bg.wasm"),
     },
   ];
   if (!bundles.some(({ js, wasm }) => existsSync(js) && existsSync(wasm))) {
@@ -44,13 +44,13 @@ test("aero-gpu-wasm: destroy_gpu resets submit_aerogpu command processor state",
 
   await page.setContent(`
     <script type="module">
-      import initAeroGpuWasm, { destroy_gpu, submit_aerogpu } from "/web/src/wasm/aero-gpu.ts";
+      import initAeroGpuWasm, { destroy_gpu, submit_aerogpu } from "/apps/web/src/wasm/aero-gpu.ts";
       import {
         AerogpuCmdWriter,
         AEROGPU_RESOURCE_USAGE_TEXTURE,
-      } from "/emulator/protocol/aerogpu/aerogpu_cmd.ts";
-      import { AerogpuFormat } from "/emulator/protocol/aerogpu/aerogpu_pci.ts";
-      import { formatOneLineUtf8 } from "/web/src/text.ts";
+      } from "/crates/aero-protocol/aerogpu/aerogpu_cmd.ts";
+      import { AerogpuFormat } from "/crates/aero-protocol/aerogpu/aerogpu_pci.ts";
+      import { formatOneLineUtf8 } from "/packages/transport-safety/src/text.js";
 
       const MAX_ERROR_BYTES = 512;
 

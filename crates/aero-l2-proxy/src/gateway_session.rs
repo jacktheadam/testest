@@ -10,7 +10,7 @@ pub struct VerifiedSession {
 
 /// Verify an Aero Gateway session token.
 ///
-/// This must match `backend/aero-gateway/src/session.ts`:
+/// This must match `services/gateway/src/session.ts`:
 /// - Token format: `<payload_b64url>.<sig_b64url>`
 /// - Signature: `HMAC_SHA256(secret, payload_b64url)`
 /// - base64url: `-`/`_`, no padding
@@ -25,9 +25,7 @@ pub fn verify_session_token(token: &str, secret: &[u8], now_ms: u64) -> Option<V
 }
 
 /// Extract the raw `aero_session` cookie value from a `Cookie` header.
-pub(crate) fn extract_session_cookie_raw_value<'a>(
-    cookie_header: &'a HeaderValue,
-) -> Option<&'a str> {
+pub(crate) fn extract_session_cookie_raw_value(cookie_header: &HeaderValue) -> Option<&str> {
     let raw = cookie_header.to_str().ok()?;
     extract_cookie_value_raw(raw, SESSION_COOKIE_NAME)
 }

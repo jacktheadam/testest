@@ -1348,6 +1348,9 @@ fn map_flagset(flags: FlagSet) -> FlagSet {
 fn map_binop(op: T1BinOp) -> Option<BinOp> {
     match op {
         T1BinOp::Add => Some(BinOp::Add),
+        T1BinOp::Adc | T1BinOp::Sbb | T1BinOp::Rol | T1BinOp::Ror | T1BinOp::Bswap | T1BinOp::Mul => {
+            None
+        }
         T1BinOp::Sub => Some(BinOp::Sub),
         T1BinOp::And => Some(BinOp::And),
         T1BinOp::Or => Some(BinOp::Or),

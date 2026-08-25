@@ -22,17 +22,23 @@ function findMatches(source, re) {
 
 test("contract: node ws code must not call ws.send/ws.close directly", async () => {
   const files = await collectJsTsSourceFiles(repoRoot, [
-    "server/src",
-    "net-proxy/src",
+    // `server/src` is gone; `apps/web/src` is where the browser host lives and was
+    // never scanned, even though its `ws_safe.js` is in the allowlist below.
+    "apps/web/src",
+    "services/net-proxy/src",
     "tools/net-proxy-server/src",
-    "backend/aero-gateway/src",
+    "services/gateway/src",
   ]);
 
   const allowlist = new Set([
     // Canonical wrappers.
-    "src/ws_safe.js",
+    "apps/web/src/ws_safe.js",
+    // The TypeScript wrapper, which duplicates the .js one above. Both are
+    // canonical; the scan only started seeing this one once apps/web/src was
+    // actually included in the roots.
+    "apps/web/src/net/wsSafe.ts",
     "scripts/_shared/ws_safe.js",
-    "net-proxy/src/wsClose.ts",
+    "services/net-proxy/src/wsClose.ts",
   ]);
 
   const rules = [

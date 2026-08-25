@@ -1,5 +1,6 @@
 mod common;
 
+use aero_d3d11::binding_model::EXPANDED_VERTEX_MAX_VARYINGS;
 use aero_d3d11::runtime::aerogpu_cmd_executor::AerogpuD3d11Executor;
 use aero_d3d11::runtime::expansion_scratch::{
     ExpansionScratchAllocator, ExpansionScratchDescriptor,
@@ -52,8 +53,13 @@ fn tessellation_scratch_oom_error_includes_computed_sizes() {
         let tess_factor_clamped = MAX_TESS_FACTOR_SUPPORTED;
         let vertices_per_patch = (tess_factor_clamped as u64 + 1).pow(2);
         let indices_per_patch = 6u64 * (tess_factor_clamped as u64).pow(2);
-        let ds_stride_bytes = ds_output_register_count as u64 * 16;
-        let expanded_vertex_bytes = vertices_per_patch * patch_count_total as u64 * ds_stride_bytes;
+        // Expanded vertices are *not* sized from the declared DS output count. They are written in
+        // the fixed layout the emulation passthrough VS consumes — `pos` plus
+        // `EXPANDED_VERTEX_MAX_VARYINGS` varyings — so the stride is the same whatever the shader
+        // declares. `ds_output_register_count` sizes the HS/DS per-control-point payload instead.
+        let expanded_vertex_stride_bytes = u64::from(1 + EXPANDED_VERTEX_MAX_VARYINGS) * 16;
+        let expanded_vertex_bytes =
+            vertices_per_patch * patch_count_total as u64 * expanded_vertex_stride_bytes;
         let expanded_index_bytes = indices_per_patch * patch_count_total as u64 * 4;
 
         assert!(

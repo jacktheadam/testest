@@ -130,7 +130,7 @@ Build the default target set (CPU-only targets that don't require extra Cargo fe
 cd fuzz && cargo +"$nightly" fuzz build
 ```
 
-To build the same feature set used by the CI fuzz smoke workflow (`.github/workflows/fuzz.yml`):
+To build the smoke-suite feature set (a fast subset for quick validation):
 
 ```bash
 cd fuzz && cargo +"$nightly" fuzz build --features ci-smoke

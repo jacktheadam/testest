@@ -36,7 +36,7 @@ async function listWorkspacePackageJsonRelPaths() {
     if (typeof entry !== "string" || entry.trim() === "") continue;
 
     // Support the small subset of npm workspace patterns we use in this repo.
-    // - Literal paths: "web", "bench", "backend/aero-gateway", ...
+    // - Literal paths: "apps/web", "bench", "services/gateway", ...
     // - One-segment wildcards: "packages/*"
     if (entry.endsWith("/*")) {
       const baseRel = entry.slice(0, -2);

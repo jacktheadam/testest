@@ -75,7 +75,7 @@ fn guest_tools_devices_cmd_service_overrides_for_spec(
     // names. Only apply spec-based overrides for legacy/back-compat behaviour when using
     // the canonical in-repo contract.
     //
-    // Virtio-win Guest Tools builds should pass `docs/windows-device-contract-virtio-win.json`
+    // Virtio-win Guest Tools builds should pass `protocol-vectors/windows-device-contract-virtio-win.json`
     // (or a derived override) so the contract itself controls service naming.
     if !contract
         .contract_name
@@ -94,11 +94,11 @@ fn guest_tools_devices_cmd_service_overrides_for_spec(
     // Legacy/back-compat:
     //
     // Some historical virtio-win packaging flows used the canonical in-repo device contract
-    // (`docs/windows-device-contract.json`) and relied on *spec-based* overrides to swap
+    // (`protocol-vectors/windows-device-contract.json`) and relied on *spec-based* overrides to swap
     // `AERO_VIRTIO_*_SERVICE` values to the upstream virtio-win service names.
     //
     // Modern virtio-win packaging should instead pass the virtio-win contract variant
-    // (`docs/windows-device-contract-virtio-win.json`) (or a derived override generated from real
+    // (`protocol-vectors/windows-device-contract-virtio-win.json`) (or a derived override generated from real
     // INFs) so the contract remains the source of truth for `config/devices.cmd`.
     let mut service_overrides = GuestToolsDevicesCmdServiceOverrides::default();
     if driver_names.contains("viostor") {
@@ -129,23 +129,23 @@ pub fn package_guest_tools(config: &PackageConfig) -> Result<PackageOutputs> {
             .with_context(|| format!("canonicalize JSON {}", config.spec_path.display()))?,
     );
 
-    let (contract, contract_bytes) = windows_device_contract::load_windows_device_contract_with_bytes(
-        &config.windows_device_contract_path,
-    )
-    .with_context(|| {
-        format!(
-            "load windows device contract {}",
-            config.windows_device_contract_path.display()
+    let (contract, contract_bytes) =
+        windows_device_contract::load_windows_device_contract_with_bytes(
+            &config.windows_device_contract_path,
         )
-    })?;
-    let contract_sha256 = sha256_hex(
-        &canonicalize_json_bytes(&contract_bytes).with_context(|| {
+        .with_context(|| {
+            format!(
+                "load windows device contract {}",
+                config.windows_device_contract_path.display()
+            )
+        })?;
+    let contract_sha256 =
+        sha256_hex(&canonicalize_json_bytes(&contract_bytes).with_context(|| {
             format!(
                 "canonicalize JSON {}",
                 config.windows_device_contract_path.display()
             )
-        })?,
-    );
+        })?);
 
     let service_overrides = guest_tools_devices_cmd_service_overrides_for_spec(&contract, &spec);
     let devices_cmd_bytes = generate_guest_tools_devices_cmd_bytes_with_overrides(
@@ -296,10 +296,7 @@ fn ensure_no_case_insensitive_path_collisions(files: &[FileToPackage]) -> Result
             for i in 1..parts.len() {
                 let dir = parts[..i].join("/");
                 let key = dir.to_ascii_lowercase();
-                by_lower
-                    .entry(key)
-                    .or_default()
-                    .insert(format!("{dir}/"));
+                by_lower.entry(key).or_default().insert(format!("{dir}/"));
             }
         }
     }
@@ -368,13 +365,9 @@ fn collect_files(
     ] {
         let src = config.guest_tools_dir.join(file_name);
         if !src.is_file() {
-            bail!(
-                "guest tools missing required file: {}",
-                format!("{src:?}")
-            );
+            bail!("guest tools missing required file: {src:?}");
         }
-        let meta =
-            fs::symlink_metadata(&src).with_context(|| format!("stat {}", src.display()))?;
+        let meta = fs::symlink_metadata(&src).with_context(|| format!("stat {}", src.display()))?;
         if meta.file_type().is_symlink() {
             bail!(
                 "refusing to package guest tools file because it is a symlink: {}",
@@ -389,10 +382,7 @@ fn collect_files(
 
     let config_dir = config.guest_tools_dir.join("config");
     if !config_dir.is_dir() {
-        bail!(
-            "guest tools missing required directory: {}",
-            format!("{config_dir:?}")
-        );
+        bail!("guest tools missing required directory: {config_dir:?}");
     }
 
     out.push(FileToPackage {
@@ -548,15 +538,12 @@ fn collect_files(
                 "guest tools certs directory contains no certificate files (*.cer/*.crt/*.p7b), \
                  but signing_policy={} requires at least one: {}",
                 config.signing_policy,
-                format!("{certs_dir:?}"),
+                format_args!("{certs_dir:?}"),
             );
         }
         out.extend(certs);
     } else if config.signing_policy.certs_required() {
-        bail!(
-            "guest tools missing required directory: {}",
-            format!("{certs_dir:?}")
-        );
+        bail!("guest tools missing required directory: {certs_dir:?}");
     }
     // Optional: include documentation alongside the packaged driver tree.
     // (Driver binaries themselves come from `drivers_dir`.)
@@ -597,10 +584,7 @@ fn collect_files(
                 );
             }
             if !meta.is_dir() {
-                bail!(
-                    "guest tools tools path exists but is not a directory: {}",
-                    format!("{tools_dir:?}")
-                );
+                bail!("guest tools tools path exists but is not a directory: {tools_dir:?}");
             }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -840,8 +824,8 @@ fn validate_drivers(
         let mut matches: Vec<(&'static str, PathBuf)> = Vec::new();
         let primary = arch_dir.join(name);
         if primary.is_dir() {
-            let meta =
-                fs::symlink_metadata(&primary).with_context(|| format!("stat {}", primary.display()))?;
+            let meta = fs::symlink_metadata(&primary)
+                .with_context(|| format!("stat {}", primary.display()))?;
             if meta.file_type().is_symlink() {
                 bail!(
                     "refusing to package guest tools because a symlink was found in drivers/: {}",
@@ -853,7 +837,8 @@ fn validate_drivers(
         for alias in legacy_driver_dir_aliases(name) {
             let p = arch_dir.join(alias);
             if p.is_dir() {
-                let meta = fs::symlink_metadata(&p).with_context(|| format!("stat {}", p.display()))?;
+                let meta =
+                    fs::symlink_metadata(&p).with_context(|| format!("stat {}", p.display()))?;
                 if meta.file_type().is_symlink() {
                     bail!(
                         "refusing to package guest tools because a symlink was found in drivers/: {}",
@@ -941,7 +926,10 @@ fn validate_drivers(
                 tried
             );
         } else {
-            eprintln!("warning: optional driver directory missing: {} (x86)", drv.name);
+            eprintln!(
+                "warning: optional driver directory missing: {} (x86)",
+                drv.name
+            );
         }
 
         // amd64
@@ -963,7 +951,10 @@ fn validate_drivers(
                 tried
             );
         } else {
-            eprintln!("warning: optional driver directory missing: {} (amd64)", drv.name);
+            eprintln!(
+                "warning: optional driver directory missing: {} (amd64)",
+                drv.name
+            );
         }
     }
 
@@ -1173,7 +1164,10 @@ fn validate_driver_dir(
                 arch
             );
         }
-        if !expected_add_services.iter().any(|s| s.eq_ignore_ascii_case(svc)) {
+        if !expected_add_services
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case(svc))
+        {
             expected_add_services.push(svc.to_string());
         }
     }
@@ -1763,11 +1757,10 @@ fn collect_inf_references(inf_text: &str) -> (BTreeSet<String>, bool) {
     //
     // - `CatalogFile[.<suffix>] = foo.cat` - validates the expected catalog file is present.
     // - `ServiceBinary = %12%\foo.sys` - validates the driver binary referenced by the service.
-    let catalog_file_re =
-        regex::RegexBuilder::new(r"^\s*CatalogFile(?:\.[^=]+)?\s*=\s*([^\s;]+)")
-            .case_insensitive(true)
-            .build()
-            .expect("valid regex");
+    let catalog_file_re = regex::RegexBuilder::new(r"^\s*CatalogFile(?:\.[^=]+)?\s*=\s*([^\s;]+)")
+        .case_insensitive(true)
+        .build()
+        .expect("valid regex");
     let service_binary_re = regex::RegexBuilder::new(r"^\s*ServiceBinary\s*=\s*([^\s;]+)")
         .case_insensitive(true)
         .build()
@@ -2153,9 +2146,7 @@ fn validate_windows_safe_rel_path(rel_path: &str) -> Result<()> {
             bail!("package path {rel_path:?} contains an empty component");
         }
         if component == "." || component == ".." {
-            bail!(
-                "package path {rel_path:?} contains an invalid component: {component:?}"
-            );
+            bail!("package path {rel_path:?} contains an invalid component: {component:?}");
         }
         if component.ends_with('.') || component.ends_with(' ') {
             bail!(
@@ -2167,12 +2158,10 @@ fn validate_windows_safe_rel_path(rel_path: &str) -> Result<()> {
                 "package path {rel_path:?} contains a Windows-invalid component (control character {c:?}): {component:?}"
             );
         }
-        if let Some(c) = component.chars().find(|c| {
-            matches!(
-                c,
-                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
-            )
-        }) {
+        if let Some(c) = component
+            .chars()
+            .find(|c| matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
+        {
             bail!(
                 "package path {rel_path:?} contains a Windows-invalid component (invalid character {c:?}): {component:?}"
             );
@@ -2216,7 +2205,7 @@ fn canonicalize_json_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn manifest_input_path(path: &Path) -> Result<String> {
-    let name = path.file_name().unwrap_or_else(|| path.as_os_str());
+    let name = path.file_name().unwrap_or(path.as_os_str());
     let s = name
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("manifest input path is not valid UTF-8: {:?}", path))?;

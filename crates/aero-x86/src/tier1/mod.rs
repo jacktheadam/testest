@@ -39,17 +39,22 @@ pub enum Operand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AluOp {
     Add,
+    Adc,
     Sub,
+    Sbb,
     And,
     Or,
     Xor,
     Shl,
     Shr,
     Sar,
+    Imul,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShiftOp {
+    Rol,
+    Ror,
     Shl,
     Shr,
     Sar,
@@ -80,6 +85,12 @@ pub enum InstKind {
         count: u8,
         width: Width,
     },
+    /// Group2 shift/rotate by `CL` (`0xD2` / `0xD3`).
+    ShiftCl {
+        op: ShiftOp,
+        dst: Operand,
+        width: Width,
+    },
     Cmp {
         lhs: Operand,
         rhs: Operand,
@@ -96,6 +107,26 @@ pub enum InstKind {
     },
     Dec {
         dst: Operand,
+        width: Width,
+    },
+    Not {
+        dst: Operand,
+        width: Width,
+    },
+    /// Two's complement negate (`F6 /3`, `F7 /3`): `dst = 0 - dst`.
+    Neg {
+        dst: Operand,
+        width: Width,
+    },
+    Bswap {
+        dst: Reg,
+        width: Width,
+    },
+    /// Three-operand `IMUL r, r/m, imm` (`0x69` / `0x6B`): `dst = src * imm`.
+    Imul3 {
+        dst: Reg,
+        src: Operand,
+        imm: u64,
         width: Width,
     },
     Push {

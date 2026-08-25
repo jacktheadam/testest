@@ -94,7 +94,7 @@ fn hda_process_completes_on_oob_bdl_address() {
         sd.lvi = 0;
         sd.fmt = fmt_raw;
         // SRST | RUN | IOCE | stream number 1.
-        sd.ctl = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 20);
+        sd.ctl = (1 << 1) | (1 << 2) | (1 << 20);
     }
 
     // The call should complete without panicking even though the DMA address is invalid.
@@ -138,7 +138,7 @@ fn hda_process_completes_on_dma_addr_overflow() {
         sd.lvi = 0;
         sd.fmt = fmt_raw;
         // SRST | RUN | stream number 1.
-        sd.ctl = (1 << 0) | (1 << 1) | (1 << 20);
+        sd.ctl = (1 << 1) | (1 << 20);
     }
 
     // First tick: consumes 512 bytes (128 frames @ 16-bit stereo), leaving a non-zero BDL offset.
@@ -177,7 +177,7 @@ fn hda_capture_dma_write_completes_on_oob_bdl_address() {
         sd.lvi = 0;
         sd.fmt = 0x0010; // 48kHz, 16-bit, mono
                          // SRST | RUN | stream number 2.
-        sd.ctl = (1 << 0) | (1 << 1) | (2 << 20);
+        sd.ctl = (1 << 1) | (2 << 20);
     }
 
     hda.process_with_capture(&mut mem, 128, &mut capture);
@@ -213,7 +213,7 @@ fn hda_capture_dma_write_completes_on_dma_addr_overflow() {
         sd.lvi = 0;
         sd.fmt = 0x0010; // 48kHz, 16-bit, mono
                          // SRST | RUN | stream number 2.
-        sd.ctl = (1 << 0) | (1 << 1) | (2 << 20);
+        sd.ctl = (1 << 1) | (2 << 20);
     }
 
     // First tick writes some bytes at `near_end` (SafeGuestMemory ignores the OOB/overflow write).

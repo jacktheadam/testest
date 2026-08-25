@@ -29,7 +29,7 @@ const A20_BOUNDARY_MASK: u64 = A20_BIT - 1;
 /// - A20 gating is applied to *all* physical accesses when disabled.
 pub struct MemoryBus {
     filter: AddressFilter,
-    bus: PhysicalMemoryBus,
+    bus: PhysicalMemoryBus<Box<dyn GuestMemory>>,
     dirty: Option<DirtyTrackingHandle>,
 }
 
@@ -231,11 +231,14 @@ impl MemoryBus {
         self.write_physical_impl(paddr, buf);
     }
 
+    #[inline]
     fn read_physical_impl(&mut self, paddr: u64, dst: &mut [u8]) {
         if dst.is_empty() {
             return;
         }
 
+        // Win7 long-mode path always has A20 enabled after early boot; keep this
+        // branch first and tiny so the common case is a single inlined call.
         if self.filter.a20_enabled() {
             self.bus.read_physical(paddr, dst);
             return;
@@ -293,12 +296,54 @@ impl MemoryBus {
 }
 
 impl memory::MemoryBus for MemoryBus {
+    #[inline]
     fn read_physical(&mut self, paddr: u64, buf: &mut [u8]) {
         self.read_physical_impl(paddr, buf);
     }
 
+    #[inline]
     fn write_physical(&mut self, paddr: u64, buf: &[u8]) {
         self.write_physical_impl(paddr, buf);
+    }
+
+    #[inline]
+    fn read_u8(&mut self, paddr: u64) -> u8 {
+        if self.filter.a20_enabled() {
+            return self.bus.read_u8(paddr);
+        }
+        let mut buf = [0u8; 1];
+        self.read_physical_impl(paddr, &mut buf);
+        buf[0]
+    }
+
+    #[inline]
+    fn read_u16(&mut self, paddr: u64) -> u16 {
+        if self.filter.a20_enabled() {
+            return self.bus.read_u16(paddr);
+        }
+        let mut buf = [0u8; 2];
+        self.read_physical_impl(paddr, &mut buf);
+        u16::from_le_bytes(buf)
+    }
+
+    #[inline]
+    fn read_u32(&mut self, paddr: u64) -> u32 {
+        if self.filter.a20_enabled() {
+            return self.bus.read_u32(paddr);
+        }
+        let mut buf = [0u8; 4];
+        self.read_physical_impl(paddr, &mut buf);
+        u32::from_le_bytes(buf)
+    }
+
+    #[inline]
+    fn read_u64(&mut self, paddr: u64) -> u64 {
+        if self.filter.a20_enabled() {
+            return self.bus.read_u64(paddr);
+        }
+        let mut buf = [0u8; 8];
+        self.read_physical_impl(paddr, &mut buf);
+        u64::from_le_bytes(buf)
     }
 }
 
@@ -341,5 +386,15 @@ impl aero_mmu::MemoryBus for MemoryBus {
     #[inline]
     fn write_u64(&mut self, paddr: u64, value: u64) {
         memory::MemoryBus::write_u64(self, paddr, value)
+    }
+
+    #[inline]
+    fn read_bytes(&mut self, paddr: u64, dst: &mut [u8]) {
+        memory::MemoryBus::read_physical(self, paddr, dst)
+    }
+
+    #[inline]
+    fn write_bytes(&mut self, paddr: u64, src: &[u8]) {
+        memory::MemoryBus::write_physical(self, paddr, src)
     }
 }

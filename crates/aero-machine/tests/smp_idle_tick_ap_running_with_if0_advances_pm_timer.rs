@@ -175,13 +175,22 @@ fn smp_idle_tick_ap_running_with_if0_advances_pm_timer() {
     // Start the AP via INIT+SIPI.
     send_init_sipi(&mut m, APIC_ID_AP, SIPI_VECTOR);
 
-    // Wait for the AP to become runnable and start polling.
+    // Wait for evidence that the AP ran.
+    //
+    // Observing `!ap.halted` is not sufficient on its own: the AP can observe a platform-time
+    // advance, set its completion flag, and park itself inside the very first slice. A run that
+    // finishes that fast is a *stronger* result than catching it mid-flight, so accept either —
+    // the flag means it ran.
     let mut ap_started = false;
     for _ in 0..200 {
         assert!(matches!(
             m.run_slice(50_000),
             RunExit::Halted { executed: 0 }
         ));
+        if m.read_physical_u8(FLAG_PADDR) == FLAG_VALUE {
+            ap_started = true;
+            break;
+        }
         let ap = m.vcpu_state(1).expect("AP vCPU must exist");
         if !ap.halted {
             assert_eq!(

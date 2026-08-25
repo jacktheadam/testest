@@ -176,4 +176,3 @@ fn aerogpu_cmd_geometry_shader_triangle_list_executes_gs_and_defaults_missing_va
         assert_eq!(px(w / 2, h / 2), [0, 0, 0, 255]);
     });
 }
-

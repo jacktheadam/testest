@@ -116,7 +116,7 @@ pub fn resolve_node_dir(repo_root: &Path, cli_override: Option<&str>) -> Result<
     for candidate in [
         repo_root.to_path_buf(),
         repo_root.join("frontend"),
-        repo_root.join("web"),
+        repo_root.join("apps/web"),
     ] {
         if candidate.join("package.json").is_file() {
             return Ok(candidate);

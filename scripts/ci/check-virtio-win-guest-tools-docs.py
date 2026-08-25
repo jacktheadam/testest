@@ -61,14 +61,10 @@ def check_docs() -> list[str]:
     # These docs historically drifted, repeatedly claiming `-Profile minimal` was the default even
     # though the wrapper scripts default to `full`. Keep a cheap CI guardrail so drift is caught on PRs.
     doc_paths = [
-        REPO_ROOT / "docs/16-guest-tools-packaging.md",
-        REPO_ROOT / "docs/virtio-windows-drivers.md",
+        REPO_ROOT / "wiki/areas/windows-drivers.md",
         REPO_ROOT / "tools/packaging/README.md",
         REPO_ROOT / "tools/packaging/specs/README.md",
         REPO_ROOT / "drivers/README.md",
-        # Workstream onboarding docs sometimes mention virtio-win-derived packaging flows.
-        # Keep them aligned with wrapper defaults too.
-        REPO_ROOT / "instructions/windows-drivers.md",
     ]
 
     patterns: list[tuple[str, re.Pattern[str]]] = [

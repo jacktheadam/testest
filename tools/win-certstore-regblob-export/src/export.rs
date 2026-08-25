@@ -149,7 +149,7 @@ fn format_hex_bytes(bytes: &[u8], indent: &str) -> String {
 }
 
 fn decode_reg_sz(bytes: &[u8]) -> Result<String> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(anyhow!(
             "REG_SZ bytes must be valid UTF-16LE (even length), got {}",
             bytes.len()
@@ -564,6 +564,9 @@ pub fn export_system_cert_reg_patch(_store: &str, _der_cert: &[u8]) -> Result<Ce
     bail!("this tool only runs on Windows")
 }
 
+// Only the Windows registry path formats certificate hashes this way. On other targets the
+// function still exists for the unit test that pins its output, so it is dead only there.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn hex_upper(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {

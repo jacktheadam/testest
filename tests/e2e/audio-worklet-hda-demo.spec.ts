@@ -13,7 +13,7 @@ test("AudioWorklet output runs and does not underrun with HDA DMA demo", async (
   // longer than Playwright's default 30s timeout.
   page.setDefaultTimeout(60_000);
 
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: "load" });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: "load" });
 
   await page.click("#init-audio-hda-demo");
 

@@ -21,7 +21,10 @@ function findRepoSrcDeepImports(text) {
   const matches = [];
 
   // Treat runs of `/` and `\\` as separators (handles escaped or doubled separators).
-  const deepRepoSrcRe = /^\.\.(?:[\\/]+\.\.)+[\\/]+src[\\/]+/;
+  //
+  // The host application lives at `apps/web/src`; a workspace reaching up into it is the boundary
+  // violation this looks for.
+  const deepRepoSrcRe = /^\.\.(?:[\\/]+\.\.)+[\\/]+apps[\\/]+web[\\/]+src[\\/]+/;
 
   /** @param {string} spec */
   function isDeepRepoSrc(spec) {
@@ -265,20 +268,29 @@ async function assertNoWorkspaceDeepImportsExceptShims(workspaceRel) {
 }
 
 test("module boundaries: workspaces must not deep-import repo-root src/ (except shim modules)", async () => {
-  await assertNoWorkspaceDeepImportsExceptShims("net-proxy");
-  await assertNoWorkspaceDeepImportsExceptShims("backend/aero-gateway");
+  await assertNoWorkspaceDeepImportsExceptShims("services/net-proxy");
+  await assertNoWorkspaceDeepImportsExceptShims("services/gateway");
 });
 
 test("module boundaries: workspace deep-import scan is comment-safe and decodes basic escapes", () => {
-  assert.deepEqual(findRepoSrcDeepImports(`// import "../../src/x"\n`), []);
-  assert.deepEqual(findRepoSrcDeepImports(`/* from "../../src/x" */\n`), []);
-  assert.deepEqual(findRepoSrcDeepImports(`const s = "import \\"../../src/x\\"";\n`), []);
+  assert.deepEqual(findRepoSrcDeepImports(`// import "../../apps/web/src/x"\n`), []);
+  assert.deepEqual(findRepoSrcDeepImports(`/* from "../../apps/web/src/x" */\n`), []);
+  assert.deepEqual(findRepoSrcDeepImports(`const s = "import \\"../../apps/web/src/x\\"";\n`), []);
 
-  assert.deepEqual(findRepoSrcDeepImports(`import "../../src/x";\n`), ["../../src/x"]);
-  assert.deepEqual(findRepoSrcDeepImports(`import("..//..//src//x");\n`), ["..//..//src//x"]);
-  assert.deepEqual(findRepoSrcDeepImports(`require("..\\\\..\\\\src\\\\x");\n`), ["..\\..\\src\\x"]);
+  assert.deepEqual(findRepoSrcDeepImports(`import "../../apps/web/src/x";\n`), ["../../apps/web/src/x"]);
+  assert.deepEqual(
+    findRepoSrcDeepImports(`import("..//..//apps//web//src//x");\n`),
+    ["..//..//apps//web//src//x"],
+  );
+  assert.deepEqual(
+    findRepoSrcDeepImports(`require("..\\\\..\\\\apps\\\\web\\\\src\\\\x");\n`),
+    ["..\\..\\apps\\web\\src\\x"],
+  );
 
   // Escaped separators should still be detected.
-  assert.deepEqual(findRepoSrcDeepImports(`import "..\\u002f..\\u002fsrc\\u002fx";\n`), ["../../src/x"]);
+  assert.deepEqual(
+    findRepoSrcDeepImports(`import "..\\u002f..\\u002fapps\\u002fweb\\u002fsrc\\u002fx";\n`),
+    ["../../apps/web/src/x"],
+  );
 });
 

@@ -3,10 +3,10 @@ import { expect, test } from "@playwright/test";
 test("gpu worker telemetry: emits stats (with wasm payload) on webgl2_wgpu presenter", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
 
   const result = await page.evaluate(async () => {
-    const proto = await import("/web/src/ipc/gpu-protocol.ts");
+    const proto = await import("/apps/web/src/ipc/gpu-protocol.ts");
     const GPU_MESSAGE_BASE = { protocol: proto.GPU_PROTOCOL_NAME, protocolVersion: proto.GPU_PROTOCOL_VERSION };
 
     const canvas = document.createElement("canvas");
@@ -46,7 +46,7 @@ test("gpu worker telemetry: emits stats (with wasm payload) on webgl2_wgpu prese
       pixels[i + 3] = 0xff;
     }
 
-    const worker = new Worker("/web/src/workers/gpu.worker.ts", { type: "module" });
+    const worker = new Worker("/apps/web/src/workers/gpu.worker.ts", { type: "module" });
 
     let readyMsg: any = null;
     let firstEventsMsg: any = null;

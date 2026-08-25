@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { wsBufferedAmountSafe, wsCloseSafe, wsIsClosedSafe, wsIsOpenSafe, wsProtocolSafe, wsSendSafe } from "../web/src/net/wsSafe.ts";
+import { wsBufferedAmountSafe, wsCloseSafe, wsIsClosedSafe, wsIsOpenSafe, wsProtocolSafe, wsSendSafe } from "../apps/web/src/net/wsSafe.ts";
 
 test("web wsSafe: wsCloseSafe formats and UTF-8 byte-limits the close reason", () => {
   const calls = [];

@@ -21,7 +21,7 @@ async function exists(absPath) {
 
 function shouldCheckWebSrcSpecifier(specifier) {
   if (!specifier.startsWith(".")) return false;
-  if (!specifier.includes("/web/src/")) return false;
+  if (!specifier.includes("/apps/web/src/")) return false;
   // Only enforce when the import has an explicit extension; we don't want to
   // reimplement bundler/TS resolution rules here.
   const ext = path.posix.extname(specifier);
@@ -104,7 +104,7 @@ test("test sources: web/src import specifiers must exist on disk (when explicit 
     // Repo-root tests (node:test + contract tests).
     "tests",
     // Workspace tests that intentionally import web runtime modules.
-    "backend/aero-gateway/test",
+    "services/gateway/test",
   ];
 
   /** @type {{ abs: string; rel: string }[]} */
@@ -128,6 +128,14 @@ test("test sources: web/src import specifiers must exist on disk (when explicit 
 
       const absTarget = path.resolve(path.dirname(absTestFile), specifier);
       if (await exists(absTarget)) continue;
+      // TypeScript sources are imported by their emitted `.js` name, which is the
+      // convention this repo follows under `moduleResolution: "Bundler"`. A `.js`
+      // specifier naming a `.ts` file on disk is correct, not a missing module.
+      if (specifier.endsWith(".js")) {
+        const asTs = absTarget.slice(0, -3);
+        if (await exists(`${asTs}.ts`)) continue;
+        if (await exists(`${asTs}.tsx`)) continue;
+      }
 
       offenders.push({
         test: relTestFile,

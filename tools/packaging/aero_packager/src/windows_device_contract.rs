@@ -30,7 +30,9 @@ pub fn load_windows_device_contract(path: &Path) -> Result<WindowsDeviceContract
     Ok(contract)
 }
 
-pub fn load_windows_device_contract_with_bytes(path: &Path) -> Result<(WindowsDeviceContract, Vec<u8>)> {
+pub fn load_windows_device_contract_with_bytes(
+    path: &Path,
+) -> Result<(WindowsDeviceContract, Vec<u8>)> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     // Be tolerant of UTF-8 BOMs produced by some editors/tools.
     let parse_bytes = bytes

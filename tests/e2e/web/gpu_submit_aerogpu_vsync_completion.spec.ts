@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("GPU worker: submit_aerogpu with VSYNC present completes without requiring a tick", async ({ page }) => {
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
 
   await page.setContent(`
      <script type="module">
@@ -11,9 +11,9 @@ test("GPU worker: submit_aerogpu with VSYNC present completes without requiring 
         FRAME_DIRTY,
         FRAME_STATUS_INDEX,
         isGpuWorkerMessageBase,
-      } from "/web/src/ipc/gpu-protocol.ts";
-      import { AerogpuCmdWriter, AEROGPU_PRESENT_FLAG_VSYNC } from "/emulator/protocol/aerogpu/aerogpu_cmd.ts";
-      import { formatOneLineUtf8 } from "/web/src/text.ts";
+      } from "/apps/web/src/ipc/gpu-protocol.ts";
+      import { AerogpuCmdWriter, AEROGPU_PRESENT_FLAG_VSYNC } from "/crates/aero-protocol/aerogpu/aerogpu_cmd.ts";
+      import { formatOneLineUtf8 } from "/packages/transport-safety/src/text.js";
 
        const GPU_MESSAGE_BASE = { protocol: GPU_PROTOCOL_NAME, protocolVersion: GPU_PROTOCOL_VERSION };
        const MAX_ERROR_BYTES = 512;
@@ -31,7 +31,7 @@ test("GPU worker: submit_aerogpu with VSYNC present completes without requiring 
 
        (async () => {
          try {
-           const worker = new Worker("/web/src/workers/gpu.worker.ts", { type: "module" });
+           const worker = new Worker("/apps/web/src/workers/gpu.worker.ts", { type: "module" });
 
           let readyResolve;
           let readyReject;
@@ -168,7 +168,7 @@ test("GPU worker: submit_aerogpu with VSYNC present completes without requiring 
 });
 
 test("GPU worker: multiple VSYNC submit_aerogpu completions arrive without ticks and preserve order", async ({ page }) => {
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
 
   await page.setContent(`
      <script type="module">
@@ -178,9 +178,9 @@ test("GPU worker: multiple VSYNC submit_aerogpu completions arrive without ticks
         FRAME_DIRTY,
         FRAME_STATUS_INDEX,
         isGpuWorkerMessageBase,
-      } from "/web/src/ipc/gpu-protocol.ts";
-      import { AerogpuCmdWriter, AEROGPU_PRESENT_FLAG_VSYNC } from "/emulator/protocol/aerogpu/aerogpu_cmd.ts";
-      import { formatOneLineUtf8 } from "/web/src/text.ts";
+      } from "/apps/web/src/ipc/gpu-protocol.ts";
+      import { AerogpuCmdWriter, AEROGPU_PRESENT_FLAG_VSYNC } from "/crates/aero-protocol/aerogpu/aerogpu_cmd.ts";
+      import { formatOneLineUtf8 } from "/packages/transport-safety/src/text.js";
 
        const GPU_MESSAGE_BASE = { protocol: GPU_PROTOCOL_NAME, protocolVersion: GPU_PROTOCOL_VERSION };
        const MAX_ERROR_BYTES = 512;
@@ -197,7 +197,7 @@ test("GPU worker: multiple VSYNC submit_aerogpu completions arrive without ticks
 
        (async () => {
          try {
-           const worker = new Worker("/web/src/workers/gpu.worker.ts", { type: "module" });
+           const worker = new Worker("/apps/web/src/workers/gpu.worker.ts", { type: "module" });
 
           let readyResolve;
           let readyReject;

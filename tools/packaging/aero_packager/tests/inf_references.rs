@@ -22,7 +22,11 @@ fn packaging_fails_when_inf_catalogfile_is_missing() -> anyhow::Result<()> {
         let mut inserted = false;
         for line in original.lines() {
             out.push(line.to_string());
-            if !inserted && line.trim().eq_ignore_ascii_case(r#"Signature="$Windows NT$""#) {
+            if !inserted
+                && line
+                    .trim()
+                    .eq_ignore_ascii_case(r#"Signature="$Windows NT$""#)
+            {
                 out.push("CatalogFile = missing.cat".to_string());
                 inserted = true;
             }
@@ -114,7 +118,6 @@ fn device_contract_path() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }
-

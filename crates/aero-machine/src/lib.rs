@@ -19,12 +19,27 @@
 //! parallel vCPU execution environment yet. For robust guest boots today, `cpu_count = 1` is still
 //! recommended.
 //!
-//! See `docs/21-smp.md` for the current SMP status and roadmap.
-#![forbid(unsafe_code)]
+//! See wiki: CPU and JIT (SMP status) for the current SMP status and roadmap.
+// #![deny(unsafe_code)] — relaxed for JIT bus adapters (raw-pointer CpuBus access)
 
 mod aerogpu;
 mod aerogpu_legacy_text;
 mod guest_time;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod jit;
+
+/// The IR block cache threaded through the execute loop.
+///
+/// [`jit`] is native-only: it caches decoded blocks for the interpreter fast path, and the browser
+/// runtime does not use it. Naming its type in the loop's signature unconditionally is what broke
+/// the wasm32 build, so on that target this is a type with no values — the `Option` is therefore
+/// always `None`, and the fast paths that would use it are compiled out.
+#[cfg(not(target_arch = "wasm32"))]
+pub type RunSliceIrJit = jit::IrBlockCache;
+
+/// See [`RunSliceIrJit`]. Uninhabited on wasm32, where there is no block cache.
+#[cfg(target_arch = "wasm32")]
+pub enum RunSliceIrJit {}
 mod shared_disk;
 mod shared_iso_disk;
 mod vcpu_init;
@@ -44,7 +59,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, Cursor, Read, Seek, Write};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -57,7 +72,7 @@ use aero_cpu_core::state::{gpr, CpuMode, CpuState, RFLAGS_IF};
 use aero_cpu_core::{AssistReason, CpuCore, Exception};
 use aero_devices::a20_gate::{A20Gate as A20GateDevice, A20_GATE_PORT};
 use aero_devices::acpi_pm::{
-    register_acpi_pm, AcpiPmCallbacks, AcpiPmConfig, AcpiPmIo, SharedAcpiPmIo,
+    register_acpi_pm, AcpiPmCallbacks, AcpiPmConfig, AcpiPmIo, SharedAcpiPmIo, DEFAULT_PM_TMR_BLK,
 };
 use aero_devices::clock::{Clock, ManualClock};
 use aero_devices::debugcon::{register_debugcon, SharedDebugConLog};
@@ -200,7 +215,11 @@ const FOUR_GIB: u64 = 0x1_0000_0000;
 const IA32_APIC_BASE_BSP_BIT: u64 = 1 << 8;
 // Use a sparse RAM backend once memory sizes exceed this threshold to avoid accidentally
 // allocating multi-GB buffers in tests and constrained environments.
-const SPARSE_RAM_THRESHOLD_BYTES: u64 = 512 * 1024 * 1024;
+// Prefer DenseMemory for bring-up sizes (Win7 CLI uses 2 GiB). SparseMemory's
+// per-access chunk lookup was ~5–6% of cycles on the kernel long-mode path; dense
+// is a single contiguous slice. Keep sparse for >4 GiB configs (and tests that
+// request RAM above the ECAM hole) so we do not force multi-GiB allocations.
+const SPARSE_RAM_THRESHOLD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 fn sync_msi_capability_into_config(
     cfg: &mut aero_devices::pci::PciConfigSpace,
@@ -491,7 +510,7 @@ pub struct MachineConfig {
     /// This is sufficient for SMP contract tests, but it is **not** a full SMP scheduler or
     /// parallel vCPU execution environment yet. For real guest boots, prefer `cpu_count=1`.
     ///
-    /// See `docs/21-smp.md` for the current SMP status and roadmap.
+    /// See wiki: CPU and JIT (SMP status) for the current SMP status and roadmap.
     pub cpu_count: u8,
     /// Preferred BIOS boot device (HDD vs CD-ROM).
     ///
@@ -565,7 +584,7 @@ pub struct MachineConfig {
     /// - Mouse: `aero_devices::pci::profile::VIRTIO_INPUT_MOUSE.bdf` (`00:0a.1`)
     ///
     /// Virtio-input is the intended low-latency “fast path” for keyboard/mouse once the guest
-    /// driver is installed (see `docs/08-input-devices.md`).
+    /// driver is installed (see wiki: USB and input).
     ///
     /// Requires [`MachineConfig::enable_pc_platform`].
     pub enable_virtio_input: bool,
@@ -606,7 +625,7 @@ pub struct MachineConfig {
     ///
     /// The hub has 16 downstream ports to match the browser runtime topology.
     ///
-    /// This matches the browser runtime topology described in `docs/08-input-devices.md`:
+    /// This matches the browser runtime topology described in wiki: USB and input:
     /// - UHCI root port 0: external hub
     /// - hub port 1: USB HID keyboard
     /// - hub port 2: USB HID mouse
@@ -724,7 +743,7 @@ pub struct MachineConfig {
     ///   - the BIOS VBE linear framebuffer begins at `BAR1_BASE + VBE_LFB_OFFSET` (`0x40000`,
     ///     `AEROGPU_PCI_BAR1_VBE_LFB_OFFSET_BYTES`).
     ///
-    /// This is the foundation required by `docs/16-aerogpu-vga-vesa-compat.md` for
+    /// This is the foundation required by wiki: graphics (boot display) for
     /// firmware/bootloader compatibility and for the guest WDDM driver to claim scanout.
     ///
     /// Note: `aero-machine` does not execute `AEROGPU_CMD` in-process by default. Instead, this
@@ -822,7 +841,7 @@ impl Default for MachineConfig {
 impl MachineConfig {
     /// Configuration preset for the canonical Windows 7 storage topology.
     ///
-    /// This enables the controller set described in `docs/05-storage-topology-win7.md`:
+    /// This enables the controller set described in wiki: storage (Windows 7 storage topology):
     ///
     /// - AHCI (ICH9) at `00:02.0`
     /// - IDE (PIIX3) at `00:01.1` (with the accompanying PIIX3 ISA function at `00:01.0` so OSes
@@ -952,7 +971,7 @@ impl MachineConfig {
     /// - UHCI (USB 1.1) enabled
     /// - AeroGPU enabled (`00:07.0`, `A3A0:0001`) for Windows driver binding
     ///
-    /// See `docs/05-storage-topology-win7.md` for the normative storage BDFs and media attachment
+    /// See wiki: storage (Windows 7 storage topology) for the normative storage BDFs and media attachment
     /// mapping.
     #[must_use]
     pub fn browser_defaults(ram_size_bytes: u64) -> Self {
@@ -1061,7 +1080,7 @@ impl fmt::Display for MachineError {
             MachineError::InvalidCpuCount(count) => {
                 write!(
                     f,
-                    "invalid cpu_count={count}; must be >= 1. Note: SMP is still bring-up only (not a robust multi-vCPU environment yet); use cpu_count=1 for real guest boots. See docs/21-smp.md#status-today and docs/09-bios-firmware.md#smp-boot-bsp--aps"
+                    "invalid cpu_count={count}; must be >= 1. Note: SMP is still bring-up only (not a robust multi-vCPU environment yet); use cpu_count=1 for real guest boots. See the CPU and JIT area page (SMP status) and the platform and firmware area page in the wiki"
                 )
             }
             MachineError::InvalidDiskSize(len) => write!(
@@ -1328,12 +1347,34 @@ impl FirmwareMemory for SystemMemory {
 }
 
 impl memory::MemoryBus for SystemMemory {
+    #[inline]
     fn read_physical(&mut self, paddr: u64, buf: &mut [u8]) {
         self.bus.read_physical(paddr, buf);
     }
 
+    #[inline]
     fn write_physical(&mut self, paddr: u64, buf: &[u8]) {
         self.bus.write_physical(paddr, buf);
+    }
+
+    #[inline]
+    fn read_u8(&mut self, paddr: u64) -> u8 {
+        self.bus.read_u8(paddr)
+    }
+
+    #[inline]
+    fn read_u16(&mut self, paddr: u64) -> u16 {
+        self.bus.read_u16(paddr)
+    }
+
+    #[inline]
+    fn read_u32(&mut self, paddr: u64) -> u32 {
+        self.bus.read_u32(paddr)
+    }
+
+    #[inline]
+    fn read_u64(&mut self, paddr: u64) -> u64 {
+        self.bus.read_u64(paddr)
     }
 }
 
@@ -1376,6 +1417,16 @@ impl aero_mmu::MemoryBus for SystemMemory {
     #[inline]
     fn write_u64(&mut self, paddr: u64, value: u64) {
         memory::MemoryBus::write_u64(self, paddr, value)
+    }
+
+    #[inline]
+    fn read_bytes(&mut self, paddr: u64, dst: &mut [u8]) {
+        memory::MemoryBus::read_physical(self, paddr, dst)
+    }
+
+    #[inline]
+    fn write_bytes(&mut self, paddr: u64, src: &[u8]) {
+        memory::MemoryBus::write_physical(self, paddr, src)
     }
 }
 
@@ -1489,6 +1540,47 @@ struct PerCpuSystemMemoryBus<'a> {
     interrupts: Option<Rc<RefCell<PlatformInterrupts>>>,
     ap_cpus: ApCpus<'a>,
     mem: &'a mut SystemMemory,
+}
+
+static PHYS_WRITE_WATCHES: OnceLock<Vec<u64>> = OnceLock::new();
+
+fn phys_write_watches() -> &'static [u64] {
+    PHYS_WRITE_WATCHES.get_or_init(|| {
+        std::env::var("AERO_WATCH_PHYS_WRITE")
+            .map(|value| {
+                value
+                    .split(',')
+                    .filter_map(|part| {
+                        let part = part.trim();
+                        u64::from_str_radix(part.trim_start_matches("0x"), 16)
+                            .ok()
+                            .or_else(|| part.parse::<u64>().ok())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
+#[inline]
+fn watch_physical_write(apic_id: u8, paddr: u64, buf: &[u8]) {
+    let Some(end) = paddr.checked_add(buf.len() as u64) else {
+        return;
+    };
+    for &watch in phys_write_watches() {
+        if paddr <= watch && watch < end {
+            let mut bytes = [0u8; 8];
+            let value_len = buf.len().min(bytes.len());
+            bytes[..value_len].copy_from_slice(&buf[..value_len]);
+            eprintln!(
+                "[watch-phys] [{}] apic={apic_id} [{paddr:#x}] len={} val={:#x} watch={watch:#x}",
+                aero_cpu_core::interp::tier0::exec::current_insn_index(),
+                buf.len(),
+                u64::from_le_bytes(bytes)
+            );
+            break;
+        }
+    }
 }
 
 impl<'a> PerCpuSystemMemoryBus<'a> {
@@ -1716,19 +1808,29 @@ impl<'a> PerCpuSystemMemoryBus<'a> {
 }
 
 impl memory::MemoryBus for PerCpuSystemMemoryBus<'_> {
+    #[inline]
     fn read_physical(&mut self, mut paddr: u64, buf: &mut [u8]) {
         if buf.is_empty() {
             return;
         }
 
+        // Fast path: access does not touch the LAPIC MMIO window. Avoid cloning the
+        // interrupts Rc and the split loop — this is nearly every guest RAM/ROM access.
+        let lapic_start = LAPIC_MMIO_BASE;
+        let lapic_end = LAPIC_MMIO_BASE + LAPIC_MMIO_SIZE;
+        if self.interrupts.is_none()
+            || paddr
+                .checked_add(buf.len() as u64)
+                .is_some_and(|end| end <= lapic_start || paddr >= lapic_end)
+        {
+            self.mem.read_physical(paddr, buf);
+            return;
+        }
+
         let Some(interrupts) = self.interrupts.clone() else {
-            // No PC platform attached: fall back to the shared bus.
             self.mem.read_physical(paddr, buf);
             return;
         };
-
-        let lapic_start = LAPIC_MMIO_BASE;
-        let lapic_end = LAPIC_MMIO_BASE + LAPIC_MMIO_SIZE;
 
         let mut offset = 0usize;
         while offset < buf.len() {
@@ -1760,19 +1862,89 @@ impl memory::MemoryBus for PerCpuSystemMemoryBus<'_> {
         }
     }
 
+    #[inline]
+    fn read_u8(&mut self, paddr: u64) -> u8 {
+        let lapic_start = LAPIC_MMIO_BASE;
+        let lapic_end = LAPIC_MMIO_BASE + LAPIC_MMIO_SIZE;
+        if self.interrupts.is_none() || paddr < lapic_start || paddr >= lapic_end {
+            return self.mem.read_u8(paddr);
+        }
+        let mut buf = [0u8; 1];
+        self.read_physical(paddr, &mut buf);
+        buf[0]
+    }
+
+    #[inline]
+    fn read_u16(&mut self, paddr: u64) -> u16 {
+        let lapic_start = LAPIC_MMIO_BASE;
+        let lapic_end = LAPIC_MMIO_BASE + LAPIC_MMIO_SIZE;
+        if self.interrupts.is_none()
+            || paddr
+                .checked_add(2)
+                .is_some_and(|end| end <= lapic_start || paddr >= lapic_end)
+        {
+            return self.mem.read_u16(paddr);
+        }
+        let mut buf = [0u8; 2];
+        self.read_physical(paddr, &mut buf);
+        u16::from_le_bytes(buf)
+    }
+
+    #[inline]
+    fn read_u32(&mut self, paddr: u64) -> u32 {
+        let lapic_start = LAPIC_MMIO_BASE;
+        let lapic_end = LAPIC_MMIO_BASE + LAPIC_MMIO_SIZE;
+        if self.interrupts.is_none()
+            || paddr
+                .checked_add(4)
+                .is_some_and(|end| end <= lapic_start || paddr >= lapic_end)
+        {
+            return self.mem.read_u32(paddr);
+        }
+        let mut buf = [0u8; 4];
+        self.read_physical(paddr, &mut buf);
+        u32::from_le_bytes(buf)
+    }
+
+    #[inline]
+    fn read_u64(&mut self, paddr: u64) -> u64 {
+        let lapic_start = LAPIC_MMIO_BASE;
+        let lapic_end = LAPIC_MMIO_BASE + LAPIC_MMIO_SIZE;
+        if self.interrupts.is_none()
+            || paddr
+                .checked_add(8)
+                .is_some_and(|end| end <= lapic_start || paddr >= lapic_end)
+        {
+            return self.mem.read_u64(paddr);
+        }
+        let mut buf = [0u8; 8];
+        self.read_physical(paddr, &mut buf);
+        u64::from_le_bytes(buf)
+    }
+
+    #[inline]
     fn write_physical(&mut self, mut paddr: u64, buf: &[u8]) {
         if buf.is_empty() {
             return;
         }
-
-        let Some(interrupts) = self.interrupts.clone() else {
-            // No PC platform attached: fall back to the shared bus.
-            self.mem.write_physical(paddr, buf);
-            return;
-        };
+        watch_physical_write(self.apic_id, paddr, buf);
 
         let lapic_start = LAPIC_MMIO_BASE;
         let lapic_end = LAPIC_MMIO_BASE + LAPIC_MMIO_SIZE;
+        // Fast path: no LAPIC touch (and no ICR side-effects to observe).
+        if self.interrupts.is_none()
+            || paddr
+                .checked_add(buf.len() as u64)
+                .is_some_and(|end| end <= lapic_start || paddr >= lapic_end)
+        {
+            self.mem.write_physical(paddr, buf);
+            return;
+        }
+
+        let Some(interrupts) = self.interrupts.clone() else {
+            self.mem.write_physical(paddr, buf);
+            return;
+        };
 
         let mut offset = 0usize;
         while offset < buf.len() {
@@ -1876,6 +2048,18 @@ impl aero_mmu::MemoryBus for PerCpuSystemMemoryBus<'_> {
     fn write_u64(&mut self, paddr: u64, value: u64) {
         memory::MemoryBus::write_u64(self, paddr, value)
     }
+
+    /// Bulk path used by instruction fetch and string ops. The trait default falls
+    /// back to per-byte `read_u8`, which dominated the kernel long-mode profile.
+    #[inline]
+    fn read_bytes(&mut self, paddr: u64, dst: &mut [u8]) {
+        memory::MemoryBus::read_physical(self, paddr, dst)
+    }
+
+    #[inline]
+    fn write_bytes(&mut self, paddr: u64, src: &[u8]) {
+        memory::MemoryBus::write_physical(self, paddr, src)
+    }
 }
 
 struct StrictIoPortBus<'a> {
@@ -1906,6 +2090,7 @@ impl aero_cpu_core::paging_bus::IoBus for StrictIoPortBus<'_> {
 struct MachineCpuBus<'a> {
     a20: A20GateHandle,
     reset: ResetLatch,
+    execution_yield_requested: bool,
     inner: aero_cpu_core::PagingBus<PerCpuSystemMemoryBus<'a>, StrictIoPortBus<'a>>,
 }
 
@@ -1918,6 +2103,33 @@ impl aero_cpu_core::mem::CpuBus for MachineCpuBus<'_> {
     #[inline]
     fn invlpg(&mut self, vaddr: u64) {
         self.inner.invlpg(vaddr);
+    }
+
+    #[inline]
+    fn write_cr3(&mut self, value: u64) {
+        self.inner.write_cr3(value);
+    }
+
+    #[inline]
+    fn io_read_time_advance_cycles(&mut self, port: u16, _size: u32) -> u64 {
+        if port != DEFAULT_PM_TMR_BLK {
+            return 0;
+        }
+
+        static QUANTUM: OnceLock<u64> = OnceLock::new();
+        let quantum = *QUANTUM.get_or_init(|| {
+            std::env::var("AERO_PM_TIMER_POLL_QUANTUM")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0)
+        });
+        self.execution_yield_requested |= quantum != 0;
+        quantum
+    }
+
+    #[inline]
+    fn take_execution_yield_request(&mut self) -> bool {
+        std::mem::take(&mut self.execution_yield_requested)
     }
 
     #[inline]
@@ -2112,27 +2324,112 @@ struct AeroGpuPciConfigDevice {
     cfg: aero_devices::pci::PciConfigSpace,
 }
 
+/// When set, AeroGPU at `00:07.0` reports Bochs/QEMU Standard VGA PCI IDs
+/// (`1234:1111`) **and** a Bochs-compatible BAR0 framebuffer so Win7's inbox
+/// `vgapnp.sys` / `framebuf` path can be compared directly with QEMU. PE has
+/// no AeroGPU KMD for `A3A0:0001`; the generic `display.inf` match is on
+/// display class `03/00`, not specifically on the standard VGA vendor/device
+/// ID.
+///
+/// BAR layout under this mode (QEMU/Bochs Standard VGA–compatible):
+/// - **BAR0**: 16 MiB prefetchable MMIO — aliases VBE LFB at
+///   `VRAM[VBE_LFB_OFFSET..]` (pixel 0 at BAR0+0). Inbox miniports map BAR0
+///   as the primary surface.
+/// - **BAR1**: **disabled** (size 0). Canonical AeroGPU keeps a 64 MiB BAR1
+///   VRAM aperture; exposing both under the inbox generic display stack caused
+///   session-create
+///   `STATUS_NO_MEMORY` (0xC000021A) on cold VBE=BAR0 bring-up — dual large
+///   MMIO maps thrash system PTEs. QEMU standard VGA has no second large
+///   framebuffer BAR (its separate BAR2 is a 4 KiB control window).
+/// - **VBE PhysBasePtr**: set to **BAR0 base** (Bochs layout). Reporting
+///   `BAR1+VBE_LFB_OFFSET` left Eng FrameBufferBase as an *interior* of the
+///   BAR1 resource; system-PTE maps of that address went NP while bootvid's
+///   own map of the same GPA remained. BAR0-start matches what `vgapnp.sys` /
+///   `framebuf` map via the PCI resource list.
+///
+/// Without the BAR0 rewrite, IDs alone still leave BAR0 as 64 KiB AeroGPU
+/// registers — Eng binds then paints into control regs, never BAR1 LFB
+/// (`lfb_writes=0` after session; see PROOF-setup-gdi-paint-wall).
+///
+/// Opt-in via `AERO_AEROGPU_STDVGA_IDS=1` (bring-up / natural GDI path).
+fn aerogpu_stdvga_pci_ids_enabled() -> bool {
+    // Read env each call so tests can toggle without process restart (no OnceLock).
+    match std::env::var("AERO_AEROGPU_STDVGA_IDS") {
+        Ok(v) => matches!(v.as_str(), "1" | "true" | "on" | "yes" | ""),
+        Err(_) => std::env::var_os("AERO_AEROGPU_STDVGA_IDS").is_some(),
+    }
+}
+
+/// QEMU Standard VGA BAR0 framebuffer size (default `vga_mem_mb=16`).
+const STDVGA_COMPAT_BAR0_FB_SIZE: u32 = 16 * 1024 * 1024;
+
+fn apply_aerogpu_stdvga_pci_ids(cfg: &mut aero_devices::pci::PciConfigSpace) {
+    if !aerogpu_stdvga_pci_ids_enabled() {
+        return;
+    }
+    cfg.set_vendor_device_id(
+        aero_gpu_vga::VGA_PCI_VENDOR_ID,
+        aero_gpu_vga::VGA_PCI_DEVICE_ID,
+    );
+    cfg.set_subsystem_ids(aero_devices::pci::PciSubsystemIds {
+        subsystem_vendor_id: aero_gpu_vga::VGA_PCI_VENDOR_ID,
+        subsystem_id: aero_gpu_vga::VGA_PCI_DEVICE_ID,
+    });
+    // Bochs/QEMU: Region 0 = framebuffer. Rewrite BAR0 from 64 KiB regs → 16 MiB FB.
+    cfg.set_bar_definition(
+        aero_devices::pci::profile::AEROGPU_BAR0_INDEX,
+        PciBarDefinition::Mmio32 {
+            size: STDVGA_COMPAT_BAR0_FB_SIZE,
+            prefetchable: true,
+        },
+    );
+    // Hide canonical BAR1 VRAM aperture. Inbox Win7 cold path with PhysBasePtr=BAR0
+    // + dual 16MiB+64MiB MMIO maps failed session create (0xC000021A / NO_MEMORY).
+    // Standard VGA exposes its framebuffer in BAR0, with no second large framebuffer BAR.
+    cfg.clear_bar_definition(aero_devices::pci::profile::AEROGPU_BAR1_VRAM_INDEX);
+}
+
 impl AeroGpuPciConfigDevice {
     fn new() -> Self {
-        let cfg = aero_devices::pci::profile::AEROGPU.build_config_space();
-        debug_assert_eq!(
-            cfg.bar_definition(aero_devices::pci::profile::AEROGPU_BAR0_INDEX),
-            Some(PciBarDefinition::Mmio32 {
-                size: u32::try_from(aero_devices::pci::profile::AEROGPU_BAR0_SIZE)
-                    .expect("AeroGPU BAR0 size should fit in u32"),
-                prefetchable: false,
-            }),
-            "unexpected AeroGPU BAR0 definition"
-        );
-        debug_assert_eq!(
-            cfg.bar_definition(aero_devices::pci::profile::AEROGPU_BAR1_VRAM_INDEX),
-            Some(PciBarDefinition::Mmio32 {
-                size: u32::try_from(aero_devices::pci::profile::AEROGPU_VRAM_SIZE)
-                    .expect("AeroGPU VRAM size should fit in u32"),
-                prefetchable: true,
-            }),
-            "unexpected AeroGPU BAR1 definition"
-        );
+        let mut cfg = aero_devices::pci::profile::AEROGPU.build_config_space();
+        apply_aerogpu_stdvga_pci_ids(&mut cfg);
+        if aerogpu_stdvga_pci_ids_enabled() {
+            debug_assert_eq!(
+                cfg.bar_definition(aero_devices::pci::profile::AEROGPU_BAR0_INDEX),
+                Some(PciBarDefinition::Mmio32 {
+                    size: STDVGA_COMPAT_BAR0_FB_SIZE,
+                    prefetchable: true,
+                }),
+                "stdvga BAR0 must be 16MiB framebuffer"
+            );
+        } else {
+            debug_assert_eq!(
+                cfg.bar_definition(aero_devices::pci::profile::AEROGPU_BAR0_INDEX),
+                Some(PciBarDefinition::Mmio32 {
+                    size: u32::try_from(aero_devices::pci::profile::AEROGPU_BAR0_SIZE)
+                        .expect("AeroGPU BAR0 size should fit in u32"),
+                    prefetchable: false,
+                }),
+                "unexpected AeroGPU BAR0 definition"
+            );
+        }
+        if aerogpu_stdvga_pci_ids_enabled() {
+            debug_assert_eq!(
+                cfg.bar_definition(aero_devices::pci::profile::AEROGPU_BAR1_VRAM_INDEX),
+                None,
+                "stdvga BAR1 must be cleared (no second large framebuffer BAR)"
+            );
+        } else {
+            debug_assert_eq!(
+                cfg.bar_definition(aero_devices::pci::profile::AEROGPU_BAR1_VRAM_INDEX),
+                Some(PciBarDefinition::Mmio32 {
+                    size: u32::try_from(aero_devices::pci::profile::AEROGPU_VRAM_SIZE)
+                        .expect("AeroGPU VRAM size should fit in u32"),
+                    prefetchable: true,
+                }),
+                "unexpected AeroGPU BAR1 definition"
+            );
+        }
         Self { cfg }
     }
 }
@@ -2525,7 +2822,7 @@ impl IdePciConfigDevice {
         // Preserve legacy compatibility port assignments (0x1F0/0x170, etc.) so software that
         // expects a "PC-like" IDE controller sees deterministic defaults.
         //
-        // See `docs/05-storage-topology-win7.md`.
+        // See wiki: storage (Windows 7 storage topology).
         let mut cfg = aero_devices::pci::profile::IDE_PIIX3.build_config_space();
         cfg.set_bar_base(0, u64::from(PRIMARY_PORTS.cmd_base));
         cfg.set_bar_base(1, 0x3F4); // alt-status/dev-ctl at +2 => 0x3F6
@@ -2618,7 +2915,7 @@ impl PciDevice for XhciPciConfigDevice {
 // `aero_devices::pci::profile::SATA_AHCI_ICH9`).
 //
 // IMPORTANT: `00:07.0` is reserved for the canonical AeroGPU PCI identity contract
-// (`VID:DID = A3A0:0001`, `PCI\VEN_A3A0&DEV_0001`). See `docs/abi/aerogpu-pci-identity.md`.
+// (`VID:DID = A3A0:0001`, `PCI\VEN_A3A0&DEV_0001`). See wiki: AeroGPU device ABI.
 //
 // The VGA/VBE device model used for boot display (`aero_gpu_vga`) is *not* AeroGPU and must not
 // occupy that BDF.
@@ -2975,6 +3272,61 @@ impl AeroGpuDevice {
         }
     }
 
+    fn vbe_dispi_refresh_virtual_height(&mut self) {
+        let bits_per_pixel = match self.vbe_dispi_bpp {
+            4 | 8 | 16 | 24 | 32 => usize::from(self.vbe_dispi_bpp),
+            15 => 16,
+            _ => {
+                self.vbe_dispi_virt_height = 0;
+                return;
+            }
+        };
+        let pitch = usize::from(self.vbe_dispi_virt_width)
+            .saturating_mul(bits_per_pixel)
+            .div_ceil(8);
+        if pitch == 0 {
+            self.vbe_dispi_virt_height = 0;
+            return;
+        }
+
+        let available = self.vram.len().saturating_sub(VBE_LFB_OFFSET);
+        self.vbe_dispi_virt_height = u16::try_from(available / pitch).unwrap_or(u16::MAX);
+    }
+
+    fn vbe_dispi_write_enable(&mut self, value: u16) {
+        const ENABLED: u16 = 0x0001;
+        const NO_CLEAR_MEMORY: u16 = 0x0080;
+
+        let was_enabled = self.vbe_dispi_enabled();
+        let will_enable = (value & ENABLED) != 0;
+
+        if will_enable && !was_enabled {
+            // Bochs/QEMU starts every newly enabled mode with tightly packed rows and no panning.
+            // A guest that needs a wider virtual surface programs those registers after enabling.
+            self.vbe_dispi_virt_width = self.vbe_dispi_xres;
+            self.vbe_dispi_x_offset = 0;
+            self.vbe_dispi_y_offset = 0;
+            self.vbe_dispi_refresh_virtual_height();
+
+            if (value & NO_CLEAR_MEMORY) == 0 {
+                let bits_per_pixel = match self.vbe_dispi_bpp {
+                    4 | 8 | 16 | 24 | 32 => usize::from(self.vbe_dispi_bpp),
+                    15 => 16,
+                    _ => 0,
+                };
+                let clear_len = usize::from(self.vbe_dispi_yres)
+                    .saturating_mul(usize::from(self.vbe_dispi_virt_width))
+                    .saturating_mul(bits_per_pixel)
+                    .div_ceil(8);
+                let start = VBE_LFB_OFFSET.min(self.vram.len());
+                let end = start.saturating_add(clear_len).min(self.vram.len());
+                self.vram[start..end].fill(0);
+            }
+        }
+
+        self.vbe_dispi_enable = value;
+    }
+
     fn vbe_dispi_write_reg(&mut self, index: u16, value: u16) {
         self.vbe_dispi_guest_owned = true;
         match index {
@@ -2988,13 +3340,16 @@ impl AeroGpuDevice {
                 self.vbe_dispi_bpp = value;
             }
             0x0004 => {
-                self.vbe_dispi_enable = value;
+                self.vbe_dispi_write_enable(value);
             }
             0x0005 => {
                 self.vbe_bank = value;
             }
             0x0006 => {
                 self.vbe_dispi_virt_width = value;
+                if self.vbe_dispi_enabled() {
+                    self.vbe_dispi_refresh_virtual_height();
+                }
             }
             0x0007 => {
                 self.vbe_dispi_virt_height = value;
@@ -3097,6 +3452,15 @@ impl AeroGpuDevice {
 
     fn vram_write(&mut self, offset: u64, size: usize, value: u64) {
         Self::write_linear(&mut self.vram, offset, size, value);
+        // Paint-wall probe: count stores into the VBE LFB window inside BAR1 VRAM.
+        // `AERO_COUNT_LFB_WRITES=1` enables; this is the *live* machine path
+        // (`AeroGpuBar1Mmio`), not the unused `aero-devices-gpu` VRAM MMIO helper.
+        if offset >= VBE_LFB_OFFSET as u64
+            && offset < (VBE_LFB_OFFSET as u64).saturating_add(0x40_0000)
+            && std::env::var_os("AERO_COUNT_LFB_WRITES").is_some()
+        {
+            aerogpu_machine_lfb_write_note(offset - VBE_LFB_OFFSET as u64, size as u64, value);
+        }
     }
 
     fn vram_mmio_read_count(&self) -> u64 {
@@ -3459,6 +3823,39 @@ impl IoSnapshot for AeroGpuDevice {
     }
 }
 
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+static AEROGPU_MACHINE_LFB_WRITES: AtomicU64 = AtomicU64::new(0);
+static AEROGPU_MACHINE_LFB_LOGGED: AtomicU64 = AtomicU64::new(0);
+static AEROGPU_MACHINE_LFB_ENABLED: OnceLock<bool> = OnceLock::new();
+
+fn aerogpu_machine_lfb_write_note(offset: u64, len: u64, value: u64) {
+    if !*AEROGPU_MACHINE_LFB_ENABLED
+        .get_or_init(|| std::env::var_os("AERO_COUNT_LFB_WRITES").is_some())
+    {
+        return;
+    }
+    let n = AEROGPU_MACHINE_LFB_WRITES.fetch_add(1, AtomicOrdering::Relaxed) + 1;
+    let logged = AEROGPU_MACHINE_LFB_LOGGED.load(AtomicOrdering::Relaxed);
+    if logged < 16
+        && AEROGPU_MACHINE_LFB_LOGGED
+            .compare_exchange(
+                logged,
+                logged + 1,
+                AtomicOrdering::Relaxed,
+                AtomicOrdering::Relaxed,
+            )
+            .is_ok()
+    {
+        eprintln!("[aerogpu-vram-lfb-write] #{n} off={offset:#x} len={len} val={value:#x}");
+    }
+}
+
+/// BAR1 VBE-LFB store count on the live machine path (0 unless `AERO_COUNT_LFB_WRITES`).
+pub fn aerogpu_machine_lfb_write_count() -> u64 {
+    AEROGPU_MACHINE_LFB_WRITES.load(AtomicOrdering::Relaxed)
+}
+
 struct AeroGpuBar1Mmio {
     dev: Rc<RefCell<AeroGpuDevice>>,
 }
@@ -3470,6 +3867,24 @@ impl PciBarMmioHandler for AeroGpuBar1Mmio {
 
     fn write(&mut self, offset: u64, size: usize, value: u64) {
         self.dev.borrow_mut().vram_write(offset, size, value);
+    }
+}
+
+/// STDVGA-compat BAR0: pixel 0 at BAR0+0 → `VRAM[VBE_LFB_OFFSET + off]`.
+/// Inbox `vga.sys` / `framebuf` map BAR0 as the primary surface (Bochs layout).
+struct AeroGpuBar0LfbMmio {
+    dev: Rc<RefCell<AeroGpuDevice>>,
+}
+
+impl PciBarMmioHandler for AeroGpuBar0LfbMmio {
+    fn read(&mut self, offset: u64, size: usize) -> u64 {
+        let off = offset.saturating_add(VBE_LFB_OFFSET as u64);
+        self.dev.borrow().vram_read(off, size)
+    }
+
+    fn write(&mut self, offset: u64, size: usize, value: u64) {
+        let off = offset.saturating_add(VBE_LFB_OFFSET as u64);
+        self.dev.borrow_mut().vram_write(off, size, value);
     }
 }
 
@@ -3564,30 +3979,59 @@ impl aero_platform::io::PortIoDevice for AeroGpuVbeDispiPortWindow {
             return 0;
         }
         if size != 2 {
+            if std::env::var_os("AERO_LOG_VBE").is_some() {
+                eprintln!("AERO_LOG_VBE: ignored DISPI read port={port:#x} size={size}");
+            }
             return u32::MAX;
         }
 
         let dev = self.dev.borrow();
-        match port {
+        let value = match port {
             aero_gpu_vga::VBE_DISPI_INDEX_PORT => u32::from(dev.vbe_dispi_index),
             aero_gpu_vga::VBE_DISPI_DATA_PORT => {
                 u32::from(dev.vbe_dispi_read_reg(dev.vbe_dispi_index))
             }
             _ => 0,
+        };
+        if std::env::var_os("AERO_LOG_VBE").is_some() {
+            eprintln!(
+                "AERO_LOG_VBE: DISPI read port={port:#x} index={:#x} value={value:#x}",
+                dev.vbe_dispi_index
+            );
         }
+        value
     }
 
     fn write(&mut self, port: u16, size: u8, value: u32) {
         if size != 2 {
+            if std::env::var_os("AERO_LOG_VBE").is_some() {
+                eprintln!(
+                    "AERO_LOG_VBE: ignored DISPI write port={port:#x} size={size} value={value:#x}"
+                );
+            }
             return;
         }
 
         let value = (value & 0xFFFF) as u16;
         let mut dev = self.dev.borrow_mut();
         match port {
-            aero_gpu_vga::VBE_DISPI_INDEX_PORT => dev.vbe_dispi_index = value,
+            aero_gpu_vga::VBE_DISPI_INDEX_PORT => {
+                if std::env::var_os("AERO_LOG_VBE").is_some() {
+                    eprintln!("AERO_LOG_VBE: DISPI index write value={value:#x}");
+                }
+                dev.vbe_dispi_index = value;
+            }
             aero_gpu_vga::VBE_DISPI_DATA_PORT => {
                 let index = dev.vbe_dispi_index;
+                if std::env::var_os("AERO_LOG_VBE").is_some() {
+                    eprintln!(
+                        "AERO_LOG_VBE: DISPI write index={index:#x} value={value:#x} (xres={} yres={} bpp={} en={:#x})",
+                        dev.vbe_dispi_xres,
+                        dev.vbe_dispi_yres,
+                        dev.vbe_dispi_bpp,
+                        dev.vbe_dispi_enable
+                    );
+                }
                 dev.vbe_dispi_write_reg(index, value);
             }
             _ => {}
@@ -4908,6 +5352,14 @@ pub struct Machine {
     mem: SystemMemory,
     io: IoPortBus,
 
+    /// Guest instructions retired since the last starved-waiter busy tick.
+    ///
+    /// The tick injects a fixed period of platform time, so how often it fires
+    /// decides how fast guest wall-clock runs relative to guest work. Counting
+    /// instructions here keeps that rate independent of how the embedder happens
+    /// to slice execution.
+    busy_tick_instructions: u64,
+
     // Host-facing display scanout cache (populated by `display_present`).
     display_fb: Vec<u32>,
     display_width: u32,
@@ -5108,7 +5560,7 @@ impl Machine {
     // - the host/coordinator that opens and re-attaches disk/ISO backends after restore.
     //
     // Canonical Windows 7 storage topology is documented in:
-    // - `docs/05-storage-topology-win7.md`
+    // - wiki: storage (Windows 7 storage topology)
     //
     // Note: this crate does *not* inline any disk bytes into snapshots; these ids only identify
     // which *external* overlays should be re-opened.
@@ -5124,7 +5576,7 @@ impl Machine {
     // UHCI synthetic HID topology constants (normative)
     // ---------------------------------------------------------------------
     //
-    // These constants mirror `web/src/usb/uhci_external_hub.ts` and `docs/08-input-devices.md` so
+    // These constants mirror `web/src/usb/uhci_external_hub.ts` and wiki: USB and input so
     // browser/WASM integrations can share a single guest-visible USB topology contract regardless
     // of whether the UHCI topology is managed by JS or auto-attached by `aero_machine::Machine`.
 
@@ -5237,6 +5689,7 @@ impl Machine {
             ap_cpus: Vec::new(),
             assist: AssistContext::default(),
             mmu: aero_mmu::Mmu::new(),
+            busy_tick_instructions: 0,
             mem,
             io: IoPortBus::new(),
             display_fb: Vec::new(),
@@ -5386,7 +5839,7 @@ impl Machine {
     ///
     /// This is equivalent to `Machine::new(MachineConfig::win7_storage_defaults(ram_size_bytes))`.
     ///
-    /// See `docs/05-storage-topology-win7.md` for the normative BDFs and media attachment mapping.
+    /// See wiki: storage (Windows 7 storage topology) for the normative BDFs and media attachment mapping.
     pub fn new_with_win7_storage(ram_size_bytes: u64) -> Result<Self, MachineError> {
         Self::new(MachineConfig::win7_storage_defaults(ram_size_bytes))
     }
@@ -6147,7 +6600,24 @@ impl Machine {
 
     /// Debug/testing helper: read from an I/O port.
     pub fn io_read(&mut self, port: u16, size: u8) -> u32 {
-        self.io.read(port, size)
+        // Host inspection must not perturb guest-visible state.
+        //
+        // VGA Input Status 1 advances its synthetic vertical-retrace phase on
+        // guest reads so firmware spin-waits make progress. That justification
+        // does not apply to a host observation, so suppress it here. Other
+        // platform timers, including PM_TMR, advance only from the shared
+        // machine clock and therefore need no read-side suppression.
+        let prev_vga = self
+            .vga
+            .as_ref()
+            .map(|vga| vga.borrow_mut().set_input_status1_read_nudge(false));
+
+        let value = self.io.read(port, size);
+
+        if let (Some(vga), Some(prev)) = (self.vga.as_ref(), prev_vga) {
+            vga.borrow_mut().set_input_status1_read_nudge(prev);
+        }
+        value
     }
 
     /// Debug/testing helper: write to an I/O port.
@@ -6276,8 +6746,21 @@ impl Machine {
     }
 
     fn display_present_aerogpu_vbe_lfb(&mut self) -> bool {
+        // Direct DISPI programming is authoritative once the guest has touched the register file.
+        // This matters when restoring an older snapshot whose host-side BIOS cache still names a
+        // boot mode: an interpreted option ROM call updates the device, not that private cache.
+        let guest_owns_dispi = self
+            .aerogpu
+            .as_ref()
+            .is_some_and(|dev| dev.borrow().vbe_dispi_guest_owned);
+        let bios_mode_id = if guest_owns_dispi {
+            None
+        } else {
+            self.bios.video.vbe.current_mode
+        };
+
         let (width, height, bpp, bytes_per_pixel, pitch, start_x, start_y) =
-            if let Some(mode_id) = self.bios.video.vbe.current_mode {
+            if let Some(mode_id) = bios_mode_id {
                 // BIOS-driven VBE mode.
                 let Some(mode) = self.bios.video.vbe.find_mode(mode_id) else {
                     return false;
@@ -6393,19 +6876,42 @@ impl Machine {
         self.display_width = width;
         self.display_height = height;
 
-        // Fast-path: if the VBE LFB base falls within AeroGPU BAR1, read directly from the
-        // device's `Vec<u8>` VRAM backing store rather than routing through the PCI MMIO router.
+        // Fast-path: if the VBE LFB base falls within AeroGPU VRAM (BAR1 aperture, or
+        // STDVGA BAR0 which aliases `VRAM[VBE_LFB_OFFSET..]`), read directly from the
+        // device's `Vec<u8>` backing store rather than routing through the PCI MMIO router.
         //
         // This avoids millions of tiny MMIO read operations when presenting a large scanout.
         let vram_fast = if pitch_usize != 0 && pitch_usize >= row_bytes {
-            match (self.aerogpu.clone(), self.aerogpu_bar1_base()) {
-                (Some(aerogpu), Some(bar1_base)) => {
-                    let bar1_end =
-                        bar1_base.saturating_add(aero_devices::pci::profile::AEROGPU_VRAM_SIZE);
-                    if base < bar1_base || base >= bar1_end {
-                        None
+            match self.aerogpu.clone() {
+                Some(aerogpu) => {
+                    let bar1_base = self.aerogpu_bar1_base();
+                    let bar0_base = self.aerogpu_bar0_base().filter(|&b| b != 0);
+                    let vram_off_u64 = if let Some(bar1_base) = bar1_base {
+                        let bar1_end =
+                            bar1_base.saturating_add(aero_devices::pci::profile::AEROGPU_VRAM_SIZE);
+                        if base >= bar1_base && base < bar1_end {
+                            Some(base - bar1_base)
+                        } else {
+                            None
+                        }
                     } else {
-                        let vram_off_u64 = base - bar1_base;
+                        None
+                    }
+                    .or_else(|| {
+                        // STDVGA: PhysBasePtr = BAR0; pixel 0 at BAR0+0 → VRAM[VBE_LFB_OFFSET].
+                        let bar0_base = bar0_base?;
+                        if !aerogpu_stdvga_pci_ids_enabled() {
+                            return None;
+                        }
+                        let bar0_end =
+                            bar0_base.saturating_add(u64::from(STDVGA_COMPAT_BAR0_FB_SIZE));
+                        if base >= bar0_base && base < bar0_end {
+                            Some((base - bar0_base).saturating_add(VBE_LFB_OFFSET as u64))
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(vram_off_u64) = vram_off_u64 {
                         let Ok(vram_off) = usize::try_from(vram_off_u64) else {
                             return false;
                         };
@@ -6430,9 +6936,11 @@ impl Machine {
                         } else {
                             None
                         }
+                    } else {
+                        None
                     }
                 }
-                _ => None,
+                None => None,
             }
         } else {
             None
@@ -7001,12 +7509,123 @@ impl Machine {
         u64::from(self.bios.video.vbe.lfb_base)
     }
 
+    /// Guest stores into the VBE LFB since process start (requires `AERO_COUNT_LFB_WRITES`).
+    /// Sums the legacy VGA LFB MMIO path, the devices-gpu helper, and the live
+    /// `AeroGpuBar1Mmio` → `vram_write` path used by `win7_graphics`.
+    pub fn lfb_write_count(&self) -> u64 {
+        aero_gpu_vga::lfb_write_count()
+            .saturating_add(aero_devices_gpu::aerogpu_lfb_write_count())
+            .saturating_add(aerogpu_machine_lfb_write_count())
+    }
+
     /// Return the BIOS-reported VBE linear framebuffer (LFB) base address as a raw `u32`.
     ///
     /// This is the value reported via `INT 10h AX=4F01h` (`VBE ModeInfoBlock.PhysBasePtr`).
     pub fn vbe_lfb_base_u32(&self) -> u32 {
         self.bios.video.vbe.lfb_base
     }
+
+    /// BIOS INT 10h cached video mode (low 7 bits = mode number).
+    pub fn bios_video_mode(&self) -> u8 {
+        self.bios.cached_video_mode()
+    }
+
+    /// Current VBE mode id if BIOS INT 10h AX=4F02h has set one.
+    pub fn vbe_current_mode(&self) -> Option<u16> {
+        self.bios.video.vbe.current_mode
+    }
+
+    /// AeroGPU Bochs VBE_DISPI register snapshot: (enable, xres, yres, bpp).
+    ///
+    /// Returns zeros when AeroGPU is not enabled.
+    pub fn aerogpu_vbe_dispi(&self) -> (u16, u16, u16, u16) {
+        let Some(dev) = self.aerogpu.as_ref() else {
+            return (0, 0, 0, 0);
+        };
+        let d = dev.borrow();
+        (
+            d.vbe_dispi_enable,
+            d.vbe_dispi_xres,
+            d.vbe_dispi_yres,
+            d.vbe_dispi_bpp,
+        )
+    }
+
+    /// AeroGPU Bochs VBE_DISPI virtual geometry for bring-up dumps.
+    ///
+    /// Returns `(virtual_width, virtual_height, x_offset, y_offset, pitch_bytes)`.
+    /// Returns zeros when AeroGPU is not enabled.
+    pub fn aerogpu_vbe_dispi_virtual_geometry(&self) -> (u16, u16, u16, u16, u32) {
+        let Some(dev) = self.aerogpu.as_ref() else {
+            return (0, 0, 0, 0, 0);
+        };
+        let d = dev.borrow();
+        let pitch_bytes = u32::from(d.vbe_dispi_virt_width)
+            .saturating_mul(u32::from(d.vbe_dispi_bpp))
+            .div_ceil(8);
+        (
+            d.vbe_dispi_virt_width,
+            d.vbe_dispi_virt_height,
+            d.vbe_dispi_x_offset,
+            d.vbe_dispi_y_offset,
+            pitch_bytes,
+        )
+    }
+
+    /// AeroGPU WDDM scanout0 snapshot for bring-up dumps.
+    ///
+    /// Returns `(wddm_active, enable, width, height, format, fb_gpa)`.
+    pub fn aerogpu_scanout0_debug(&self) -> (bool, bool, u32, u32, u32, u64) {
+        let Some(mmio) = self.aerogpu_mmio.as_ref() else {
+            return (false, false, 0, 0, 0, 0);
+        };
+        let s = mmio.borrow().scanout0_state();
+        (
+            s.wddm_scanout_active,
+            s.enable,
+            s.width,
+            s.height,
+            s.format,
+            s.fb_gpa,
+        )
+    }
+
+    /// Which presentation path last succeeded: `"wddm"`, `"backend"`, `"vbe"`,
+    /// `"mode13"`, `"text"`, or `"none"`. Also refreshes the host framebuffer.
+    pub fn display_present_path(&mut self) -> &'static str {
+        if let Some(vga) = &self.vga {
+            let mut vga = vga.borrow_mut();
+            vga.present();
+            let (w, h) = vga.get_resolution();
+            let fb = vga.get_framebuffer();
+            self.display_width = w;
+            self.display_height = h;
+            self.display_fb.resize(fb.len(), 0);
+            self.display_fb.copy_from_slice(fb);
+            return "legacy_vga";
+        }
+        if self.cfg.enable_aerogpu {
+            if self.display_present_aerogpu_scanout() {
+                return "wddm";
+            }
+            if self.display_present_aerogpu_backend_scanout() {
+                return "backend";
+            }
+            if self.display_present_aerogpu_vbe_lfb() {
+                return "vbe";
+            }
+            if self.display_present_aerogpu_mode13h() {
+                return "mode13";
+            }
+            self.display_present_aerogpu_text_mode();
+            return "text";
+        }
+        self.display_fb.clear();
+        self.display_width = 0;
+        self.display_height = 0;
+        "none"
+    }
+
     /// Install an external scanout descriptor that should receive legacy VGA/VBE mode updates.
     ///
     /// When present, BIOS INT 10h mode transitions publish updates to this descriptor so an
@@ -7087,7 +7706,7 @@ impl Machine {
     /// Returns the canonical AeroGPU PCI function BDF if the device is present.
     ///
     /// The canonical AeroGPU identity contract reserves `00:07.0` for
-    /// `VID:DID = A3A0:0001` (see `docs/abi/aerogpu-pci-identity.md`). This helper allows
+    /// `VID:DID = A3A0:0001` (see wiki: AeroGPU device ABI). This helper allows
     /// integration tests and wasm glue code to detect whether an AeroGPU device model is attached
     /// without reaching into machine internals.
     pub fn aerogpu_bdf(&self) -> Option<PciBdf> {
@@ -7101,9 +7720,14 @@ impl Machine {
             return None;
         }
         let device = bus.read_config(bdf, 0x02, 2) as u16;
-        (vendor == aero_devices::pci::profile::PCI_VENDOR_ID_AERO
-            && device == aero_devices::pci::profile::PCI_DEVICE_ID_AERO_AEROGPU)
-            .then_some(bdf)
+        let canonical = vendor == aero_devices::pci::profile::PCI_VENDOR_ID_AERO
+            && device == aero_devices::pci::profile::PCI_DEVICE_ID_AERO_AEROGPU;
+        // Bring-up: `AERO_AEROGPU_STDVGA_IDS` reports the Bochs Standard VGA
+        // identity/topology for direct QEMU comparison. Win7's generic
+        // `display.inf` binding is class-code based; PE has no AeroGPU KMD.
+        let stdvga_compat =
+            vendor == aero_gpu_vga::VGA_PCI_VENDOR_ID && device == aero_gpu_vga::VGA_PCI_DEVICE_ID;
+        (canonical || stdvga_compat).then_some(bdf)
     }
 
     /// Install/replace the host-side AeroGPU command backend.
@@ -7213,6 +7837,17 @@ impl Machine {
         let mut pm = acpi_pm.borrow_mut();
         pm.set_wake_status();
         pm.trigger_power_button();
+    }
+
+    /// Latch only `PM1_STS.PWRBTN_STS` (no `WAK_STS`).
+    ///
+    /// Win7 HAL early power-button poll requires PWRBTN set **and** WAK clear; `acpi_wake`
+    /// sets both and so never satisfies that check.
+    pub fn acpi_power_button(&mut self) {
+        let Some(acpi_pm) = &self.acpi_pm else {
+            return;
+        };
+        acpi_pm.borrow_mut().trigger_power_button();
     }
 
     /// Returns the HPET device, if present.
@@ -7979,6 +8614,33 @@ impl Machine {
         self.attach_ide_secondary_master_iso(disk)
     }
 
+    /// Set PIIX3 IDETIM decode-enable (config 0x40/0x42 bit 15) so `intelide.sys`
+    /// creates primary/secondary channel PDOs. Guest-visible PCI config lives on
+    /// the bus device, not only on the IDE model.
+    fn enable_piix3_ide_channel_decode(&mut self) {
+        const IDETIM_DECODE_ENABLE: u32 = 0x8000;
+        let bdf = aero_devices::pci::profile::IDE_PIIX3.bdf;
+        if let Some(pci_cfg) = &self.pci_cfg {
+            if let Some(cfg) = pci_cfg.borrow_mut().bus_mut().device_config_mut(bdf) {
+                if (cfg.read(0x40, 2) as u16) & 0x8000 == 0 {
+                    cfg.write(0x40, 2, IDETIM_DECODE_ENABLE);
+                }
+                if (cfg.read(0x42, 2) as u16) & 0x8000 == 0 {
+                    cfg.write(0x42, 2, IDETIM_DECODE_ENABLE);
+                }
+            }
+        }
+        if let Some(ide) = &self.ide {
+            let mut ide = ide.borrow_mut();
+            if (ide.config_mut().read(0x40, 2) as u16) & 0x8000 == 0 {
+                ide.config_mut().write(0x40, 2, IDETIM_DECODE_ENABLE);
+            }
+            if (ide.config_mut().read(0x42, 2) as u16) & 0x8000 == 0 {
+                ide.config_mut().write(0x42, 2, IDETIM_DECODE_ENABLE);
+            }
+        }
+    }
+
     /// Attach an ISO backend as the machine's canonical install media / ATAPI CD-ROM (`disk_id=1`)
     /// without changing guest-visible tray/media state.
     ///
@@ -8506,6 +9168,117 @@ impl Machine {
             cpu.time.set_tsc(tsc);
             cpu.state.msr.tsc = tsc;
         }
+    }
+
+    /// A compute-bound kernel thread (Win7 `wimfsf.sys` LZX inside `wmiprvse`)
+    /// stays `Running` and never `HLT`s. The idle 1 ms tick then never arms, so
+    /// `DelayExecution` / `WaitForServiceReady` waiters starve even though VDS
+    /// is already `SERVICE_RUNNING`.
+    ///
+    /// After a full long-mode slice we still owe those waiters a timer period of
+    /// platform time. Skip tiny `run_slice(1)` test steps and `cli` sections so
+    /// HAL calibration and unit tests keep their cycle accounting.
+    fn maybe_busy_tick_starved_waiters(&mut self, executed: u64, slice_budget: u64) {
+        const MIN_FULL_SLICE: u64 = 10_000;
+        const TIMER_PERIOD_MS: u64 = 16;
+        if executed < MIN_FULL_SLICE || executed < slice_budget {
+            return;
+        }
+        if self.cpu.state.mode != CpuMode::Long {
+            return;
+        }
+        if (self.cpu.state.rflags() & RFLAGS_IF) == 0 {
+            return;
+        }
+        // Bill the tick against retired instructions rather than against slice
+        // boundaries. `aero-machine-cli` drives 100 k-instruction slices, so ticking
+        // once per slice injected 16 ms of platform time for every 100 k
+        // instructions — about 160 guest-seconds per billion retired, while the
+        // guest's own TSC advances one cycle per instruction. Windows watchdogs
+        // are wall-clock: winlogon gives LogonUI a bounded time to report itself
+        // ready, and under that dilation the deadline always expired first, so
+        // LogonUI was terminated and relaunched forever. The mid-slice path
+        // already documents one period per `busy_tick_mid_period()` retired
+        // instructions; both paths now share that rate.
+        self.busy_tick_instructions = self.busy_tick_instructions.saturating_add(executed);
+        if self.busy_tick_instructions < Self::busy_tick_mid_period() {
+            return;
+        }
+        self.busy_tick_instructions = 0;
+        // Match idle-HLT: sixteen 1 ms ticks so RTC (once per tick_platform)
+        // and USB 1 ms walks stay coherent with the halt path. A single 16 ms
+        // gulp under-ticks RTC and was slower on the WMI slice.
+        for _ in 0..TIMER_PERIOD_MS {
+            self.idle_tick_platform_1ms();
+        }
+    }
+
+    /// Compute-bound Win7 threads (`spsys.sys` SPP crypto, `sppsvc`, user
+    /// `svchost` hash loops) stay `Running` for tens of millions of instructions
+    /// without `HLT` or `RDTSC`. Guest time then advances only 1 cycle/insn, so
+    /// a 40 M host slice is still well under one Windows quantum and explorer
+    /// never gets scheduled. The end-of-slice busy tick is too late: inject the
+    /// same 16 ms period every 1 M retired instructions *inside* a large
+    /// long-mode IF=1 slice. Tiny slices (<1 M) keep the historical end-only
+    /// behaviour so HAL calibration and the 20 k busy-tick test stay put.
+    /// Guest instructions Tier-0 may retire before the outer loop re-polls devices,
+    /// interrupts and platform timers.
+    ///
+    /// Every boundary rebuilds the per-vCPU memory bus and paging bus and re-polls
+    /// every storage/network/GPU backend, so the batch length is a direct throughput
+    /// knob. It is bounded on the other side by responsiveness: a guest wait that
+    /// spins on a platform timer only makes progress across a boundary, so an
+    /// oversized batch can stall calibration waits.
+    fn batch_inst_quantum() -> u64 {
+        static QUANTUM: OnceLock<u64> = OnceLock::new();
+        *QUANTUM.get_or_init(|| {
+            const DEFAULT: u64 = 1_024;
+            let n = std::env::var("AERO_BATCH_INSTS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .filter(|&n| n >= 1)
+                .unwrap_or(DEFAULT);
+            if n != DEFAULT {
+                eprintln!("AERO_BATCH_INSTS: {n} guest instructions per outer-loop batch (default {DEFAULT})");
+            }
+            n
+        })
+    }
+
+    fn busy_tick_mid_period() -> u64 {
+        // Default 1M: spsys/sppsvc otherwise hog a 40M `--max-insts` slice
+        // and explorer never runs. A clock DPC in the middle of
+        // NtUserCreateWindowEx while win32k holds session prototype PTEs
+        // bugchecks (IRQL 15, cr2 in 0xfffff960). Stretch with
+        // AERO_BUSY_TICK_PERIOD so a syscall can finish; 10k is the floor
+        // so HAL calibration slices stay on the end-only path.
+        static PERIOD: OnceLock<u64> = OnceLock::new();
+        *PERIOD.get_or_init(|| {
+            const DEFAULT: u64 = 1_000_000;
+            let n = std::env::var("AERO_BUSY_TICK_PERIOD")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .filter(|&n| n >= 10_000)
+                .unwrap_or(DEFAULT);
+            if n != DEFAULT {
+                eprintln!(
+                    "AERO_BUSY_TICK_PERIOD: mid-slice waiter tick every {n} insts (default {DEFAULT})"
+                );
+            }
+            n
+        })
+    }
+
+    fn maybe_busy_tick_mid_slice(&mut self, executed: u64, batch_executed: u64) {
+        let period = Self::busy_tick_mid_period();
+        if batch_executed == 0 || executed < period {
+            return;
+        }
+        let prev = executed - batch_executed;
+        if prev / period == executed / period {
+            return;
+        }
+        self.maybe_busy_tick_starved_waiters(period, period);
     }
 
     fn idle_tick_platform_1ms(&mut self) {
@@ -9214,6 +9987,12 @@ impl Machine {
         let num = (raw >> 1) & 0x01;
         let caps = (raw >> 2) & 0x01;
         (num) | (caps << 1) | (scroll << 2)
+    }
+
+    pub fn ps2_diagnostic_state(&self) -> Option<aero_devices_input::I8042DiagnosticState> {
+        self.i8042
+            .as_ref()
+            .map(|ctrl| ctrl.borrow().diagnostic_state())
     }
 
     /// Inject a browser-style keyboard code into the i8042 controller, if present.
@@ -11203,7 +11982,7 @@ impl Machine {
             // PIIX3 is a multi-function PCI device. Ensure function 0 exists and has the
             // multi-function bit set so OSes enumerate the IDE/UHCI functions at 00:01.1/00:01.2
             // reliably.
-            if self.cfg.enable_ide || self.cfg.enable_uhci {
+            if self.cfg.enable_ide || self.cfg.enable_uhci || self.cfg.enable_i8042 {
                 let bdf = aero_devices::pci::profile::ISA_PIIX3.bdf;
                 pci_cfg
                     .borrow_mut()
@@ -11314,6 +12093,14 @@ impl Machine {
             } else {
                 None
             };
+            if let Some(ide_dev) = &ide {
+                if let (Some(irq14), Some(irq15)) = (&self.ide_irq14_line, &self.ide_irq15_line) {
+                    ide_dev.borrow_mut().attach_irq_lines(
+                        Box::new(irq14.clone()),
+                        Box::new(irq15.clone()),
+                    );
+                }
+            }
 
             let virtio_net = if self.cfg.enable_virtio_net {
                 let mac = self
@@ -11770,8 +12557,18 @@ impl Machine {
                     router.register_handler(
                         bdf,
                         aero_devices::pci::profile::AEROGPU_BAR1_VRAM_INDEX,
-                        AeroGpuBar1Mmio { dev: aerogpu },
+                        AeroGpuBar1Mmio {
+                            dev: aerogpu.clone(),
+                        },
                     );
+                    // STDVGA: BAR0 is the Bochs framebuffer (LFB alias), not AeroGPU regs.
+                    if aerogpu_stdvga_pci_ids_enabled() {
+                        router.register_handler(
+                            bdf,
+                            aero_devices::pci::profile::AEROGPU_BAR0_INDEX,
+                            AeroGpuBar0LfbMmio { dev: aerogpu },
+                        );
+                    }
                 }
                 if let Some(e1000) = e1000.clone() {
                     router.register_shared_handler(
@@ -11820,12 +12617,15 @@ impl Machine {
                         VirtioPciBar0Mmio::new(pci_cfg.clone(), virtio_input_tablet, bdf),
                     );
                 }
-                if let Some(aerogpu_mmio) = aerogpu_mmio.clone() {
-                    router.register_shared_handler(
-                        aero_devices::pci::profile::AEROGPU.bdf,
-                        aero_devices::pci::profile::AEROGPU_BAR0_INDEX,
-                        aerogpu_mmio,
-                    );
+                // Canonical AeroGPU: BAR0 = register file. STDVGA replaces BAR0 with LFB alias.
+                if !aerogpu_stdvga_pci_ids_enabled() {
+                    if let Some(aerogpu_mmio) = aerogpu_mmio.clone() {
+                        router.register_shared_handler(
+                            aero_devices::pci::profile::AEROGPU.bdf,
+                            aero_devices::pci::profile::AEROGPU_BAR0_INDEX,
+                            aerogpu_mmio,
+                        );
+                    }
                 }
                 Box::new(PciMmioWindow {
                     window_base: PCI_MMIO_BASE,
@@ -12100,6 +12900,7 @@ impl Machine {
             cpu_count: self.cfg.cpu_count,
             smbios_uuid_seed: self.cfg.smbios_uuid_seed,
             enable_acpi: self.cfg.enable_pc_platform && self.cfg.enable_acpi,
+            enable_i8042: self.cfg.enable_i8042,
             vbe_lfb_base,
             ..Default::default()
         });
@@ -12426,58 +13227,66 @@ impl Machine {
             };
 
             let current_legacy_scanout_descriptor = || -> ScanoutStateUpdate {
-                // BIOS-driven VBE modes (INT 10h / HLE BIOS).
-                if let Some(mode) = self.bios.video.vbe.current_mode {
-                    if let Some(mode_info) = self.bios.video.vbe.find_mode(mode) {
-                        // This legacy VBE scanout publication path currently only supports the
-                        // canonical boot pixel formats:
-                        // - 32bpp packed pixels `B8G8R8X8`
-                        // - 16bpp packed pixels `B5G6R5`
-                        //
-                        // If the guest selected a palettized VBE mode (e.g. 8bpp), fall back to the
-                        // implicit legacy path rather than publishing a misleading descriptor.
-                        let (format, bytes_per_pixel) = match mode_info.bpp {
-                            32 => (SCANOUT_FORMAT_B8G8R8X8, 4u64),
-                            16 => (SCANOUT_FORMAT_B5G6R5, 2u64),
-                            _ => return legacy_text,
-                        };
+                let guest_owns_dispi = self
+                    .aerogpu
+                    .as_ref()
+                    .is_some_and(|dev| dev.borrow().vbe_dispi_guest_owned);
 
-                        // Keep the published legacy scanout descriptor consistent with the BIOS VBE
-                        // state used by the AeroGPU VBE/text fallback renderer
-                        // (`display_present_aerogpu_vbe_lfb`).
-                        //
-                        // `ScanoutState` has no explicit panning fields, so display-start offsets must
-                        // be encoded by adjusting the base address.
-                        let pitch = u64::from(
-                            self.bios
-                                .video
-                                .vbe
-                                .bytes_per_scan_line
-                                .max(mode_info.bytes_per_scan_line()),
-                        );
-                        if pitch == 0 {
-                            return legacy_text;
-                        }
-                        let base = u64::from(self.bios.video.vbe.lfb_base)
-                            .saturating_add(
-                                u64::from(self.bios.video.vbe.display_start_y)
-                                    .saturating_mul(pitch),
-                            )
-                            .saturating_add(
-                                u64::from(self.bios.video.vbe.display_start_x)
-                                    .saturating_mul(bytes_per_pixel),
+                // BIOS-driven VBE modes (INT 10h / HLE BIOS). Once the guest programs DISPI
+                // directly, the device register file supersedes any stale host-side BIOS cache.
+                if !guest_owns_dispi {
+                    if let Some(mode) = self.bios.video.vbe.current_mode {
+                        if let Some(mode_info) = self.bios.video.vbe.find_mode(mode) {
+                            // This legacy VBE scanout publication path currently only supports the
+                            // canonical boot pixel formats:
+                            // - 32bpp packed pixels `B8G8R8X8`
+                            // - 16bpp packed pixels `B5G6R5`
+                            //
+                            // If the guest selected a palettized VBE mode (e.g. 8bpp), fall back to the
+                            // implicit legacy path rather than publishing a misleading descriptor.
+                            let (format, bytes_per_pixel) = match mode_info.bpp {
+                                32 => (SCANOUT_FORMAT_B8G8R8X8, 4u64),
+                                16 => (SCANOUT_FORMAT_B5G6R5, 2u64),
+                                _ => return legacy_text,
+                            };
+
+                            // Keep the published legacy scanout descriptor consistent with the BIOS
+                            // VBE state used by the AeroGPU VBE/text fallback renderer
+                            // (`display_present_aerogpu_vbe_lfb`).
+                            //
+                            // `ScanoutState` has no explicit panning fields, so display-start offsets
+                            // must be encoded by adjusting the base address.
+                            let pitch = u64::from(
+                                self.bios
+                                    .video
+                                    .vbe
+                                    .bytes_per_scan_line
+                                    .max(mode_info.bytes_per_scan_line()),
                             );
-                        return ScanoutStateUpdate {
-                            source: SCANOUT_SOURCE_LEGACY_VBE_LFB,
-                            base_paddr_lo: base as u32,
-                            base_paddr_hi: (base >> 32) as u32,
-                            width: u32::from(mode_info.width),
-                            height: u32::from(mode_info.height),
-                            pitch_bytes: pitch as u32,
-                            format,
-                        };
+                            if pitch == 0 {
+                                return legacy_text;
+                            }
+                            let base = u64::from(self.bios.video.vbe.lfb_base)
+                                .saturating_add(
+                                    u64::from(self.bios.video.vbe.display_start_y)
+                                        .saturating_mul(pitch),
+                                )
+                                .saturating_add(
+                                    u64::from(self.bios.video.vbe.display_start_x)
+                                        .saturating_mul(bytes_per_pixel),
+                                );
+                            return ScanoutStateUpdate {
+                                source: SCANOUT_SOURCE_LEGACY_VBE_LFB,
+                                base_paddr_lo: base as u32,
+                                base_paddr_hi: (base >> 32) as u32,
+                                width: u32::from(mode_info.width),
+                                height: u32::from(mode_info.height),
+                                pitch_bytes: pitch as u32,
+                                format,
+                            };
+                        }
+                        return legacy_text;
                     }
-                    return legacy_text;
                 }
 
                 // Guest-driven Bochs VBE_DISPI programming (0x01CE/0x01CF). This allows a guest to
@@ -12884,6 +13693,7 @@ impl Machine {
             let mut bus = MachineCpuBus {
                 a20: self.chipset.a20(),
                 reset: self.reset_latch.clone(),
+                execution_yield_requested: false,
                 inner,
             };
 
@@ -12895,15 +13705,51 @@ impl Machine {
 
     /// Run the CPU for at most `max_insts` guest instructions.
     pub fn run_slice(&mut self, max_insts: u64) -> RunExit {
+        self.run_slice_inner(max_insts, None)
+    }
+
+    /// Run with IR-block JIT acceleration. Hot blocks are pre-decoded to IR and
+    /// executed via the Tier-1 IR interpreter, skipping per-instruction decode
+    /// and dispatch overhead.
+    #[doc(hidden)]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn run_slice_jit(&mut self, max_insts: u64, ir_jit: &mut RunSliceIrJit) -> RunExit {
+        self.run_slice_inner(max_insts, Some(ir_jit))
+    }
+
+    fn run_slice_inner(
+        &mut self,
+        max_insts: u64,
+        // Both the binding and its `mut` are used only on native, where the block-cache fast
+        // paths below are compiled in. On wasm32 the cache type is uninhabited, so this is
+        // always `None` and nothing reads it.
+        #[allow(unused_mut, unused_variables)] mut ir_jit: Option<&mut RunSliceIrJit>,
+    ) -> RunExit {
         let mut executed = 0u64;
         // Keep Tier-0 instruction gating coherent with the CPUID surface that assists expose to the
         // guest.
-        let cfg = Tier0Config::from_cpuid(&self.assist.features);
+        let mut cfg = Tier0Config::from_cpuid(&self.assist.features);
+        // Critical for native bring-up throughput: do not exit the Tier-0 batch on every
+        // branch. Branch-dense boot/kernel code otherwise forces a full device re-poll +
+        // paging-bus rebuild after nearly every taken/not-taken branch (previously ~95% of
+        // host cycles). Cap each batch so devices/timers stay responsive.
+        cfg.exit_on_branch = false;
+        // Keep batches modest so RDTSC-accelerated waits still cross outer-loop
+        // boundaries where platform timers tick and IRQs are polled. 16k let a
+        // HAL 0x5C clock-sync wait expire entirely inside one batch.
+        let batch_inst_quantum = Self::batch_inst_quantum();
         while executed < max_insts {
             if let Some(kind) = self.reset_latch.take() {
                 self.flush_serial();
                 return RunExit::ResetRequested { kind, executed };
             }
+
+            // Interpreter-safe VBE ROM services program the standalone VGA device through DISPI
+            // ports and do not cross the host-HLE BIOS boundary. Reconcile the shared presentation
+            // descriptor from the live register file after every execution batch so native ROM
+            // mode/stride/panning changes are externally visible.
+            #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threaded"))]
+            self.sync_legacy_vga_scanout_state();
 
             // Keep the core's A20 view coherent with the chipset latch.
             self.cpu.state.a20_enabled = self.chipset.a20().enabled();
@@ -12937,7 +13783,7 @@ impl Machine {
             const MAX_QUEUED_EXTERNAL_INTERRUPTS: usize = 1;
             let _ = self.poll_platform_interrupt(MAX_QUEUED_EXTERNAL_INTERRUPTS);
 
-            let mut remaining = max_insts - executed;
+            let mut remaining = (max_insts - executed).min(batch_inst_quantum);
             // `CpuState::apply_a20` masks bit 20 in real/v8086 mode when `state.a20_enabled` is
             // false. If the guest enables A20 via port I/O, the chipset latch updates immediately,
             // but `state.a20_enabled` is only synchronized here at the outer loop boundary.
@@ -12955,33 +13801,135 @@ impl Machine {
             // Today `Machine` only executes vCPU0, so the APIC ID is always 0 here; multi-vCPU
             // scheduling can pass the correct APIC ID when additional `CpuCore` instances are
             // introduced.
+            //
+            // Hand the durable MMU (warm TLB) into the paging bus. Use swap against a
+            // stack-local empty MMU so we never leave `self.mmu` in a partially-moved
+            // state; the empty one is discarded when the batch ends.
             let phys = PerCpuSystemMemoryBus::new(
                 0,
                 self.interrupts.clone(),
                 ApCpus::All(self.ap_cpus.as_mut_slice()),
                 &mut self.mem,
             );
-            let mut inner =
-                aero_cpu_core::PagingBus::new_with_io(phys, StrictIoPortBus { io: &mut self.io });
+            let mut inner = aero_cpu_core::PagingBus::with_mmu_and_io(
+                aero_mmu::Mmu::new(),
+                phys,
+                StrictIoPortBus { io: &mut self.io },
+            );
             std::mem::swap(&mut self.mmu, inner.mmu_mut());
             let mut bus = MachineCpuBus {
                 a20: self.chipset.a20(),
                 reset: self.reset_latch.clone(),
+                execution_yield_requested: false,
                 inner,
             };
 
-            let batch = run_batch_cpu_core_with_assists(
-                &cfg,
-                &mut self.assist,
-                &mut self.cpu,
-                &mut bus,
-                remaining,
-            );
+            // Platform timers (RTC/PIT/HPET/LAPIC) must include explicit virtual-time
+            // advances, not merely retired instruction count. PM-timer polling can add a
+            // large coherent quantum so calibration waits finish in finite host time.
+            //
+            // Do not derive this interval by subtracting the architectural TSC. Windows
+            // legally resets IA32_TSC during HAL calibration; a wrapping subtraction across
+            // that WRMSR looks like nearly 2^64 elapsed cycles and jumps PM_TMR through
+            // multiple wraps. TimeSource's monotonic counter advances for instructions and
+            // explicit quanta but is intentionally unaffected by architectural TSC writes.
+            let elapsed_cycles_before = self.cpu.time.elapsed_cycles();
+
+            // ── IR block JIT fast-path ───────────────────────────────────────
+            // Check if a hot block is cached for the current RIP. If so,
+            // execute it via the IR interpreter (skipping decode + dispatch).
+            // Assigned only by the block-cache fast path below, which is native-only; the
+            // branch that reads it further down handles the zero case either way.
+            #[allow(unused_mut)]
+            let mut ir_executed = 0u64;
+            #[cfg(not(target_arch = "wasm32"))]
+            if !self.cpu.pending.has_pending_event()
+                && self.cpu.pending.external_interrupts().is_empty()
+            {
+                if let Some(ref mut jit) = ir_jit {
+                    let rip = self.cpu.state.rip();
+                    if jit.get(rip).is_some() {
+                        // A newly constructed PagingBus has not yet observed the
+                        // CPU's paging registers or CPL. Tier-0 synchronizes it at
+                        // every instruction boundary; the cached-block path must
+                        // establish the same invariant before any translated
+                        // fetch/load/store.
+                        aero_cpu_core::mem::CpuBus::sync(&mut bus, &self.cpu.state);
+                        if let Some((next_rip, guest_instruction_count, blocks)) =
+                            crate::jit::run_ir_chain(
+                                jit,
+                                &mut self.cpu.state,
+                                &mut bus,
+                                remaining,
+                            )
+                        {
+                            self.cpu.state.set_rip(next_rip);
+                            self.cpu.time.advance_cycles(guest_instruction_count);
+                            self.cpu.state.msr.tsc = self.cpu.time.read_tsc();
+                            self.cpu
+                                .pending
+                                .retire_instructions(guest_instruction_count);
+                            ir_executed = guest_instruction_count;
+                            jit.record_chain_execution(blocks, guest_instruction_count);
+                        }
+                    }
+                }
+            }
+
+            let batch = if ir_executed > 0 {
+                // IR block succeeded; skip the interpreter batch for this iteration.
+                // Return the warm, synchronized MMU to the machine before the
+                // stack-local bus is dropped. Losing it here made the next
+                // cached block start from a default (paging-disabled) MMU.
+                std::mem::swap(&mut self.mmu, bus.inner.mmu_mut());
+                // Tick platform timers by the IR block's instruction count.
+                let elapsed_cycles = self
+                    .cpu
+                    .time
+                    .elapsed_cycles()
+                    .wrapping_sub(elapsed_cycles_before);
+                self.tick_platform_from_cycles(elapsed_cycles.max(ir_executed));
+                executed = executed.saturating_add(ir_executed);
+                // Continue the outer loop (process devices, poll interrupts).
+                if let Some(kind) = self.reset_latch.take() {
+                    self.flush_serial();
+                    return RunExit::ResetRequested { kind, executed };
+                }
+                self.run_ap_cpus(&cfg, remaining.min(ir_executed));
+                continue;
+            } else {
+                // Normal interpreter batch.
+                run_batch_cpu_core_with_assists(
+                    &cfg,
+                    &mut self.assist,
+                    &mut self.cpu,
+                    &mut bus,
+                    remaining,
+                )
+            };
+
+            // ── Hotness tracking ─────────────────────────────────────────────
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(ref mut jit) = ir_jit {
+                let rip = self.cpu.state.rip();
+                if jit.record_hit(rip) {
+                    // Compile hot block (may fail if decode errors; that's OK).
+                    let bitness = self.cpu.state.bitness();
+                    let _ = jit.compile(rip, bitness, &mut bus);
+                }
+            }
+
             std::mem::swap(&mut self.mmu, bus.inner.mmu_mut());
             executed = executed.saturating_add(batch.executed);
 
-            // Deterministically advance platform time based on executed CPU cycles.
-            self.tick_platform_from_cycles(batch.executed);
+            let elapsed_cycles = self
+                .cpu
+                .time
+                .elapsed_cycles()
+                .wrapping_sub(elapsed_cycles_before);
+            // Prefer monotonic virtual cycles so explicit time quanta are included; fall
+            // back to retired count as a defensive floor.
+            self.tick_platform_from_cycles(elapsed_cycles.max(batch.executed));
 
             if let Some(kind) = self.reset_latch.take() {
                 self.flush_serial();
@@ -13002,9 +13950,11 @@ impl Machine {
                     // Only treat this as a slice completion when we've consumed the full slice
                     // budget.
                     if executed >= max_insts {
+                        self.maybe_busy_tick_starved_waiters(executed, max_insts);
                         self.flush_serial();
                         return RunExit::Completed { executed };
                     }
+                    self.maybe_busy_tick_mid_slice(executed, batch.executed);
                     continue;
                 }
                 BatchExit::Branch => continue,
@@ -13075,6 +14025,7 @@ impl Machine {
             }
         }
 
+        self.maybe_busy_tick_starved_waiters(executed, max_insts);
         self.flush_serial();
         RunExit::Completed { executed }
     }
@@ -13094,6 +14045,41 @@ impl Machine {
         }
 
         None
+    }
+
+    #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threaded"))]
+    fn sync_legacy_vga_scanout_state(&self) {
+        let (Some(vga), Some(scanout_state)) = (&self.vga, &self.scanout_state) else {
+            return;
+        };
+        let Some(current) = scanout_state.try_snapshot() else {
+            return;
+        };
+
+        // A WDDM claim is sticky until reset. Native legacy VGA/VBE register writes must not steal
+        // scanout ownership back from the accelerated path.
+        if current.source == SCANOUT_SOURCE_WDDM {
+            return;
+        }
+
+        let mut update = vga.borrow().active_scanout_update();
+        if update.source == SCANOUT_SOURCE_LEGACY_TEXT {
+            // Geometry is implicit for legacy text/planar/palettized modes. Keep the shared
+            // descriptor canonical and consistent with reset/HLE publication.
+            update.base_paddr_lo = 0;
+            update.base_paddr_hi = 0;
+        }
+
+        let matches_current = current.source == update.source
+            && current.base_paddr_lo == update.base_paddr_lo
+            && current.base_paddr_hi == update.base_paddr_hi
+            && current.width == update.width
+            && current.height == update.height
+            && current.pitch_bytes == update.pitch_bytes
+            && current.format == update.format;
+        if !matches_current {
+            let _ = scanout_state.try_publish(update);
+        }
     }
 
     fn sync_text_mode_cursor_bda_to_vga_crtc(&mut self) {
@@ -13239,7 +14225,9 @@ impl Machine {
         //
         // - Legacy VGA/VBE device model: PCI BAR assignment when the PC platform is enabled, else
         //   `cfg.vga_lfb_base`.
-        // - AeroGPU: BAR1_BASE + VBE_LFB_OFFSET (within the VRAM aperture).
+        // - AeroGPU STDVGA-compat: BAR0 base (Bochs — LFB is Region 0 start; see
+        //   `AERO_AEROGPU_STDVGA_IDS`).
+        // - AeroGPU canonical: BAR1_BASE + VBE_LFB_OFFSET (within the VRAM aperture).
         // - Headless: default RAM-backed base (safe, avoids overlap with PCI MMIO window).
         let use_legacy_vga = self.cfg.enable_vga && !self.cfg.enable_aerogpu;
         let lfb_base = if use_legacy_vga {
@@ -13249,14 +14237,30 @@ impl Machine {
             }
             base
         } else if self.cfg.enable_aerogpu {
-            self.aerogpu_bar1_base()
-                .and_then(|base| u32::try_from(base.saturating_add(VBE_LFB_OFFSET as u64)).ok())
-                .unwrap_or(firmware::video::vbe::VbeDevice::LFB_BASE_DEFAULT)
+            if aerogpu_stdvga_pci_ids_enabled() {
+                // Bochs/QEMU Standard VGA: PhysBasePtr == BAR0 (framebuffer region).
+                // Prefer programmed BAR0; fall back to BAR1+LFB offset only if BAR0
+                // is not yet assigned (pre-PCI enum).
+                self.aerogpu_bar0_base()
+                    .filter(|&b| b != 0)
+                    .and_then(|base| u32::try_from(base).ok())
+                    .or_else(|| {
+                        self.aerogpu_bar1_base().and_then(|base| {
+                            u32::try_from(base.saturating_add(VBE_LFB_OFFSET as u64)).ok()
+                        })
+                    })
+                    .unwrap_or(firmware::video::vbe::VbeDevice::LFB_BASE_DEFAULT)
+            } else {
+                self.aerogpu_bar1_base()
+                    .and_then(|base| u32::try_from(base.saturating_add(VBE_LFB_OFFSET as u64)).ok())
+                    .unwrap_or(firmware::video::vbe::VbeDevice::LFB_BASE_DEFAULT)
+            }
         } else {
             firmware::video::vbe::VbeDevice::LFB_BASE_DEFAULT
         };
 
         self.bios.video.vbe.lfb_base = lfb_base;
+        self.bios.sync_vbe_rom_lfb(&mut self.mem);
 
         // Keep the AeroGPU legacy window mapping coherent with BIOS VBE state for banked access.
         if let Some(aerogpu) = &self.aerogpu {
@@ -13366,6 +14370,18 @@ impl Machine {
             self.cpu.state.gpr[gpr::RBX] &= !0x8000;
         }
         let ax_after = self.cpu.state.gpr[gpr::RAX] as u16;
+
+        if std::env::var_os("AERO_LOG_VBE").is_some() && vector == 0x10 {
+            let is_vbe = (ax_before & 0xFF00) == 0x4F00;
+            if is_vbe || int10_is_set_mode {
+                eprintln!(
+                    "AERO_LOG_VBE: INT10 ax_before={ax_before:#x} bx={bx_before:#x} cx={cx_before:#x} dx={dx_before:#x} ax_after={ax_after:#x} mode_before={vbe_mode_before:?} mode_after={:?} bios_mode={:#x} lfb={:#x}",
+                    self.bios.video.vbe.current_mode,
+                    self.bios.cached_video_mode(),
+                    self.bios.video.vbe.lfb_base
+                );
+            }
+        }
 
         // The HLE BIOS uses its own configuration to determine the VBE LFB base and may overwrite
         // `VbeDevice::lfb_base` during INT 10h services (e.g. mode sets). Keep it coherent with the
@@ -13795,6 +14811,11 @@ impl Machine {
             return false;
         };
 
+        // CR8 → LAPIC TPR (x64 IRQL). See `LocalApic::set_tpr_from_cr8`.
+        interrupts
+            .borrow()
+            .sync_cr8_tpr_for_cpu(0, self.cpu.state.control.cr8);
+
         let mut interrupts = interrupts.borrow_mut();
         let vector = PlatformInterruptController::get_pending(&*interrupts);
         let Some(vector) = vector else {
@@ -13830,6 +14851,11 @@ impl Machine {
         let Some(interrupts) = interrupts else {
             return false;
         };
+
+        // CR8 → LAPIC TPR for this APIC id's CPU index (APIC id == cpu index for BSP/AP layout).
+        interrupts
+            .borrow()
+            .sync_cr8_tpr_for_cpu(apic_id as usize, cpu.state.control.cr8);
 
         let mut interrupts = interrupts.borrow_mut();
         let Some(vector) = interrupts.get_pending_for_apic(apic_id) else {
@@ -14667,7 +15693,7 @@ impl snapshot::SnapshotSource for Machine {
 
     fn disk_overlays(&self) -> snapshot::DiskOverlayRefs {
         let mut disks = Vec::new();
-        // Deterministic ordering (by stable disk_id); see `docs/16-snapshots.md`.
+        // Deterministic ordering (by stable disk_id); see wiki: snapshot format.
         //
         // Always emit entries for the canonical Win7 disks so `disk_id` mapping remains stable
         // even when the host has not populated overlay refs yet.
@@ -14914,6 +15940,7 @@ impl snapshot::SnapshotTarget for Machine {
                         .map(|vga| vga.borrow().lfb_base())
                         .unwrap_or_else(|| self.legacy_vga_lfb_base());
                     snapshot.config.vbe_lfb_base = use_legacy_vga.then_some(legacy_vga_lfb_base);
+                    snapshot.config.enable_i8042 = self.cfg.enable_i8042;
                     self.bios.restore_snapshot(snapshot, &mut self.mem);
                 }
             }
@@ -15357,7 +16384,7 @@ impl snapshot::SnapshotTarget for Machine {
         // controller + PCI core so any restored interrupt state can be re-driven deterministically.
         for state in disk_controller_states {
             // Canonical encoding: `DeviceId::DISK_CONTROLLER` is a `DSKC` wrapper containing nested
-            // controller snapshots keyed by packed PCI BDF. See `docs/16-snapshots.md`.
+            // controller snapshots keyed by packed PCI BDF. See wiki: snapshot format.
             if matches!(state.data.get(8..12), Some(id) if id == b"DSKC") {
                 let mut wrapper = DiskControllersSnapshot::default();
                 if snapshot::io_snapshot_bridge::apply_io_snapshot_to_device(&state, &mut wrapper)
@@ -15851,6 +16878,11 @@ impl snapshot::SnapshotTarget for Machine {
         // Ensure the BIOS VBE LFB base matches the machine's active display wiring (VGA configured
         // base, AeroGPU BAR1-derived base, or the default RAM-backed base for headless configs).
         self.sync_bios_vbe_lfb_base_to_display_wiring();
+
+        // Older snapshots leave PIIX3 IDETIM at 0. intelide.sys then creates no
+        // channel PDOs and Setup never sees the ATAPI CD-ROM. Re-enable both
+        // channels in the guest-visible PCI config after restore.
+        self.enable_piix3_ide_channel_decode();
     }
 
     fn restore_disk_overlays(&mut self, mut overlays: snapshot::DiskOverlayRefs) {
@@ -15979,6 +17011,11 @@ impl snapshot::SnapshotTarget for Machine {
             BootDevice::Hdd
         };
 
+        // DEVICES are restored before RAM. Re-publish the final, machine-wired
+        // VBE LFB address after RAM so older snapshots cannot erase the EBDA
+        // runtime value consumed by the interpreter-safe INT 10h ROM.
+        self.bios.sync_vbe_rom_lfb(&mut self.mem);
+
         // Snapshot restore applies `DEVICES` before `RAM`, so any cursor sync that reads from the
         // BIOS Data Area must happen *after* RAM is restored (here in `post_restore`).
         //
@@ -16093,6 +17130,128 @@ mod tests {
 
         dev.legacy_vga_write(u64::MAX, 2, 0xBBAA);
         assert_eq!(dev.vram[0], 0xAA);
+    }
+
+    #[test]
+    fn guest_owned_dispi_mode_supersedes_stale_bios_vbe_mode() {
+        let mut m = Machine::new(MachineConfig {
+            ram_size_bytes: 64 * 1024 * 1024,
+            enable_pc_platform: true,
+            enable_aerogpu: true,
+            enable_vga: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            enable_e1000: false,
+            enable_virtio_net: false,
+            ..Default::default()
+        })
+        .unwrap();
+        m.reset();
+
+        // Model a restored snapshot whose host-side BIOS cache still contains the boot loader's
+        // 1024x768 mode. Windows 7's VGA miniport changes mode through an interpreted real-mode
+        // ROM, so only the device register file observes the later mode set.
+        assert!(m.bios.video.vbe.set_mode(&mut m.mem, 0x0118, true));
+        {
+            let mut dev = m
+                .aerogpu
+                .as_ref()
+                .expect("AeroGPU should be present")
+                .borrow_mut();
+            // Model the old BIOS-programmed DISPI geometry too. QEMU resets virtual geometry on
+            // the disabled→enabled transition; retaining this 1024-pixel pitch across the later
+            // 800x600 mode set makes guest BAR writes and host presentation disagree.
+            dev.vbe_dispi_enable = 0x0041;
+            dev.vbe_dispi_virt_width = 1024;
+            dev.vbe_dispi_virt_height = 768;
+            dev.vbe_dispi_x_offset = 7;
+            dev.vbe_dispi_y_offset = 11;
+
+            let clear_len = 800usize * 600 * 4;
+            dev.vram[VBE_LFB_OFFSET..VBE_LFB_OFFSET + clear_len].fill(0xA5);
+        }
+
+        let scanout_state = Arc::new(ScanoutState::new());
+        m.set_scanout_state(Some(scanout_state.clone()));
+
+        m.io_write(0x01CE, 2, 0x0004);
+        m.io_write(0x01CF, 2, 0x0000); // disable
+        m.io_write(0x01CE, 2, 0x0003);
+        m.io_write(0x01CF, 2, 32); // bpp
+        m.io_write(0x01CE, 2, 0x0001);
+        m.io_write(0x01CF, 2, 800); // xres
+        m.io_write(0x01CE, 2, 0x0002);
+        m.io_write(0x01CF, 2, 600); // yres
+        m.io_write(0x01CE, 2, 0x0005);
+        m.io_write(0x01CF, 2, 0); // bank
+        m.io_write(0x01CE, 2, 0x0004);
+        m.io_write(0x01CF, 2, 0x0041); // enable + lfb
+
+        assert_eq!(m.bios.video.vbe.current_mode, Some(0x0118));
+        {
+            let dev = m
+                .aerogpu
+                .as_ref()
+                .expect("AeroGPU should be present")
+                .borrow();
+            assert_eq!(dev.vbe_dispi_virt_width, 800);
+            assert_eq!(dev.vbe_dispi_x_offset, 0);
+            assert_eq!(dev.vbe_dispi_y_offset, 0);
+            assert!(
+                dev.vram[VBE_LFB_OFFSET..VBE_LFB_OFFSET + 800 * 600 * 4]
+                    .iter()
+                    .all(|&byte| byte == 0),
+                "enabling without NOCLEARMEM must clear the new surface"
+            );
+        }
+        m.display_present();
+        assert_eq!(m.display_resolution(), (800, 600));
+
+        m.process_aerogpu();
+        let snap = scanout_state.snapshot();
+        assert_eq!(snap.source, SCANOUT_SOURCE_LEGACY_VBE_LFB);
+        assert_eq!(snap.width, 800);
+        assert_eq!(snap.height, 600);
+        assert_eq!(snap.pitch_bytes, 800 * 4);
+        assert_eq!(snap.format, SCANOUT_FORMAT_B8G8R8X8);
+        assert_eq!(snap.base_paddr(), m.vbe_lfb_base());
+
+        // Bit 7 preserves framebuffer contents while retaining the same enable-edge geometry
+        // reset. This independently covers the machine-local DISPI model (the canonical standalone
+        // VGA device has its own matching regression).
+        m.io_write(0x01CE, 2, 0x0004);
+        m.io_write(0x01CF, 2, 0x0000); // disable
+        {
+            let mut dev = m
+                .aerogpu
+                .as_ref()
+                .expect("AeroGPU should be present")
+                .borrow_mut();
+            dev.vbe_dispi_virt_width = 1024;
+            dev.vbe_dispi_x_offset = 7;
+            dev.vbe_dispi_y_offset = 11;
+            dev.vram[VBE_LFB_OFFSET..VBE_LFB_OFFSET + 800 * 600 * 4].fill(0xA5);
+        }
+        m.io_write(0x01CE, 2, 0x0004);
+        m.io_write(0x01CF, 2, 0x00C1); // enable + lfb + NOCLEARMEM
+        {
+            let dev = m
+                .aerogpu
+                .as_ref()
+                .expect("AeroGPU should be present")
+                .borrow();
+            assert_eq!(dev.vbe_dispi_virt_width, 800);
+            assert_eq!(dev.vbe_dispi_x_offset, 0);
+            assert_eq!(dev.vbe_dispi_y_offset, 0);
+            assert!(
+                dev.vram[VBE_LFB_OFFSET..VBE_LFB_OFFSET + 800 * 600 * 4]
+                    .iter()
+                    .all(|&byte| byte == 0xA5),
+                "NOCLEARMEM must preserve the new surface"
+            );
+        }
     }
 
     #[test]
@@ -17249,6 +18408,317 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn jit_cached_register_blocks_preserve_paging_and_instruction_accounting() {
+        let cfg = MachineConfig {
+            ram_size_bytes: 2 * 1024 * 1024,
+            enable_pc_platform: false,
+            enable_vga: false,
+            enable_aerogpu: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            ..Default::default()
+        };
+        let mut m = Machine::new(cfg).unwrap();
+
+        // Linear code page 0 deliberately maps to physical 0x3000 so the
+        // cached path must preserve the active paging configuration.
+        let pd_base = 0x1000u64;
+        let pt_base = 0x2000u64;
+        let code_page = 0x3000u64;
+        const PTE_P: u32 = 1 << 0;
+        const PTE_RW: u32 = 1 << 1;
+        let flags = PTE_P | PTE_RW;
+
+        // add eax,1; jmp short 0
+        let code: [u8; 5] = [0x83, 0xC0, 0x01, 0xEB, 0xFB];
+        m.write_physical_u32(pd_base, (pt_base as u32) | flags);
+        m.write_physical_u32(pt_base, (code_page as u32) | flags);
+        m.write_physical(code_page, &code);
+
+        *m.cpu_core_mut_by_index(0) = CpuCore::new(CpuMode::Protected);
+        m.cpu_mut().control.cr3 = pd_base;
+        m.cpu_mut().control.cr0 = CR0_PE | CR0_PG;
+        m.cpu_mut().update_mode();
+        m.cpu_mut().set_rip(0);
+
+        let mut jit = RunSliceIrJit::new();
+        for _ in 0..50 {
+            assert_eq!(
+                m.run_slice_jit(2, &mut jit),
+                RunExit::Completed { executed: 2 }
+            );
+        }
+        assert!(
+            jit.get(0).is_some(),
+            "self-loop should be cached after 50 hits"
+        );
+
+        assert_eq!(
+            m.run_slice_jit(1_000, &mut jit),
+            RunExit::Completed { executed: 1_000 },
+            "slice accounting must count guest x86 instructions, not lowered IR operations"
+        );
+        assert_eq!(m.cpu().read_gpr32(gpr::RAX), 550);
+        assert_eq!(m.mmu.cr3(), pd_base);
+        assert_eq!(m.mmu.cr0(), CR0_PE | CR0_PG);
+        assert!(jit.executed_blocks() > 1);
+        assert!(jit.executed_guest_instructions() > 4);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn jit_caches_user_mode_two_store_ram_loops() {
+        let cfg = MachineConfig {
+            ram_size_bytes: 2 * 1024 * 1024,
+            enable_pc_platform: false,
+            enable_vga: false,
+            enable_aerogpu: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            ..Default::default()
+        };
+        let mut m = Machine::new(cfg).unwrap();
+
+        let pd_base = 0x1000u64;
+        let pt_base = 0x2000u64;
+        let code_page = 0x3000u64;
+        let data_page = 0x4000u64;
+        const PTE_P: u32 = 1 << 0;
+        const PTE_RW: u32 = 1 << 1;
+        let flags = PTE_P | PTE_RW;
+
+        // Two stores: mov [edi],eax; mov [edi+4],eax; jmp short 0
+        // User-linear RIP: both RAM MOVs are idempotent on #PF retry, so
+        // the WMI/repdrvfs multi-store loops can stay in the IR cache.
+        let code: [u8; 7] = [0x89, 0x07, 0x89, 0x47, 0x04, 0xEB, 0xF9];
+        m.write_physical_u32(pd_base, (pt_base as u32) | flags);
+        m.write_physical_u32(pt_base, (code_page as u32) | flags);
+        m.write_physical_u32(pt_base + 4, (data_page as u32) | flags);
+        m.write_physical_u32(data_page, 0);
+        m.write_physical(code_page, &code);
+
+        *m.cpu_core_mut_by_index(0) = CpuCore::new(CpuMode::Protected);
+        m.cpu_mut().control.cr3 = pd_base;
+        m.cpu_mut().control.cr0 = CR0_PE | CR0_PG;
+        m.cpu_mut().update_mode();
+        m.cpu_mut().set_rip(0);
+        m.cpu_mut().write_gpr32(gpr::RDI, 0x1000);
+        m.cpu_mut().write_gpr32(gpr::RAX, 0x11);
+
+        let pd_entry_before = m.read_physical_u32(pd_base);
+        let mut jit = RunSliceIrJit::new();
+        for _ in 0..50 {
+            assert_eq!(
+                m.run_slice_jit(3, &mut jit),
+                RunExit::Completed { executed: 3 }
+            );
+        }
+        assert!(
+            jit.get(0).is_some(),
+            "user-mode two-store RAM loops must be cached (WMI/repdrvfs)"
+        );
+        assert_eq!(
+            m.run_slice_jit(30, &mut jit),
+            RunExit::Completed { executed: 30 }
+        );
+        assert_eq!(
+            m.read_physical_u32(pd_base) & !(1 << 5 | 1 << 6),
+            pd_entry_before & !(1 << 5 | 1 << 6),
+            "ordinary page-walk accessed/dirty bits are allowed; the mapping itself must remain intact"
+        );
+        assert_eq!(m.read_physical_u32(data_page), 0x11);
+        assert_eq!(m.read_physical_u32(data_page + 4), 0x11);
+        assert!(
+            jit.executed_blocks() > 0,
+            "the cached two-store loop must actually retire IR blocks"
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn jit_caches_user_block_with_one_trailing_store() {
+        let cfg = MachineConfig {
+            ram_size_bytes: 2 * 1024 * 1024,
+            enable_pc_platform: false,
+            enable_vga: false,
+            enable_aerogpu: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            ..Default::default()
+        };
+        let mut m = Machine::new(cfg).unwrap();
+
+        let pd_base = 0x1000u64;
+        let pt_base = 0x2000u64;
+        let code_page = 0x3000u64;
+        let data_page = 0x4000u64;
+        const PTE_P: u32 = 1 << 0;
+        const PTE_RW: u32 = 1 << 1;
+        let flags = PTE_P | PTE_RW;
+
+        // mov eax,[edi]; mov [edi+4],eax; jmp short 0
+        // One load, one trailing store: the wmiprvse merge-loop shape.
+        let code: [u8; 7] = [0x8B, 0x07, 0x89, 0x47, 0x04, 0xEB, 0xF9];
+        m.write_physical_u32(pd_base, (pt_base as u32) | flags);
+        m.write_physical_u32(pt_base, (code_page as u32) | flags);
+        m.write_physical_u32(pt_base + 4, (data_page as u32) | flags);
+        m.write_physical_u32(data_page, 0xAB);
+        m.write_physical_u32(data_page + 4, 0);
+        m.write_physical(code_page, &code);
+
+        *m.cpu_core_mut_by_index(0) = CpuCore::new(CpuMode::Protected);
+        m.cpu_mut().control.cr3 = pd_base;
+        m.cpu_mut().control.cr0 = CR0_PE | CR0_PG;
+        m.cpu_mut().update_mode();
+        m.cpu_mut().set_rip(0);
+        m.cpu_mut().write_gpr32(gpr::RDI, 0x1000);
+
+        let mut jit = RunSliceIrJit::new();
+        for _ in 0..50 {
+            assert_eq!(
+                m.run_slice_jit(3, &mut jit),
+                RunExit::Completed { executed: 3 }
+            );
+        }
+        assert!(
+            jit.get(0).is_some(),
+            "a user-linear block with one trailing store should be cacheable"
+        );
+        assert_eq!(
+            m.run_slice_jit(30, &mut jit),
+            RunExit::Completed { executed: 30 }
+        );
+        assert_eq!(m.read_physical_u32(data_page + 4), 0xAB);
+        assert!(jit.executed_blocks() > 0);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn jit_caches_single_load_blocks_without_memory_writes() {
+        let cfg = MachineConfig {
+            ram_size_bytes: 2 * 1024 * 1024,
+            enable_pc_platform: false,
+            enable_vga: false,
+            enable_aerogpu: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            ..Default::default()
+        };
+        let mut m = Machine::new(cfg).unwrap();
+
+        let pd_base = 0x1000u64;
+        let pt_base = 0x2000u64;
+        let code_page = 0x3000u64;
+        let data_page = 0x4000u64;
+        const PTE_P: u32 = 1 << 0;
+        const PTE_RW: u32 = 1 << 1;
+        let flags = PTE_P | PTE_RW;
+
+        // mov eax,[edi]; add eax,1; jmp short 0
+        let code: [u8; 7] = [0x8B, 0x07, 0x83, 0xC0, 0x01, 0xEB, 0xF9];
+        m.write_physical_u32(pd_base, (pt_base as u32) | flags);
+        m.write_physical_u32(pt_base, (code_page as u32) | flags);
+        m.write_physical_u32(pt_base + 4, (data_page as u32) | flags);
+        m.write_physical_u32(data_page, 0x1234_5678);
+        m.write_physical(code_page, &code);
+
+        *m.cpu_core_mut_by_index(0) = CpuCore::new(CpuMode::Protected);
+        m.cpu_mut().control.cr3 = pd_base;
+        m.cpu_mut().control.cr0 = CR0_PE | CR0_PG;
+        m.cpu_mut().update_mode();
+        m.cpu_mut().set_rip(0);
+        m.cpu_mut().write_gpr32(gpr::RDI, 0x1000);
+
+        let mut jit = RunSliceIrJit::new();
+        for _ in 0..50 {
+            assert_eq!(
+                m.run_slice_jit(3, &mut jit),
+                RunExit::Completed { executed: 3 }
+            );
+        }
+
+        assert!(
+            jit.get(0).is_some(),
+            "a block with one read and no writes should be cacheable"
+        );
+        assert_eq!(
+            m.run_slice_jit(300, &mut jit),
+            RunExit::Completed { executed: 300 }
+        );
+        assert_eq!(m.cpu().read_gpr32(gpr::RAX), 0x1234_5679);
+        assert!(jit.executed_blocks() > 0);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn jit_caches_multi_load_user_blocks_and_rolls_back_a_later_fault() {
+        let cfg = MachineConfig {
+            ram_size_bytes: 2 * 1024 * 1024,
+            enable_pc_platform: false,
+            enable_vga: false,
+            enable_aerogpu: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            ..Default::default()
+        };
+        let mut m = Machine::new(cfg).unwrap();
+
+        let pd_base = 0x1000u64;
+        let pt_base = 0x2000u64;
+        let code_page = 0x3000u64;
+        let data_page = 0x4000u64;
+        const PTE_P: u32 = 1 << 0;
+        const PTE_RW: u32 = 1 << 1;
+        let flags = PTE_P | PTE_RW;
+
+        // mov eax,[edi]; add eax,[edi+4]; jmp short 0
+        // Two RAM loads, no store: the FastProx/WMI shape.
+        let code: [u8; 7] = [0x8B, 0x07, 0x03, 0x47, 0x04, 0xEB, 0xF9];
+        m.write_physical_u32(pd_base, (pt_base as u32) | flags);
+        m.write_physical_u32(pt_base, (code_page as u32) | flags);
+        m.write_physical_u32(pt_base + 4, (data_page as u32) | flags);
+        m.write_physical_u32(data_page, 0x0000_0002);
+        m.write_physical_u32(data_page + 4, 0x0000_0003);
+        m.write_physical(code_page, &code);
+
+        *m.cpu_core_mut_by_index(0) = CpuCore::new(CpuMode::Protected);
+        m.cpu_mut().control.cr3 = pd_base;
+        m.cpu_mut().control.cr0 = CR0_PE | CR0_PG;
+        m.cpu_mut().update_mode();
+        m.cpu_mut().set_rip(0);
+        m.cpu_mut().write_gpr32(gpr::RDI, 0x1000);
+
+        let mut jit = RunSliceIrJit::new();
+        for _ in 0..50 {
+            assert_eq!(
+                m.run_slice_jit(3, &mut jit),
+                RunExit::Completed { executed: 3 }
+            );
+        }
+        assert!(
+            jit.get(0).is_some(),
+            "a user-linear block with two RAM loads and no stores should be cacheable"
+        );
+        assert_eq!(
+            m.run_slice_jit(30, &mut jit),
+            RunExit::Completed { executed: 30 }
+        );
+        assert_eq!(m.cpu().read_gpr32(gpr::RAX), 5);
+        assert!(jit.executed_blocks() > 0);
+    }
+
+    #[test]
     fn snapshot_restore_roundtrips_cpu_internal_state() {
         let cfg = MachineConfig {
             ram_size_bytes: 2 * 1024 * 1024,
@@ -18379,8 +19849,8 @@ mod tests {
             .borrow_mut()
             .set_mode(aero_platform::interrupts::PlatformInterruptMode::Apic);
 
-        // Program IOAPIC redirection entry for GSI10 -> vector 0x60 (active-low, level-triggered).
-        const GSI: u32 = 10;
+        // Program Q35 PCI GSI20 -> vector 0x60 (active-low, level-triggered).
+        const GSI: u32 = 20;
         const VECTOR: u32 = 0x60;
         let low: u32 = VECTOR | (1 << 13) | (1 << 15); // polarity low + level triggered
         let redtbl_low = 0x10u32 + GSI * 2;
@@ -18475,11 +19945,14 @@ mod tests {
         let pci_intx = m.pci_intx_router().expect("pc platform enabled");
 
         let bdf = aero_devices::pci::profile::NIC_E1000_82540EM.bdf;
-        let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let expected_vector = if gsi < 8 {
-            0x20u8.wrapping_add(gsi as u8)
+        let irq = pci_intx
+            .borrow()
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("E1000 INTx should have a legacy PIC compatibility route");
+        let expected_vector = if irq < 8 {
+            0x20u8.wrapping_add(irq)
         } else {
-            0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+            0x28u8.wrapping_add(irq.wrapping_sub(8))
         };
 
         // Install a trivial real-mode ISR for the expected vector.
@@ -18501,11 +19974,7 @@ mod tests {
             ints.pic_mut().set_offsets(0x20, 0x28);
             // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
             ints.pic_mut().set_masked(2, false);
-            if let Ok(irq) = u8::try_from(gsi) {
-                if irq < 16 {
-                    ints.pic_mut().set_masked(irq, false);
-                }
-            }
+            ints.pic_mut().set_masked(irq, false);
         }
 
         // Assert E1000 INTx level by enabling + setting a cause bit.
@@ -18567,11 +20036,14 @@ mod tests {
         let pci_intx = m.pci_intx_router().expect("pc platform enabled");
 
         let bdf = aero_devices::pci::profile::NIC_E1000_82540EM.bdf;
-        let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let expected_vector = if gsi < 8 {
-            0x20u8.wrapping_add(gsi as u8)
+        let irq = pci_intx
+            .borrow()
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("E1000 INTx should have a legacy PIC compatibility route");
+        let expected_vector = if irq < 8 {
+            0x20u8.wrapping_add(irq)
         } else {
-            0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+            0x28u8.wrapping_add(irq.wrapping_sub(8))
         };
 
         // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -18580,11 +20052,7 @@ mod tests {
             ints.pic_mut().set_offsets(0x20, 0x28);
             // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
             ints.pic_mut().set_masked(2, false);
-            if let Ok(irq) = u8::try_from(gsi) {
-                if irq < 16 {
-                    ints.pic_mut().set_masked(irq, false);
-                }
-            }
+            ints.pic_mut().set_masked(irq, false);
         }
 
         // Assert E1000 INTx level by enabling + setting a cause bit.
@@ -18661,11 +20129,14 @@ mod tests {
         let pci_intx = m.pci_intx_router().expect("pc platform enabled");
 
         let bdf = aero_devices::pci::profile::NIC_E1000_82540EM.bdf;
-        let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let expected_vector = if gsi < 8 {
-            0x20u8.wrapping_add(gsi as u8)
+        let irq = pci_intx
+            .borrow()
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("E1000 INTx should have a legacy PIC compatibility route");
+        let expected_vector = if irq < 8 {
+            0x20u8.wrapping_add(irq)
         } else {
-            0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+            0x28u8.wrapping_add(irq.wrapping_sub(8))
         };
 
         // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -18674,11 +20145,7 @@ mod tests {
             ints.pic_mut().set_offsets(0x20, 0x28);
             // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
             ints.pic_mut().set_masked(2, false);
-            if let Ok(irq) = u8::try_from(gsi) {
-                if irq < 16 {
-                    ints.pic_mut().set_masked(irq, false);
-                }
-            }
+            ints.pic_mut().set_masked(irq, false);
         }
 
         // Assert E1000 INTx level by enabling + setting a cause bit.
@@ -18735,11 +20202,14 @@ mod tests {
         let pci_intx = m.pci_intx_router().expect("pc platform enabled");
 
         let bdf = aero_devices::pci::profile::NIC_E1000_82540EM.bdf;
-        let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let expected_vector = if gsi < 8 {
-            0x20u8.wrapping_add(gsi as u8)
+        let irq = pci_intx
+            .borrow()
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("E1000 INTx should have a legacy PIC compatibility route");
+        let expected_vector = if irq < 8 {
+            0x20u8.wrapping_add(irq)
         } else {
-            0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+            0x28u8.wrapping_add(irq.wrapping_sub(8))
         };
 
         // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -18751,11 +20221,7 @@ mod tests {
             }
             // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
             ints.pic_mut().set_masked(2, false);
-            if let Ok(irq) = u8::try_from(gsi) {
-                if irq < 16 {
-                    ints.pic_mut().set_masked(irq, false);
-                }
-            }
+            ints.pic_mut().set_masked(irq, false);
         }
 
         // Assert E1000 INTx level by enabling + setting a cause bit.
@@ -18820,11 +20286,14 @@ mod tests {
         let pci_cfg = m.pci_config_ports().expect("pc platform enabled");
 
         let bdf = aero_devices::pci::profile::NIC_E1000_82540EM.bdf;
-        let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let expected_vector = if gsi < 8 {
-            0x20u8.wrapping_add(gsi as u8)
+        let irq = pci_intx
+            .borrow()
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("E1000 INTx should have a legacy PIC compatibility route");
+        let expected_vector = if irq < 8 {
+            0x20u8.wrapping_add(irq)
         } else {
-            0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+            0x28u8.wrapping_add(irq.wrapping_sub(8))
         };
 
         // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -18833,11 +20302,7 @@ mod tests {
             ints.pic_mut().set_offsets(0x20, 0x28);
             // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
             ints.pic_mut().set_masked(2, false);
-            if let Ok(irq) = u8::try_from(gsi) {
-                if irq < 16 {
-                    ints.pic_mut().set_masked(irq, false);
-                }
-            }
+            ints.pic_mut().set_masked(irq, false);
         }
 
         // Resolve the E1000 BAR1 I/O port base assigned by BIOS POST.
@@ -18957,11 +20422,14 @@ mod tests {
         let pci_cfg = m.pci_config_ports().expect("pc platform enabled");
 
         let bdf = aero_devices::pci::profile::NIC_E1000_82540EM.bdf;
-        let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let expected_vector = if gsi < 8 {
-            0x20u8.wrapping_add(gsi as u8)
+        let irq = pci_intx
+            .borrow()
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("E1000 INTx should have a legacy PIC compatibility route");
+        let expected_vector = if irq < 8 {
+            0x20u8.wrapping_add(irq)
         } else {
-            0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+            0x28u8.wrapping_add(irq.wrapping_sub(8))
         };
 
         // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -18970,11 +20438,7 @@ mod tests {
             ints.pic_mut().set_offsets(0x20, 0x28);
             // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
             ints.pic_mut().set_masked(2, false);
-            if let Ok(irq) = u8::try_from(gsi) {
-                if irq < 16 {
-                    ints.pic_mut().set_masked(irq, false);
-                }
-            }
+            ints.pic_mut().set_masked(irq, false);
         }
 
         // Resolve BAR0 MMIO and BAR1 I/O bases assigned by BIOS POST.
@@ -19945,6 +21409,7 @@ mod tests {
         let mut bus = MachineCpuBus {
             a20: m.chipset.a20(),
             reset: m.reset_latch.clone(),
+            execution_yield_requested: false,
             inner,
         };
 
@@ -19988,7 +21453,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut bus = memory::PhysicalMemoryBus::new(Box::new(mapped));
+        let mut bus = memory::PhysicalMemoryBus::new(mapped);
 
         // Writing to high RAM at 4GiB should succeed and be observable via the same address.
         bus.write_physical(FOUR_GIB, &[0xAA]);
@@ -20138,5 +21603,232 @@ mod tests {
         assert_eq!(m.display_resolution(), (width, height));
         assert_eq!(m.display_framebuffer()[0], u32::from_le_bytes(rgba_backend));
         assert_ne!(m.display_framebuffer()[0], u32::from_le_bytes(rgba_guest));
+    }
+
+    #[test]
+    fn long_mode_busy_slice_advances_platform_time_for_delayexecution_waiters() {
+        // wimfsf.sys LZX in wmiprvse stays Running (no HLT). Without a busy-slice
+        // tick, DelayExecution waiters never see timer IRQs. A full long-mode
+        // slice must still retire one 16 ms timer period of platform time.
+        use aero_cpu_core::state::{CR0_PE, CR0_PG, CR4_PAE, EFER_LME};
+
+        let mut m = Machine::new(MachineConfig {
+            ram_size_bytes: 2 * 1024 * 1024,
+            enable_pc_platform: false,
+            enable_vga: false,
+            enable_aerogpu: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            ..Default::default()
+        })
+        .unwrap();
+
+        const PML4: u64 = 0x10000;
+        const PDPT: u64 = 0x11000;
+        const PD: u64 = 0x12000;
+        const CODE: u64 = 0x8000;
+        const PTE_P: u64 = 1;
+        const PTE_RW: u64 = 2;
+        const PTE_PS: u64 = 0x80;
+        m.mem.write_u64(PML4, PDPT | PTE_P | PTE_RW);
+        m.mem.write_u64(PDPT, PD | PTE_P | PTE_RW);
+        m.mem.write_u64(PD, PTE_P | PTE_RW | PTE_PS); // 2 MiB identity
+        m.mem.write_physical(CODE, &[0xEB, 0xFE]); // jmp $
+
+        m.cpu = aero_cpu_core::CpuCore::new(CpuMode::Long);
+        m.cpu.state.control.cr0 = CR0_PE | CR0_PG;
+        m.cpu.state.control.cr3 = PML4;
+        m.cpu.state.control.cr4 = CR4_PAE;
+        m.cpu.state.msr.efer = EFER_LME;
+        m.cpu.state.update_mode();
+        m.cpu.state.set_rip(CODE);
+        m.cpu.state.rflags = m.cpu.state.rflags() | RFLAGS_IF;
+        m.cpu.time.set_tsc_hz(1_000_000);
+        m.cpu.state.msr.tsc = m.cpu.time.read_tsc();
+
+        let start = m.cpu.state.msr.tsc;
+        let exit = m.run_slice(20_000);
+        assert!(
+            matches!(exit, RunExit::Completed { executed } if executed == 20_000),
+            "busy jmp $ must retire the full slice, got {exit:?}"
+        );
+        let delta = m.cpu.state.msr.tsc.wrapping_sub(start);
+        // 16 ms at 1 MHz plus the ~20k instruction cycles.
+        assert!(
+            delta >= 16_000,
+            "busy long-mode slice must advance ≥16 ms for DelayExecution waiters (tsc Δ={delta})"
+        );
+    }
+
+    #[test]
+    fn long_mode_busy_multi_million_slice_ticks_waiters_mid_slice() {
+        // spsys.sys / sppsvc stay Running inside a 40 M `--max-insts` slice.
+        // One 16 ms gulp at the *end* of that slice never preempts them, so
+        // explorer's GetMessage/CreateWindow never run. Crossing each 1 M
+        // instruction boundary must inject another 16 ms of platform time.
+        // AERO_BUSY_TICK_PERIOD stretches that gap (CreateWindow's
+        // NtUserCreateWindowEx #PFs session prototype PTEs at DISPATCH).
+        use aero_cpu_core::state::{CR0_PE, CR0_PG, CR4_PAE, EFER_LME};
+
+        let mut m = Machine::new(MachineConfig {
+            ram_size_bytes: 2 * 1024 * 1024,
+            enable_pc_platform: false,
+            enable_vga: false,
+            enable_aerogpu: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            ..Default::default()
+        })
+        .unwrap();
+
+        const PML4: u64 = 0x10000;
+        const PDPT: u64 = 0x11000;
+        const PD: u64 = 0x12000;
+        const CODE: u64 = 0x8000;
+        const PTE_P: u64 = 1;
+        const PTE_RW: u64 = 2;
+        const PTE_PS: u64 = 0x80;
+        m.mem.write_u64(PML4, PDPT | PTE_P | PTE_RW);
+        m.mem.write_u64(PDPT, PD | PTE_P | PTE_RW);
+        m.mem.write_u64(PD, PTE_P | PTE_RW | PTE_PS);
+        m.mem.write_physical(CODE, &[0xEB, 0xFE]);
+
+        m.cpu = aero_cpu_core::CpuCore::new(CpuMode::Long);
+        m.cpu.state.control.cr0 = CR0_PE | CR0_PG;
+        m.cpu.state.control.cr3 = PML4;
+        m.cpu.state.control.cr4 = CR4_PAE;
+        m.cpu.state.msr.efer = EFER_LME;
+        m.cpu.state.update_mode();
+        m.cpu.state.set_rip(CODE);
+        m.cpu.state.rflags = m.cpu.state.rflags() | RFLAGS_IF;
+        m.cpu.time.set_tsc_hz(1_000_000);
+        m.cpu.state.msr.tsc = m.cpu.time.read_tsc();
+
+        let start = m.cpu.state.msr.tsc;
+        let exit = m.run_slice(2_000_000);
+        assert!(
+            matches!(exit, RunExit::Completed { executed } if executed == 2_000_000),
+            "busy jmp $ must retire the full 2M slice, got {exit:?}"
+        );
+        let delta = m.cpu.state.msr.tsc.wrapping_sub(start);
+        // 2M instruction cycles + 16 ms at 1 M (mid) + 16 ms at 2 M (end).
+        // End-only behaviour would be ~2_016_000.
+        assert!(
+            delta >= 2_000_000 + 32_000,
+            "2M busy long-mode slice must inject a mid-slice 16 ms tick plus the end tick (tsc Δ={delta})"
+        );
+    }
+
+    #[test]
+    fn busy_waiter_tick_rate_does_not_depend_on_how_execution_is_sliced() {
+        // `aero-machine-cli` runs the guest in 100 k-instruction slices. Billing
+        // the 16 ms starved-waiter tick per *slice* rather than per retired
+        // instruction made guest wall-clock run about ten times faster than the
+        // mid-slice path documents, which is what expired winlogon's LogonUI
+        // readiness deadline over and over. The same 2 M instructions must cost
+        // the same platform time however they are sliced.
+        use aero_cpu_core::state::{CR0_PE, CR0_PG, CR4_PAE, EFER_LME};
+
+        fn busy_long_mode_machine() -> Machine {
+            let mut m = Machine::new(MachineConfig {
+                ram_size_bytes: 2 * 1024 * 1024,
+                enable_pc_platform: false,
+                enable_vga: false,
+                enable_aerogpu: false,
+                enable_serial: false,
+                enable_i8042: false,
+                enable_a20_gate: false,
+                enable_reset_ctrl: false,
+                ..Default::default()
+            })
+            .unwrap();
+
+            const PML4: u64 = 0x10000;
+            const PDPT: u64 = 0x11000;
+            const PD: u64 = 0x12000;
+            const CODE: u64 = 0x8000;
+            const PTE_P: u64 = 1;
+            const PTE_RW: u64 = 2;
+            const PTE_PS: u64 = 0x80;
+            m.mem.write_u64(PML4, PDPT | PTE_P | PTE_RW);
+            m.mem.write_u64(PDPT, PD | PTE_P | PTE_RW);
+            m.mem.write_u64(PD, PTE_P | PTE_RW | PTE_PS);
+            m.mem.write_physical(CODE, &[0xEB, 0xFE]);
+
+            m.cpu = aero_cpu_core::CpuCore::new(CpuMode::Long);
+            m.cpu.state.control.cr0 = CR0_PE | CR0_PG;
+            m.cpu.state.control.cr3 = PML4;
+            m.cpu.state.control.cr4 = CR4_PAE;
+            m.cpu.state.msr.efer = EFER_LME;
+            m.cpu.state.update_mode();
+            m.cpu.state.set_rip(CODE);
+            m.cpu.state.rflags = m.cpu.state.rflags() | RFLAGS_IF;
+            m.cpu.time.set_tsc_hz(1_000_000);
+            m.cpu.state.msr.tsc = m.cpu.time.read_tsc();
+            m
+        }
+
+        const TOTAL: u64 = 2_000_000;
+        const CLI_SLICE: u64 = 100_000;
+        // 16 ms of platform time is 16 000 cycles at the 1 MHz TSC used here.
+        const TICK_CYCLES: u64 = 16_000;
+
+        let mut one_slice = busy_long_mode_machine();
+        let start = one_slice.cpu.state.msr.tsc;
+        let _ = one_slice.run_slice(TOTAL);
+        let bulk_delta = one_slice.cpu.state.msr.tsc.wrapping_sub(start);
+
+        let mut many_slices = busy_long_mode_machine();
+        let start = many_slices.cpu.state.msr.tsc;
+        for _ in 0..(TOTAL / CLI_SLICE) {
+            let _ = many_slices.run_slice(CLI_SLICE);
+        }
+        let sliced_delta = many_slices.cpu.state.msr.tsc.wrapping_sub(start);
+
+        let bulk_injected = bulk_delta - TOTAL;
+        let sliced_injected = sliced_delta - TOTAL;
+        assert!(
+            sliced_injected >= TICK_CYCLES,
+            "starved waiters must still be ticked when the embedder uses small slices \
+             (injected {sliced_injected} cycles)"
+        );
+        assert!(
+            sliced_injected <= bulk_injected + TICK_CYCLES,
+            "slicing 2M instructions into 100k chunks must not inflate platform time: \
+             bulk injected {bulk_injected} cycles, sliced injected {sliced_injected}"
+        );
+    }
+
+    #[test]
+    fn tiny_protected_slice_does_not_get_busy_waiter_tick() {
+        let mut m = Machine::new(MachineConfig {
+            ram_size_bytes: 2 * 1024 * 1024,
+            enable_pc_platform: false,
+            enable_vga: false,
+            enable_aerogpu: false,
+            enable_serial: false,
+            enable_i8042: false,
+            enable_a20_gate: false,
+            enable_reset_ctrl: false,
+            ..Default::default()
+        })
+        .unwrap();
+        m.cpu = aero_cpu_core::CpuCore::new(CpuMode::Protected);
+        m.cpu.state.set_rip(0x8000);
+        m.mem.write_physical(0x8000, &[0xEB, 0xFE]);
+        m.cpu.time.set_tsc_hz(10_000_000);
+        m.cpu.state.msr.tsc = m.cpu.time.read_tsc();
+        let start = m.cpu.state.msr.tsc;
+        let _ = m.run_slice(20_000);
+        let delta = m.cpu.state.msr.tsc.wrapping_sub(start);
+        // Instruction cycles only (~20k). A mistaken 16 ms tick is 160k cycles at 10 MHz.
+        assert!(
+            delta < 40_000,
+            "protected-mode slices must not receive the 16 ms waiter tick (tsc Δ={delta})"
+        );
     }
 }

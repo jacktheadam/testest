@@ -1882,7 +1882,7 @@ fn print_disks_section_summary(file: &mut fs::File, section: &SnapshotSectionInf
         let overlay = display_disk_ref(&disk.overlay_image, MAX_PRINT_CHARS);
 
         // Convenience hint: Aero's canonical Windows 7 storage topology uses stable `disk_id`s.
-        // (See `docs/05-storage-topology-win7.md`.)
+        // (See `wiki/areas/storage.md`.)
         let win7_slot = match disk.disk_id {
             0 => Some("win7: primary_hdd (AHCI port 0)"),
             1 => Some("win7: install_media (IDE secondary master ATAPI)"),

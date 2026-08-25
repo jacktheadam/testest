@@ -4,26 +4,26 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 test('GPU worker: submit_aerogpu executes real D3D9 draw via wasm executor', async ({ page }) => {
-  await page.goto('/web/blank.html');
+  await page.goto('/apps/web/blank.html');
 
   const thisDir = dirname(fileURLToPath(import.meta.url));
   const repoRoot = dirname(dirname(dirname(thisDir)));
   const bundles = [
     {
-      js: join(repoRoot, 'web', 'src', 'wasm', 'pkg-single-gpu', 'aero_gpu_wasm.js'),
-      wasm: join(repoRoot, 'web', 'src', 'wasm', 'pkg-single-gpu', 'aero_gpu_wasm_bg.wasm'),
+      js: join(repoRoot, 'apps/web', 'src', 'wasm', 'pkg-single-gpu', 'aero_gpu_wasm.js'),
+      wasm: join(repoRoot, 'apps/web', 'src', 'wasm', 'pkg-single-gpu', 'aero_gpu_wasm_bg.wasm'),
     },
     {
-      js: join(repoRoot, 'web', 'src', 'wasm', 'pkg-threaded-gpu', 'aero_gpu_wasm.js'),
-      wasm: join(repoRoot, 'web', 'src', 'wasm', 'pkg-threaded-gpu', 'aero_gpu_wasm_bg.wasm'),
+      js: join(repoRoot, 'apps/web', 'src', 'wasm', 'pkg-threaded-gpu', 'aero_gpu_wasm.js'),
+      wasm: join(repoRoot, 'apps/web', 'src', 'wasm', 'pkg-threaded-gpu', 'aero_gpu_wasm_bg.wasm'),
     },
     {
-      js: join(repoRoot, 'web', 'src', 'wasm', 'pkg-single-gpu-dev', 'aero_gpu_wasm.js'),
-      wasm: join(repoRoot, 'web', 'src', 'wasm', 'pkg-single-gpu-dev', 'aero_gpu_wasm_bg.wasm'),
+      js: join(repoRoot, 'apps/web', 'src', 'wasm', 'pkg-single-gpu-dev', 'aero_gpu_wasm.js'),
+      wasm: join(repoRoot, 'apps/web', 'src', 'wasm', 'pkg-single-gpu-dev', 'aero_gpu_wasm_bg.wasm'),
     },
     {
-      js: join(repoRoot, 'web', 'src', 'wasm', 'pkg-threaded-gpu-dev', 'aero_gpu_wasm.js'),
-      wasm: join(repoRoot, 'web', 'src', 'wasm', 'pkg-threaded-gpu-dev', 'aero_gpu_wasm_bg.wasm'),
+      js: join(repoRoot, 'apps/web', 'src', 'wasm', 'pkg-threaded-gpu-dev', 'aero_gpu_wasm.js'),
+      wasm: join(repoRoot, 'apps/web', 'src', 'wasm', 'pkg-threaded-gpu-dev', 'aero_gpu_wasm_bg.wasm'),
     },
   ];
   if (!bundles.some(({ js, wasm }) => existsSync(js) && existsSync(wasm))) {
@@ -126,8 +126,8 @@ test('GPU worker: submit_aerogpu executes real D3D9 draw via wasm executor', asy
     </style>
     <canvas id="c"></canvas>
     <script type="module">
-      import { fnv1a32Hex } from "/web/src/utils/fnv1a.ts";
-      import { GPU_PROTOCOL_NAME, GPU_PROTOCOL_VERSION, isGpuWorkerMessageBase } from "/web/src/ipc/gpu-protocol.ts";
+      import { fnv1a32Hex } from "/apps/web/src/utils/fnv1a.ts";
+      import { GPU_PROTOCOL_NAME, GPU_PROTOCOL_VERSION, isGpuWorkerMessageBase } from "/apps/web/src/ipc/gpu-protocol.ts";
         import {
           AerogpuCmdWriter,
           AerogpuPrimitiveTopology,
@@ -140,7 +140,7 @@ test('GPU worker: submit_aerogpu executes real D3D9 draw via wasm executor', asy
           AEROGPU_RESOURCE_USAGE_VERTEX_BUFFER,
         } from "/emulator/protocol/aerogpu/aerogpu_cmd.ts";
       import { AerogpuFormat } from "/emulator/protocol/aerogpu/aerogpu_pci.ts";
-      import { formatOneLineUtf8 } from "/web/src/text.ts";
+      import { formatOneLineUtf8 } from "/apps/web/src/text.ts";
 
       const FORCE_BACKEND = ${JSON.stringify(forceBackend)};
 
@@ -318,7 +318,7 @@ test('GPU worker: submit_aerogpu executes real D3D9 draw via wasm executor', asy
 
       (async () => {
         try {
-          const worker = new Worker("/web/src/workers/gpu.worker.ts", { type: "module" });
+          const worker = new Worker("/apps/web/src/workers/gpu.worker.ts", { type: "module" });
 
           let readyResolve;
           let readyReject;

@@ -77,3 +77,20 @@ fn i8042_tracks_host_button_state_while_mouse_port_disabled() {
     assert_eq!(i8042.read_port(0x60), 1);
     assert_eq!(i8042.read_port(0x60), 0);
 }
+
+#[test]
+fn i8042_diagnostic_reports_mouse_reporting_enabled_after_enable() {
+    let mut i8042 = I8042Controller::new();
+    assert!(
+        !i8042.diagnostic_state().mouse_reporting_enabled,
+        "PS/2 mice power up with stream reporting disabled"
+    );
+
+    i8042.write_port(0x64, 0xD4);
+    i8042.write_port(0x60, 0xF4);
+    assert_eq!(i8042.read_port(0x60), 0xFA);
+    assert!(
+        i8042.diagnostic_state().mouse_reporting_enabled,
+        "command F4 must show up in DUMP_INPUT so a silent inject drop is visible"
+    );
+}

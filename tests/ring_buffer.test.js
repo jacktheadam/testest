@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createSpscRingBufferSharedArrayBuffer, SpscRingBuffer } from "../web/src/perf/ring_buffer.js";
-import { WorkerKind } from "../web/src/perf/record.js";
-import { createPerfChannel } from "../web/src/perf/shared.js";
-import { PerfWriter } from "../web/src/perf/writer.js";
-import { PerfAggregator } from "../web/src/perf/aggregator.js";
+import { createSpscRingBufferSharedArrayBuffer, SpscRingBuffer } from "../apps/web/src/perf/ring_buffer.js";
+import { WorkerKind } from "../apps/web/src/perf/record.js";
+import { createPerfChannel } from "../apps/web/src/perf/shared.js";
+import { PerfWriter } from "../apps/web/src/perf/writer.js";
+import { PerfAggregator } from "../apps/web/src/perf/aggregator.js";
 
 test("SpscRingBuffer basic write/read", () => {
   const sab = createSpscRingBufferSharedArrayBuffer({ capacity: 4, recordSize: 4 });

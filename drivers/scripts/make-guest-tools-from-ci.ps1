@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 #
-# Convenience wrapper around `ci/package-guest-tools.ps1` for producing the Guest Tools
+# Convenience wrapper around `drivers/build/package-guest-tools.ps1` for producing the Guest Tools
 # ISO/zip from CI-built signed driver packages (`out/packages` + `out/certs`).
 #
 # This lives under `drivers/scripts/` so it sits alongside the other "make Guest Tools"
@@ -37,7 +37,7 @@ param(
   #
   # Defaults to the canonical Aero device contract, but can be overridden when packaging
   # a different driver stack (e.g. virtio-win service naming).
-  [string] $WindowsDeviceContractPath = "docs/windows-device-contract.json",
+  [string] $WindowsDeviceContractPath = "protocol-vectors/windows-device-contract.json",
 
   # Output directory for `aero-guest-tools.iso`, `aero-guest-tools.zip`, and `manifest.json`.
   [string] $OutDir = "out/artifacts",
@@ -55,7 +55,7 @@ function Resolve-RepoRoot {
 }
 
 $repoRoot = Resolve-RepoRoot
-$ciScript = Join-Path $repoRoot "ci/package-guest-tools.ps1"
+$ciScript = Join-Path $repoRoot "drivers/build/package-guest-tools.ps1"
 if (-not (Test-Path -LiteralPath $ciScript -PathType Leaf)) {
   throw "Expected CI Guest Tools packager wrapper to exist: $ciScript"
 }
@@ -73,6 +73,6 @@ if (-not (Test-Path -LiteralPath $ciScript -PathType Leaf)) {
   -SourceDateEpoch $SourceDateEpoch
 
 if ($LASTEXITCODE -ne 0) {
-  throw "ci/package-guest-tools.ps1 failed (exit code $LASTEXITCODE)."
+  throw "drivers/build/package-guest-tools.ps1 failed (exit code $LASTEXITCODE)."
 }
 

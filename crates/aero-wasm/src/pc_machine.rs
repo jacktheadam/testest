@@ -32,7 +32,7 @@ impl PcMachine {
     /// the bootstrap processor (BSP), so multi-vCPU guests are not expected to run robustly yet and
     /// the CPU count is not configurable via this JS API.
     ///
-    /// See `docs/21-smp.md#status-today` and `docs/09-bios-firmware.md#smp-boot-bsp--aps`.
+    /// See `the CPU and JIT area page#smp-status` and the platform and firmware area page.
     #[wasm_bindgen(constructor)]
     pub fn new(ram_size_bytes: u32, smbios_uuid_seed: Option<u64>) -> Result<Self, JsValue> {
         // The BIOS expects to use the EBDA at 0x9F000, so enforce a minimum RAM size.

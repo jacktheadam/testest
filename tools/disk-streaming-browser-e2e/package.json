@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "description": "Browser E2E tests for COOP/COEP cross-origin isolation + authenticated Range fetches (disk streaming).",
   "engines": {
-    "node": ">=22.11.0 <23"
+    "node": ">=24.0.0 <25"
   },
   "scripts": {
     "check:node": "node ../../scripts/check-node-version.mjs",
-    "pretest": "npm run check:node && node ../../scripts/playwright_install.mjs chromium --with-deps",
+    "pretest": "pnpm run check:node && node ../../scripts/playwright_install.mjs chromium --with-deps",
     "test": "playwright test"
   }
 }

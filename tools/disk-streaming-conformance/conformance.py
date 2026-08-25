@@ -10,7 +10,7 @@ Supported modes:
 
 - Range mode (`--mode range`, default): one large object served via HTTP Range.
 - Chunked mode (`--mode chunked`): `manifest.json` + chunk objects under `chunks/`
-  (see `docs/18-chunked-disk-image-format.md`).
+  (see `wiki/areas/storage.md`).
 
 No third-party dependencies; Python stdlib only.
 """
@@ -192,8 +192,8 @@ class ChunkedDiskManifest:
     """
     Parsed + validated chunked disk image manifest (aero.chunked-disk-image.v1).
 
-    This mirrors the schema used by `web/src/storage/remote_chunked_disk.ts` and
-    `services/image-gateway/openapi.yaml`.
+    This mirrors the schema used by `web/src/storage/remote_chunked_disk.ts`
+    (and formerly by the retired hosted image service).
     """
 
     version: str

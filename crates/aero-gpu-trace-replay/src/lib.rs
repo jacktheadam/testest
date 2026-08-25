@@ -1263,7 +1263,7 @@ pub fn decode_cmd_stream_listing(
                             && stage_ex != 0
                         {
                             // `CREATE_SHADER_DXBC` uses `reserved0` as a `stage_ex` tag when
-                            // `stage == COMPUTE` (see `docs/16-gpu-command-abi.md`).
+                            // `stage == COMPUTE` (see `wiki/areas/graphics.md`).
                             let _ = write!(
                                 line,
                                 " stage_ex={stage_ex} stage_ex_name={}",

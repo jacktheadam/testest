@@ -409,9 +409,7 @@ pub fn verify_gateway_session_token_checked(
         decode_base64url_unchecked(payload_b64).ok_or(SessionTokenError::InvalidBase64)?;
     let payload: serde_json::Value =
         serde_json::from_slice(&payload_raw).map_err(|_| SessionTokenError::InvalidJson)?;
-    let obj = payload
-        .as_object()
-        .ok_or(SessionTokenError::InvalidJson)?;
+    let obj = payload.as_object().ok_or(SessionTokenError::InvalidJson)?;
 
     // Gateway accepts any JSON number that parses to `1` (e.g. `1` or `1.0`),
     // since it compares the parsed JS number with `!== 1`.
@@ -431,9 +429,7 @@ pub fn verify_gateway_session_token_checked(
     }
 
     let exp_val = obj.get("exp").ok_or(SessionTokenError::InvalidClaims)?;
-    let exp = exp_val
-        .as_f64()
-        .ok_or(SessionTokenError::InvalidClaims)?;
+    let exp = exp_val.as_f64().ok_or(SessionTokenError::InvalidClaims)?;
     if !exp.is_finite() {
         return Err(SessionTokenError::InvalidClaims);
     }
@@ -451,8 +447,7 @@ pub fn verify_gateway_session_token_checked(
     let exp_unix = match exp_val.as_i64() {
         Some(v) => v,
         None => match exp_val.as_u64() {
-            Some(v) => i64::try_from(v)
-                .map_err(|_| SessionTokenError::InvalidClaims)?,
+            Some(v) => i64::try_from(v).map_err(|_| SessionTokenError::InvalidClaims)?,
             None => {
                 // Non-integer JSON number (e.g. `1.5`). Fall back to the JS semantics (`number`)
                 // while still ensuring we can represent the value as an `i64`.
@@ -558,9 +553,7 @@ pub fn verify_hs256_jwt_checked(
     }
 
     if let Some(nbf_val) = obj.get("nbf") {
-        let nbf = nbf_val
-            .as_i64()
-            .ok_or(JwtError::InvalidClaims)?;
+        let nbf = nbf_val.as_i64().ok_or(JwtError::InvalidClaims)?;
         if now_sec < nbf {
             return Err(JwtError::NotYetValid);
         }

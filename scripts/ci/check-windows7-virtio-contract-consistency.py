@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Guardrail: prevent drift between the definitive Windows 7 virtio contract
-(`docs/windows7-virtio-driver-contract.md`, Contract ID: AERO-W7-VIRTIO) and the
-Windows device/driver binding docs/manifest (`docs/windows-device-contract.*`),
+(`wiki/specs/windows7-virtio-driver-contract.md`, Contract ID: AERO-W7-VIRTIO) and the
+Windows device/driver binding docs/manifest (`wiki/specs/windows-device-contract.md`,
+`protocol-vectors/windows-device-contract*.json`),
 and ensure the canonical in-tree Windows 7 virtio driver INFs remain aligned with
 the contract identity policy (modern IDs + revision gating).
 
@@ -32,10 +33,10 @@ from typing import Iterable, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-W7_VIRTIO_CONTRACT_MD = REPO_ROOT / "docs/windows7-virtio-driver-contract.md"
-WINDOWS_DEVICE_CONTRACT_MD = REPO_ROOT / "docs/windows-device-contract.md"
-WINDOWS_DEVICE_CONTRACT_JSON = REPO_ROOT / "docs/windows-device-contract.json"
-WINDOWS_DEVICE_CONTRACT_VIRTIO_WIN_JSON = REPO_ROOT / "docs/windows-device-contract-virtio-win.json"
+W7_VIRTIO_CONTRACT_MD = REPO_ROOT / "wiki/specs/windows7-virtio-driver-contract.md"
+WINDOWS_DEVICE_CONTRACT_MD = REPO_ROOT / "wiki/specs/windows-device-contract.md"
+WINDOWS_DEVICE_CONTRACT_JSON = REPO_ROOT / "protocol-vectors/windows-device-contract.json"
+WINDOWS_DEVICE_CONTRACT_VIRTIO_WIN_JSON = REPO_ROOT / "protocol-vectors/windows-device-contract-virtio-win.json"
 
 # The Windows 7 virtio test harness docs/log strings should always reference the
 # canonical INF basenames shipped by this repo. When we rename driver packages,

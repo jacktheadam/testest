@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createWsSendQueue } from "../src/ws_backpressure.js";
+import { createWsSendQueue } from "../apps/web/src/ws_backpressure.js";
 
 function wait(ms) {
   return new Promise((r) => setTimeout(r, ms));

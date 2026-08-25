@@ -63,7 +63,8 @@ pub fn write_iso9660_joliet_from_dir(
                 return false;
             }
             true
-        }) {
+        })
+    {
         let entry = entry?;
         crate::bail_if_symlink(&entry, &packaged_root)?;
         if !entry.file_type().is_file() {

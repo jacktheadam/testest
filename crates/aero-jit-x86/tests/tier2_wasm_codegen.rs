@@ -4018,7 +4018,7 @@ mod random_traces {
                 } else {
                     code_versions[page as usize].wrapping_add(1)
                 };
-                let exit_rip = 0x3000u64 + (rng.gen::<u16>() as u64);
+                let exit_rip = 0x3000u64 + (rng.random::<u16>() as u64);
                 prologue.push(Instr::GuardCodeVersion {
                     page,
                     expected,
@@ -4104,7 +4104,7 @@ mod random_traces {
                     let base = gen_operand(rng, &values);
                     let index = gen_operand(rng, &values);
                     let scale = *[1u8, 2, 4, 8].choose(rng).unwrap();
-                    let disp = rng.gen::<i32>() as i64;
+                    let disp = rng.random::<i32>() as i64;
                     body.push(Instr::Addr {
                         dst,
                         base,
@@ -4184,7 +4184,7 @@ mod random_traces {
                     // Conditional guard (side exit).
                     let cond = gen_operand(rng, &values);
                     let expected = rng.random_bool(0.5);
-                    let exit_rip = 0x2000u64 + (rng.gen::<u16>() as u64);
+                    let exit_rip = 0x2000u64 + (rng.random::<u16>() as u64);
                     body.push(Instr::Guard {
                         cond,
                         expected,
@@ -4221,7 +4221,7 @@ mod random_traces {
             } else {
                 1
             };
-            let exit_rip = 0x3000u64 + (rng.gen::<u16>() as u64);
+            let exit_rip = 0x3000u64 + (rng.random::<u16>() as u64);
             prologue.push(Instr::GuardCodeVersion {
                 page,
                 expected,
@@ -4235,7 +4235,7 @@ mod random_traces {
         // Loop traces must terminate (the WASM trace executes an actual `loop {}`), so always end
         // them with a side exit.
         if kind == TraceKind::Loop || rng.random_bool(0.25) {
-            let exit_rip = 0x2000u64 + (rng.gen::<u16>() as u64);
+            let exit_rip = 0x2000u64 + (rng.random::<u16>() as u64);
             body.push(Instr::SideExit { exit_rip });
         }
 
@@ -4391,7 +4391,7 @@ mod random_traces {
                     Instr::GuardCodeVersion {
                         page,
                         expected,
-                        exit_rip: 0x3000u64 + (rng.gen::<u16>() as u64),
+                        exit_rip: 0x3000u64 + (rng.random::<u16>() as u64),
                     },
                 );
             }

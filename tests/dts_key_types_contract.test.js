@@ -16,7 +16,7 @@ function assertIncludes(text, needle, message) {
 }
 
 test("d.ts typing: safe helpers use PropertyKey for property/method keys", async () => {
-  const safeProps = await readRepoFile("src/safe_props.d.ts");
+  const safeProps = await readRepoFile("packages/transport-safety/src/safe_props.types.d.ts");
   assertIncludes(
     safeProps,
     "export function tryGetProp(obj: unknown, key: PropertyKey): unknown | undefined;",
@@ -33,7 +33,7 @@ test("d.ts typing: safe helpers use PropertyKey for property/method keys", async
     "Expected safe_props.d.ts to type key as PropertyKey for tryGetNumberProp",
   );
 
-  const socketSafe = await readRepoFile("src/socket_safe.d.ts");
+  const socketSafe = await readRepoFile("packages/transport-safety/src/socket_safe.types.d.ts");
   assertIncludes(
     socketSafe,
     "export function tryGetMethodBestEffort(obj: unknown, key: PropertyKey): ((this: unknown, ...args: unknown[]) => unknown) | null;",

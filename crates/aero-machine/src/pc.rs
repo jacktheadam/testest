@@ -41,7 +41,7 @@ pub struct PcMachineConfig {
     /// bring-up experimentation and topology validation. For real guest boots, prefer
     /// `cpu_count=1`.
     ///
-    /// See `docs/21-smp.md` for the SMP bring-up plan and progress tracker.
+    /// See the CPU and JIT area page for the SMP bring-up plan and progress tracker.
     pub cpu_count: u8,
     /// Deterministic seed used to generate the SMBIOS Type 1 "System UUID".
     ///
@@ -458,6 +458,15 @@ impl PcMachine {
             return false;
         }
 
+        // CR8 is the architectural TPR alias on x64. Windows raises IRQL with
+        // `mov cr8` for spinlocks / DPCs; without mirroring that into the LAPIC
+        // TPR, mid-priority IRQs re-enter while DPC spinlocks are held (UP hang).
+        self.bus
+            .platform
+            .interrupts
+            .borrow()
+            .sync_cr8_tpr_for_cpu(0, self.cpu.state.control.cr8);
+
         let mut ctrl = self.bus.interrupt_controller();
         if let Some(vector) = ctrl.poll_interrupt() {
             self.cpu.pending.inject_external_interrupt(vector);
@@ -691,7 +700,7 @@ impl PcMachine {
                     return RunExit::Exception {
                         exception,
                         executed,
-                    }
+                    };
                 }
                 BatchExit::CpuExit(exit) => return RunExit::CpuExit { exit, executed },
             }
@@ -745,19 +754,16 @@ mod tests {
         let mut pc = PcMachine::new_with_e1000(2 * 1024 * 1024, None);
 
         let bdf = NIC_E1000_82540EM.bdf;
-        let gsi = pc
+        let irq = pc
             .bus
             .platform
             .pci_intx
-            .gsi_for_intx(bdf, PciInterruptPin::IntA);
-        assert!(
-            gsi < 16,
-            "expected E1000 INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-        );
-        let expected_vector = if gsi < 8 {
-            0x20u8.wrapping_add(gsi as u8)
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("E1000 INTx should have a legacy PIC compatibility route");
+        let expected_vector = if irq < 8 {
+            0x20u8.wrapping_add(irq)
         } else {
-            0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+            0x28u8.wrapping_add(irq.wrapping_sub(8))
         };
 
         // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -769,11 +775,7 @@ mod tests {
             }
             // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
             ints.pic_mut().set_masked(2, false);
-            if let Ok(irq) = u8::try_from(gsi) {
-                if irq < 16 {
-                    ints.pic_mut().set_masked(irq, false);
-                }
-            }
+            ints.pic_mut().set_masked(irq, false);
         }
 
         // Assert E1000 INTx level by enabling + setting a cause bit.
@@ -852,19 +854,16 @@ mod tests {
         let mut pc = PcMachine::new_with_e1000(2 * 1024 * 1024, None);
 
         let bdf = NIC_E1000_82540EM.bdf;
-        let gsi = pc
+        let irq = pc
             .bus
             .platform
             .pci_intx
-            .gsi_for_intx(bdf, PciInterruptPin::IntA);
-        assert!(
-            gsi < 16,
-            "expected E1000 INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-        );
-        let expected_vector = if gsi < 8 {
-            0x20u8.wrapping_add(gsi as u8)
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("E1000 INTx should have a legacy PIC compatibility route");
+        let expected_vector = if irq < 8 {
+            0x20u8.wrapping_add(irq)
         } else {
-            0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+            0x28u8.wrapping_add(irq.wrapping_sub(8))
         };
 
         // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -873,11 +872,7 @@ mod tests {
             ints.pic_mut().set_offsets(0x20, 0x28);
             // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
             ints.pic_mut().set_masked(2, false);
-            if let Ok(irq) = u8::try_from(gsi) {
-                if irq < 16 {
-                    ints.pic_mut().set_masked(irq, false);
-                }
-            }
+            ints.pic_mut().set_masked(irq, false);
         }
 
         // Resolve BAR0 MMIO and BAR1 I/O bases assigned by BIOS POST.

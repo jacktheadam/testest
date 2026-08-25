@@ -4,7 +4,7 @@ This directory contains shared virtio helper code used by Aero’s in-tree Windo
 that implement the **AERO-W7-VIRTIO contract v1** (virtio-pci **modern** transport + modern PCI Device ID
 space `DEV_104x`/`DEV_105x`).
 
-- Contract: `docs/windows7-virtio-driver-contract.md`
+- Contract: `wiki/areas/drivers-windows.md`
 - Host/portable virtio helpers (cap parser tests, etc.): `drivers/win7/virtio/`
 
 ## Why this matters (INF hardware ID conflicts)

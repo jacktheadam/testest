@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=22.11.0 <23"
+    "node": ">=24.0.0 <25"
   },
   "scripts": {
     "check:node": "node ../../../scripts/check-node-version.mjs",
-    "pretest": "npm run check:node && node ../../../scripts/playwright_install.mjs chromium",
+    "pretest": "pnpm run check:node && node ../../../scripts/playwright_install.mjs chromium",
     "test": "playwright test"
   },
   "devDependencies": {

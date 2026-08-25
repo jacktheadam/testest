@@ -1,11 +1,12 @@
 //! Aero audio subsystem.
 //!
-//! This crate currently provides a minimal Intel HD Audio (HDA) controller + codec
-//! implementation along with helpers for feeding a Web Audio `AudioWorkletProcessor`
-//! via a `SharedArrayBuffer` ring buffer.
+//! This crate provides a minimal Intel HD Audio (HDA) controller and codec implementation,
+//! helpers for feeding a Web Audio `AudioWorkletProcessor` through a `SharedArrayBuffer` ring
+//! buffer, and the sample-rate and channel conversion that sits between them ([`dsp`]).
 
 pub mod capture;
 pub mod clock;
+pub mod dsp;
 pub mod hda;
 pub mod hda_pci;
 pub mod mem;

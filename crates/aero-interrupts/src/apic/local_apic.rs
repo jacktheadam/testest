@@ -13,6 +13,8 @@ const REG_VERSION: u64 = 0x30;
 const REG_TPR: u64 = 0x80;
 const REG_PPR: u64 = 0xA0;
 const REG_EOI: u64 = 0xB0;
+const REG_LDR: u64 = 0xD0;
+const REG_DFR: u64 = 0xE0;
 const REG_SVR: u64 = 0xF0;
 
 const REG_ISR_BASE: u64 = 0x100;
@@ -133,6 +135,12 @@ enum TimerMode {
 struct LapicState {
     id: u8,
     tpr: u8,
+    /// Logical Destination Register (xAPIC). Bits 24–31 are the logical APIC ID
+    /// bitmask used with flat destination model.
+    ldr: u32,
+    /// Destination Format Register. `0xF000_0000` (model bits 28–31 = 0xF) is flat;
+    /// other values are cluster model (not fully modeled — flat matching is used).
+    dfr: u32,
     svr: u32,
     icr_low: u32,
     icr_high: u32,
@@ -149,6 +157,9 @@ impl LapicState {
         Self {
             id,
             tpr: 0,
+            ldr: 0,
+            // Hardware power-on value is all-ones (flat model).
+            dfr: 0xFFFF_FFFF,
             // Real hardware resets the spurious vector register to 0xFF (software
             // enable bit cleared). Keeping the vector non-zero helps guests that
             // read SVR before programming it.
@@ -163,6 +174,28 @@ impl LapicState {
             initial_count: 0,
             next_timer_deadline_ns: None,
         }
+    }
+
+    /// Whether this LAPIC accepts a logical-mode destination field (`dest`).
+    ///
+    /// Flat model: accept when `(dest & logical_id) != 0`, where `logical_id` is
+    /// LDR[31:24]. If LDR was never programmed (0), fall back to `1 << apic_id`
+    /// so delivery still works when a snapshot lost LDR writes (older emulator
+    /// versions ignored REG_LDR) or when guests rely on the conventional
+    /// one-hot mapping used by Windows on small MP systems.
+    fn matches_logical_dest(&self, dest: u8) -> bool {
+        if dest == 0xFF {
+            return true;
+        }
+        let ldr_bits = (self.ldr >> 24) as u8;
+        let mask = if ldr_bits != 0 {
+            ldr_bits
+        } else if self.id < 8 {
+            1u8 << self.id
+        } else {
+            0
+        };
+        (dest & mask) != 0
     }
 
     fn enabled(&self) -> bool {
@@ -343,6 +376,8 @@ impl LapicState {
             REG_TPR => u32::from(self.tpr),
             REG_PPR => u32::from(self.ppr()),
             REG_EOI => 0,
+            REG_LDR => self.ldr,
+            REG_DFR => self.dfr,
             REG_SVR => self.svr,
             REG_ICR_LOW => self.icr_low,
             REG_ICR_HIGH => self.icr_high,
@@ -367,6 +402,10 @@ impl LapicState {
             REG_ID => self.id = (value >> 24) as u8,
             REG_TPR => self.tpr = value as u8,
             REG_EOI => return self.eoi(),
+            // xAPIC LDR: only bits 24–31 are defined/writable.
+            REG_LDR => self.ldr = value & 0xFF00_0000,
+            // xAPIC DFR: only the model field (bits 28–31) is writable; the rest RAZ/WI.
+            REG_DFR => self.dfr = (value & 0xF000_0000) | 0x0FFF_FFFF,
             REG_SVR => self.svr = value,
             REG_ICR_LOW => self.icr_low = value,
             REG_ICR_HIGH => self.icr_high = value,
@@ -384,6 +423,22 @@ impl LapicState {
 pub trait LapicInterruptSink: Send + Sync {
     fn apic_id(&self) -> u8;
     fn inject_external_interrupt(&self, vector: u8);
+    /// Current processor-priority class used for lowest-priority delivery.
+    ///
+    /// Sinks that do not model PPR default to the most receptive priority.
+    fn processor_priority(&self) -> u8 {
+        0
+    }
+    /// Whether this LAPIC accepts `dest` under xAPIC logical destination mode.
+    ///
+    /// Default: one-hot `1 << apic_id` (flat model, conventional Windows mapping).
+    fn matches_logical_destination(&self, dest: u8) -> bool {
+        if dest == 0xFF {
+            return true;
+        }
+        let id = self.apic_id();
+        id < 8 && (dest & (1u8 << id)) != 0
+    }
 }
 
 pub type EoiNotifier = Arc<dyn Fn(u8) + Send + Sync>;
@@ -434,6 +489,30 @@ impl LocalApic {
 
     pub fn enabled(&self) -> bool {
         self.state.lock().unwrap().enabled()
+    }
+
+    /// Current Task Priority Register value (APIC offset `0x80`).
+    pub fn tpr(&self) -> u8 {
+        self.state.lock().unwrap().tpr
+    }
+
+    /// Set the Task Priority Register (APIC offset `0x80`).
+    ///
+    /// On AMD64, guest `MOV CR8` is architecturally aliased to this register:
+    /// `TPR[7:4] = CR8[3:0]`, `TPR[3:0] = 0`. Use [`Self::set_tpr_from_cr8`].
+    pub fn set_tpr(&self, tpr: u8) {
+        self.state.lock().unwrap().tpr = tpr;
+    }
+
+    /// Apply the architectural CR8 → TPR mapping used by Windows IRQL.
+    ///
+    /// Intel SDM: writing CR8 sets APIC TPR bits 7:4 from CR8 bits 3:0 and
+    /// clears TPR bits 3:0. Without this, `KeRaiseIrql` / spinlock paths leave
+    /// TPR at 0 and low/mid priority IRQs can re-enter while a DPC-level
+    /// spinlock is held (classic UP deadlock).
+    pub fn set_tpr_from_cr8(&self, cr8: u64) {
+        let tpr = ((cr8 as u8) & 0x0f) << 4;
+        self.set_tpr(tpr);
     }
 
     pub fn poll(&self) {
@@ -616,6 +695,14 @@ impl LapicInterruptSink for LocalApic {
     fn inject_external_interrupt(&self, vector: u8) {
         self.inject_fixed_interrupt(vector);
     }
+
+    fn processor_priority(&self) -> u8 {
+        self.state.lock().unwrap().ppr()
+    }
+
+    fn matches_logical_destination(&self, dest: u8) -> bool {
+        self.state.lock().unwrap().matches_logical_dest(dest)
+    }
 }
 
 impl LocalApic {
@@ -631,6 +718,8 @@ impl LocalApic {
         const TAG_DIVIDE_CONFIG: u16 = 9;
         const TAG_INITIAL_COUNT: u16 = 10;
         const TAG_NEXT_TIMER_DEADLINE_NS: u16 = 11;
+        const TAG_LDR: u16 = 12;
+        const TAG_DFR: u16 = 13;
 
         let r = SnapshotReader::parse(bytes, <Self as IoSnapshot>::DEVICE_ID)?;
         r.ensure_device_major(<Self as IoSnapshot>::DEVICE_VERSION.major)?;
@@ -651,6 +740,12 @@ impl LocalApic {
         }
         if let Some(icr_high) = r.u32(TAG_ICR_HIGH)? {
             state.icr_high = icr_high;
+        }
+        if let Some(ldr) = r.u32(TAG_LDR)? {
+            state.ldr = ldr & 0xFF00_0000;
+        }
+        if let Some(dfr) = r.u32(TAG_DFR)? {
+            state.dfr = (dfr & 0xF000_0000) | 0x0FFF_FFFF;
         }
 
         if let Some(buf) = r.bytes(TAG_IRR) {
@@ -701,6 +796,8 @@ impl IoSnapshot for LocalApic {
         const TAG_DIVIDE_CONFIG: u16 = 9;
         const TAG_INITIAL_COUNT: u16 = 10;
         const TAG_NEXT_TIMER_DEADLINE_NS: u16 = 11;
+        const TAG_LDR: u16 = 12;
+        const TAG_DFR: u16 = 13;
 
         let state = self.state.lock().unwrap().clone();
 
@@ -730,6 +827,9 @@ impl IoSnapshot for LocalApic {
         if let Some(deadline) = state.next_timer_deadline_ns {
             w.field_u64(TAG_NEXT_TIMER_DEADLINE_NS, deadline);
         }
+
+        w.field_u32(TAG_LDR, state.ldr);
+        w.field_u32(TAG_DFR, state.dfr);
 
         w.finish()
     }
@@ -827,6 +927,10 @@ mod tests {
 
         write_u32(&apic, REG_TPR, 0x70);
         assert_eq!(read_u32(&apic, REG_TPR), 0x70);
+        // CR8=2 (DISPATCH) → TPR=0x20
+        apic.set_tpr_from_cr8(2);
+        assert_eq!(apic.tpr(), 0x20);
+        assert_eq!(read_u32(&apic, REG_TPR), 0x20);
 
         write_u32(&apic, REG_SVR, (1 << 8) | 0xFF);
         assert_eq!(read_u32(&apic, REG_SVR), (1 << 8) | 0xFF);
@@ -851,6 +955,27 @@ mod tests {
         let vec = apic.get_pending_vector().expect("pending");
         assert_eq!(vec, 0x30);
         assert!(apic.ack(vec));
+    }
+
+    #[test]
+    fn cr8_masks_lower_priority_class_like_tpr() {
+        let clock = Arc::new(TestClock::default());
+        let apic = LocalApic::with_clock(clock, 0);
+        write_u32(&apic, REG_SVR, 1 << 8);
+
+        // Vector 0x21 is priority class 2. DISPATCH IRQL is CR8=2 → TPR=0x20,
+        // which masks class ≤ 2.
+        apic.inject_fixed_interrupt(0x21);
+        apic.set_tpr_from_cr8(2);
+        assert_eq!(apic.get_pending_vector(), None);
+
+        // Higher class still delivers.
+        apic.inject_fixed_interrupt(0x40);
+        assert_eq!(apic.get_pending_vector(), Some(0x40));
+
+        // Drop IRQL: both become eligible; highest class wins.
+        apic.set_tpr_from_cr8(0);
+        assert_eq!(apic.get_pending_vector(), Some(0x40));
     }
 
     #[test]

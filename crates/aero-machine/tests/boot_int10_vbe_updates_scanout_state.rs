@@ -320,7 +320,9 @@ fn boot_sector_int10_vbe_8bpp_mode_falls_back_to_legacy_text_scanout() {
     run_until_halt(&mut m);
 
     let snap = scanout_state.snapshot();
-    assert_ne!(snap.generation, generation_before);
+    // Palettized VBE is represented by the same implicit legacy descriptor as reset text mode, so
+    // semantic deduplication should avoid a redundant shared-state publication.
+    assert_eq!(snap.generation, generation_before);
     assert_eq!(snap.source, SCANOUT_SOURCE_LEGACY_TEXT);
     assert_eq!(snap.base_paddr(), 0);
     assert_eq!(snap.width, 0);
@@ -438,7 +440,9 @@ fn boot_sector_int10_vbe_display_start_updates_scanout_state_base() {
 
 #[test]
 fn boot_sector_int10_vbe_scanline_bytes_and_display_start_update_scanout_state() {
-    let bytes_per_scan_line = 4101u16;
+    // Bochs exposes pitch as a whole-pixel virtual width; use an exactly representable non-default
+    // pitch, matching SeaBIOS' 4F06 behavior.
+    let bytes_per_scan_line = 4100u16;
     let x_off = 1u16;
     let y_off = 4u16;
     let boot = build_int10_vbe_set_mode_stride_bytes_and_display_start_boot_sector(
@@ -468,8 +472,8 @@ fn boot_sector_int10_vbe_scanline_bytes_and_display_start_update_scanout_state()
 
     let snap = scanout_state.snapshot();
     let bytes_per_pixel = 4u64;
-    // INT 10h AX=4F06 BL=2 sets the logical scan line length in bytes. The BIOS preserves
-    // byte-granular pitches but clamps them to at least the mode's natural pitch (1024*4).
+    // INT 10h AX=4F06 BL=2 sets the logical scan line length in bytes. This request is exactly
+    // representable by the Bochs virtual-width register and exceeds the natural 1024*4 pitch.
     let expected_pitch = u64::from(bytes_per_scan_line).max(1024u64 * bytes_per_pixel);
 
     assert_eq!(snap.source, SCANOUT_SOURCE_LEGACY_VBE_LFB);

@@ -24,12 +24,12 @@ fn ioapic_redirection_destination_apic1_delivers_to_lapic1() {
         .borrow_mut()
         .set_mode(PlatformInterruptMode::Apic);
 
-    let gsi = 10u32;
+    let gsi = 20u32;
     let vector = 0x40u8;
 
-    // Route GSI10 -> vector 0x40, unmasked, edge-triggered, destination APIC ID 1.
+    // Route Q35 PCI GSI20 -> vector 0x40, unmasked, edge-triggered, destination APIC ID 1.
     //
-    // GSI10 is part of the default PCI INTx wiring and is active-low, so program the IOAPIC
+    // GSI20 is active-low, so program the IOAPIC
     // polarity bit accordingly (bit 13).
     let low = u32::from(vector) | (1 << 13);
     let high = 1u32 << 24; // destination APIC ID in bits 56..63 of the redirection entry.

@@ -279,7 +279,7 @@ typedef struct AEROGPU_CMD_SIGNAL_FENCE_PAYLOAD {
  * versioned ABI IDs in `aerogpu_pci.h` (VID=0xA3A0, DID=0x0001).
  *
  * If you change the IDs exposed by a device model, you must also update the matching Windows INF.
- * See: docs/abi/aerogpu-pci-identity.md
+ * See: wiki/areas/graphics.md
  */
 #ifndef AEROGPU_PCI_VENDOR_ID
 #define AEROGPU_PCI_VENDOR_ID 0x1AED

@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { wsCloseSafe, wsSendSafe } from "../scripts/_shared/ws_safe.js";
-import { unrefBestEffort } from "../src/unref_safe.js";
+import { unrefBestEffort } from "../packages/transport-safety/src/unref_safe.js";
 import { WebSocket } from "../tools/minimal_ws.js";
-import { encodeL2Frame, L2_TUNNEL_SUBPROTOCOL } from "../web/src/shared/l2TunnelProtocol.ts";
+import { encodeL2Frame, L2_TUNNEL_SUBPROTOCOL } from "../apps/web/src/shared/l2TunnelProtocol.ts";
 
 import { startRustL2Proxy } from "../tools/rust_l2_proxy.js";
 

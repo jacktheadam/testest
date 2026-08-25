@@ -45,8 +45,8 @@ fn bdl_base_low_bits_are_ignored() {
         sd.cbl = 0x4000;
         sd.lvi = 0;
         sd.fmt = fmt_raw;
-        // SRST | RUN | stream number 1.
-        sd.ctl = (1 << 0) | (1 << 1) | (1 << 20);
+        // RUN=1, SRST=0 (reset complete), stream number 1.
+        sd.ctl = (1 << 1) | (1 << 20);
     }
 
     hda.process(&mut mem, frames);

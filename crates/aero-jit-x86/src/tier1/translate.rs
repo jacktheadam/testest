@@ -115,18 +115,23 @@ fn emit_write_operand(
 fn to_binop(op: AluOp) -> BinOp {
     match op {
         AluOp::Add => BinOp::Add,
+        AluOp::Adc => BinOp::Adc,
         AluOp::Sub => BinOp::Sub,
+        AluOp::Sbb => BinOp::Sbb,
         AluOp::And => BinOp::And,
         AluOp::Or => BinOp::Or,
         AluOp::Xor => BinOp::Xor,
         AluOp::Shl => BinOp::Shl,
         AluOp::Shr => BinOp::Shr,
         AluOp::Sar => BinOp::Sar,
+        AluOp::Imul => BinOp::Mul,
     }
 }
 
 fn to_shift_binop(op: ShiftOp) -> BinOp {
     match op {
+        ShiftOp::Rol => BinOp::Rol,
+        ShiftOp::Ror => BinOp::Ror,
         ShiftOp::Shl => BinOp::Shl,
         ShiftOp::Shr => BinOp::Shr,
         ShiftOp::Sar => BinOp::Sar,
@@ -229,6 +234,27 @@ pub fn translate_block(block: &BasicBlock) -> IrBlock {
                 );
                 emit_write_operand(&mut b, inst, dst, *width, res, addr_mask);
             }
+            InstKind::ShiftCl { op, dst, width } => {
+                let lhs = emit_read_operand(&mut b, inst, dst, *width, addr_mask);
+                // Read CX/ECX/RCX at the operand width so the IR types match.
+                // CL is the low 8 bits; the architectural mask then isolates it.
+                let raw = b.read_reg(GuestReg::Gpr {
+                    reg: Gpr::Rcx,
+                    width: *width,
+                    high8: false,
+                });
+                let mask_bits = if *width == Width::W64 { 0x3f } else { 0x1f };
+                let mask = b.const_int(*width, mask_bits);
+                let rhs = b.binop(BinOp::And, *width, raw, mask, FlagSet::EMPTY);
+                let res = b.binop(
+                    to_shift_binop(*op),
+                    *width,
+                    lhs,
+                    rhs,
+                    FlagSet::ALU.without(FlagSet::AF),
+                );
+                emit_write_operand(&mut b, inst, dst, *width, res, addr_mask);
+            }
             InstKind::Cmp { lhs, rhs, width } => {
                 let l = emit_read_operand(&mut b, inst, lhs, *width, addr_mask);
                 let r = emit_read_operand(&mut b, inst, rhs, *width, addr_mask);
@@ -262,6 +288,46 @@ pub fn translate_block(block: &BasicBlock) -> IrBlock {
                     FlagSet::ALU.without(FlagSet::CF),
                 );
                 emit_write_operand(&mut b, inst, dst, *width, res, addr_mask);
+            }
+            InstKind::Not { dst, width } => {
+                // NOT does not update flags.
+                let lhs = emit_read_operand(&mut b, inst, dst, *width, addr_mask);
+                let ones = b.const_int(*width, width.mask());
+                let res = b.binop(BinOp::Xor, *width, lhs, ones, FlagSet::EMPTY);
+                emit_write_operand(&mut b, inst, dst, *width, res, addr_mask);
+            }
+            InstKind::Neg { dst, width } => {
+                let lhs = emit_read_operand(&mut b, inst, dst, *width, addr_mask);
+                let zero = b.const_int(*width, 0);
+                let res = b.binop(BinOp::Sub, *width, zero, lhs, FlagSet::ALU);
+                emit_write_operand(&mut b, inst, dst, *width, res, addr_mask);
+            }
+            InstKind::Imul3 {
+                dst,
+                src,
+                imm,
+                width,
+            } => {
+                let lhs = emit_read_operand(&mut b, inst, src, *width, addr_mask);
+                let rhs = b.const_int(*width, *imm);
+                // IMUL writes CF/OF; SF/ZF/AF/PF are undefined. The CIM hash
+                // and CRT memcpy immediately overwrite flags with SAR/AND.
+                let res = b.binop(BinOp::Mul, *width, lhs, rhs, FlagSet::CF.union(FlagSet::OF));
+                emit_write_operand(
+                    &mut b,
+                    inst,
+                    &Operand::Reg(*dst),
+                    *width,
+                    res,
+                    addr_mask,
+                );
+            }
+            InstKind::Bswap { dst, width } => {
+                let dst_op = Operand::Reg(*dst);
+                let lhs = emit_read_operand(&mut b, inst, &dst_op, *width, addr_mask);
+                let zero = b.const_int(*width, 0);
+                let res = b.binop(BinOp::Bswap, *width, lhs, zero, FlagSet::EMPTY);
+                emit_write_operand(&mut b, inst, &dst_op, *width, res, addr_mask);
             }
             InstKind::Push { src } => {
                 let rsp = b.read_reg(GuestReg::Gpr {

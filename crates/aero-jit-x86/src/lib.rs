@@ -23,6 +23,7 @@ pub mod backend;
 
 mod tier1_bus;
 
+pub use aero_types::Width;
 pub use tier1_bus::Tier1Bus;
 
 #[cfg(feature = "legacy-baseline")]

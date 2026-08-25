@@ -1,8 +1,9 @@
 [package]
 name = "aero-d3d11-wasm"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2024"
-license = "MIT OR Apache-2.0"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -17,4 +18,6 @@ wasm-bindgen-futures = "0.4"
 # Enable the wgpu WebGL backend for maximum browser compatibility when the crate is
 # built as a top-level wasm-pack package (features are unified across the graph).
 wgpu = { version = "0.20", features = ["webgl"] }
+
+[dependencies]
 

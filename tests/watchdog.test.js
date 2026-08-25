@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { VmCoordinator } from '../src/vmCoordinator.js';
-import { unrefBestEffort } from '../src/unref_safe.js';
+import { VmCoordinator } from './node_vm_harness/vm_coordinator.js';
+import { unrefBestEffort } from '../packages/transport-safety/src/unref_safe.js';
 
 const WATCHDOG_TEST_TIMEOUT_MS = 30_000;
 

@@ -56,7 +56,7 @@ pub struct SecurityConfig {
     pub jwt_audience: Option<String>,
     /// Optional expected JWT `iss` claim for `auth_mode=jwt` / `cookie_or_jwt`.
     pub jwt_issuer: Option<String>,
-    /// HMAC secret shared with `backend/aero-gateway` for verifying the `aero_session` cookie.
+    /// HMAC secret shared with `services/gateway` for verifying the `aero_session` cookie.
     /// (Only used for `auth_mode=cookie` / `cookie_or_jwt` / `cookie_or_api_key` / `cookie_and_api_key`.)
     pub session_secret: Option<Vec<u8>>,
     /// Process-wide concurrent tunnel cap (`0` disables).

@@ -19,8 +19,8 @@ fn iso_from_dir_fails_on_symlink() -> anyhow::Result<()> {
     let out = tempfile::tempdir()?;
     let iso_path = out.path().join("out.iso");
 
-    let err = aero_packager::write_iso9660_joliet_from_dir(root, &iso_path, "TEST_VOL", 0)
-        .unwrap_err();
+    let err =
+        aero_packager::write_iso9660_joliet_from_dir(root, &iso_path, "TEST_VOL", 0).unwrap_err();
     let msg = format!("{err:#}");
     assert!(msg.contains("symlink"), "unexpected error: {msg}");
     assert!(

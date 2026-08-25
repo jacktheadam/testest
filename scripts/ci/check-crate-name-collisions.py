@@ -15,7 +15,7 @@ This script uses `cargo metadata` (workspace truth) and checks for collisions of
 
   normalized_ident = package_name.replace("-", "_")
 
-Additionally, it enforces the workspace naming convention from ADR 0007:
+Additionally, it enforces the workspace naming convention from the Rust crate naming decision:
 
   - workspace packages must use kebab-case (no `_`) in `[package].name`.
   - workspace package names must be lowercase.
@@ -54,7 +54,7 @@ def cargo_metadata() -> dict:
         proc = subprocess.run(
             # This check only needs the workspace package list, so use `--no-deps` for speed.
             #
-            # We still pass `--locked` to align with Aero's Cargo.lock policy (ADR 0012) and to
+            # We still pass `--locked` to align with Aero's Cargo.lock policy (the Cargo.lock policy decision) and to
             # fail fast if lockfiles are missing. Lockfile drift is enforced elsewhere in CI via
             # `cargo metadata --locked` *without* `--no-deps`.
             ["cargo", "metadata", "--locked", "--format-version", "1", "--no-deps"],

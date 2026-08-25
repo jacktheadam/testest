@@ -32,7 +32,7 @@ class ValidationError(RuntimeError):
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_WINDOWS_DEVICE_CONTRACT_PATH = REPO_ROOT / "docs/windows-device-contract.json"
+DEFAULT_WINDOWS_DEVICE_CONTRACT_PATH = REPO_ROOT / "protocol-vectors/windows-device-contract.json"
 
 # Canonical Guest Tools / packager naming for the AeroGPU driver directory.
 # Keep this in sync with:
@@ -776,7 +776,7 @@ def validate(
     # name so `guest-tools/setup.cmd` can preseed BOOT_START + CriticalDeviceDatabase keys.
     #
     # The in-repo Guest Tools config (`devices.cmd`) is generated from the canonical
-    # Aero device contract (`docs/windows-device-contract.json`). If the packaged storage
+    # Aero device contract (`protocol-vectors/windows-device-contract.json`). If the packaged storage
     # driver changes its INF AddService name, update the contract and regenerate Guest Tools
     # (do not hand-edit devices.cmd).
     contract_path = windows_device_contract
@@ -798,7 +798,7 @@ def validate(
             f"{devices.source_contract_name!r}, but the selected contract file declares "
             f"contract_name={contract.contract_name!r}.\n"
             "If you are validating a virtio-win Guest Tools build, pass:\n"
-            "  --windows-device-contract docs/windows-device-contract-virtio-win.json\n"
+            "  --windows-device-contract protocol-vectors/windows-device-contract-virtio-win.json\n"
         )
     if devices.virtio_blk_service.strip().lower() != expected_blk_service.strip().lower():
         raise ValidationError(
@@ -1150,7 +1150,7 @@ def main(argv: Sequence[str]) -> int:
                 and devices.source_contract_name.strip().lower()
                 == "aero-windows-pci-device-contract-virtio-win"
             ):
-                contract_path = REPO_ROOT / "docs/windows-device-contract-virtio-win.json"
+                contract_path = REPO_ROOT / "protocol-vectors/windows-device-contract-virtio-win.json"
 
         validate(devices, spec_path, spec_expected, windows_device_contract=contract_path)
     except ValidationError as e:

@@ -67,8 +67,32 @@ pub(crate) fn ensure_runtime_dir() {
     RUNTIME_DIR.get_or_init(|| ensure_xdg_runtime_dir("aero-gpu-tests"));
 }
 
+/// A backend forced by `AERO_GPU_TEST_BACKEND`, if the variable names one.
+///
+/// The browser runs this executor on wgpu's GL backend, because that is what WebGL2 maps to. These
+/// tests take whatever adapter the host offers first, which on a machine with Vulkan means the GL
+/// backend is never exercised — so a defect that only appears there passes here and fails in the
+/// browser, where it is far harder to see.
+///
+/// Accepted values: `gl`, `vulkan`, `metal`, `dx12`, `primary`. Anything else is ignored.
+fn forced_backends() -> Option<wgpu::Backends> {
+    let raw = std::env::var("AERO_GPU_TEST_BACKEND").ok()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "gl" | "opengl" | "gles" => Some(wgpu::Backends::GL),
+        "vulkan" | "vk" => Some(wgpu::Backends::VULKAN),
+        "metal" => Some(wgpu::Backends::METAL),
+        "dx12" | "d3d12" => Some(wgpu::Backends::DX12),
+        "primary" => Some(wgpu::Backends::PRIMARY),
+        _ => None,
+    }
+}
+
 async fn select_adapter() -> Option<wgpu::Adapter> {
     ensure_runtime_dir();
+
+    if let Some(backends) = forced_backends() {
+        return request_adapter(backends).await;
+    }
 
     // On Linux, prefer the native ("primary") backends first and fall back to GL if Vulkan (etc)
     // isn't available.

@@ -184,7 +184,7 @@ fn build_app(state: AppState) -> Router {
         .route("/metrics", get(metrics))
         .route("/l2", get(l2_ws_handler))
         .route("/l2/", get(l2_ws_handler))
-        // Legacy alias (see `docs/l2-tunnel-protocol.md`).
+        // Legacy alias (see `wiki/areas/networking.md`).
         .route("/eth", get(l2_ws_handler))
         .route("/eth/", get(l2_ws_handler))
         .with_state(state)
@@ -380,39 +380,49 @@ async fn handle_l2_ws(socket: WebSocket, state: AppState, session_identity: Opti
     }
 }
 
-fn reject_auth_unauthorized(
-    state: &AppState,
-    headers: &HeaderMap,
+/// The facts every rejected WebSocket upgrade logs.
+///
+/// These five travel together through all of the rejection helpers below, and two of them are
+/// adjacent booleans describing opposite ways a client can present credentials. Passed
+/// positionally, `token_present` and `cookie_present` are silently swappable, and a swap would
+/// misreport every rejection without failing anything. Naming them at the one place they are
+/// built removes that.
+#[derive(Clone, Copy)]
+struct UpgradeContext<'a> {
+    state: &'a AppState,
+    headers: &'a HeaderMap,
     token_present: bool,
     cookie_present: bool,
     client_ip: IpAddr,
+}
+
+fn reject_auth_unauthorized(
+    ctx: UpgradeContext<'_>,
     reject_reason: AuthRejectReason,
     message: &'static str,
 ) -> Box<axum::response::Response> {
     let missing = matches!(reject_reason, AuthRejectReason::MissingCredentials);
-    let reason = if missing { "auth_missing" } else { "auth_invalid" };
-    reject_auth_unauthorized_with_reason(
+    let reason = if missing {
+        "auth_missing"
+    } else {
+        "auth_invalid"
+    };
+    reject_auth_unauthorized_with_reason(ctx, reject_reason, reason, message)
+}
+
+fn reject_auth_unauthorized_with_reason(
+    ctx: UpgradeContext<'_>,
+    reject_reason: AuthRejectReason,
+    reason: &'static str,
+    message: &'static str,
+) -> Box<axum::response::Response> {
+    let UpgradeContext {
         state,
         headers,
         token_present,
         cookie_present,
         client_ip,
-        reject_reason,
-        reason,
-        message,
-    )
-}
-
-fn reject_auth_unauthorized_with_reason(
-    state: &AppState,
-    headers: &HeaderMap,
-    token_present: bool,
-    cookie_present: bool,
-    client_ip: IpAddr,
-    reject_reason: AuthRejectReason,
-    reason: &'static str,
-    message: &'static str,
-) -> Box<axum::response::Response> {
+    } = ctx;
     state.metrics.auth_failed();
     if matches!(reject_reason, AuthRejectReason::MissingCredentials) {
         state.metrics.upgrade_reject_auth_missing();
@@ -434,13 +444,16 @@ fn reject_auth_unauthorized_with_reason(
 }
 
 fn reject_invalid_jwt(
-    state: &AppState,
-    headers: &HeaderMap,
-    token_present: bool,
-    cookie_present: bool,
-    client_ip: IpAddr,
+    ctx: UpgradeContext<'_>,
     context: &'static str,
 ) -> Box<axum::response::Response> {
+    let UpgradeContext {
+        state,
+        headers,
+        token_present,
+        cookie_present,
+        client_ip,
+    } = ctx;
     state.metrics.auth_failed();
     state.metrics.upgrade_reject_auth_invalid();
     state.metrics.auth_rejected(AuthRejectReason::InvalidJwt);
@@ -457,7 +470,7 @@ fn reject_invalid_jwt(
     Box::new((StatusCode::UNAUTHORIZED, "invalid jwt".to_string()).into_response())
 }
 
-fn session_cookie_raw_value<'a>(headers: &'a HeaderMap) -> Option<&'a str> {
+fn session_cookie_raw_value(headers: &HeaderMap) -> Option<&str> {
     headers
         .get_all(header::COOKIE)
         .iter()
@@ -475,16 +488,20 @@ fn session_id_from_cookie(headers: &HeaderMap, secret: &[u8], now_ms: u64) -> Op
 }
 
 fn reject_origin_forbidden(
-    state: &AppState,
-    _headers: &HeaderMap,
-    token_present: bool,
-    cookie_present: bool,
-    client_ip: IpAddr,
+    ctx: UpgradeContext<'_>,
     reason: &'static str,
     origin: &str,
     message: String,
     record_metric: impl FnOnce(&Metrics),
 ) -> Box<axum::response::Response> {
+    let UpgradeContext {
+        state,
+        headers,
+        token_present,
+        cookie_present,
+        client_ip,
+    } = ctx;
+    let _ = headers;
     record_metric(&state.metrics);
     tracing::warn!(
         reason,
@@ -499,16 +516,19 @@ fn reject_origin_forbidden(
 }
 
 fn reject_host_forbidden(
-    state: &AppState,
-    headers: &HeaderMap,
-    token_present: bool,
-    cookie_present: bool,
-    client_ip: IpAddr,
+    ctx: UpgradeContext<'_>,
     reason: &'static str,
     host: &str,
     message: String,
     record_metric: impl FnOnce(&Metrics),
 ) -> Box<axum::response::Response> {
+    let UpgradeContext {
+        state,
+        headers,
+        token_present,
+        cookie_present,
+        client_ip,
+    } = ctx;
     record_metric(&state.metrics);
     tracing::warn!(
         reason,
@@ -533,6 +553,13 @@ fn enforce_security(
     // credentials, even if the request is also missing/invalid Origin (see tests/security.rs).
     let token_present = token_present(state.cfg.security.auth_mode, headers, uri);
     let cookie_present = session_cookie_present(headers);
+    let ctx = UpgradeContext {
+        state,
+        headers,
+        token_present,
+        cookie_present,
+        client_ip,
+    };
     let origin_normalized_for_jwt =
         origin_from_headers(headers).and_then(crate::origin::normalize_origin);
 
@@ -553,11 +580,7 @@ fn enforce_security(
                     AuthRejectReason::MissingCredentials
                 };
                 return Err(reject_auth_unauthorized(
-                    state,
-                    headers,
-                    token_present,
-                    cookie_present,
-                    client_ip,
+                    ctx,
                     reject_reason,
                     "invalid token",
                 ));
@@ -579,11 +602,7 @@ fn enforce_security(
                     AuthRejectReason::MissingCredentials
                 };
                 return Err(reject_auth_unauthorized(
-                    state,
-                    headers,
-                    token_present,
-                    cookie_present,
-                    client_ip,
+                    ctx,
                     reject_reason,
                     "missing or expired session",
                 ));
@@ -591,15 +610,7 @@ fn enforce_security(
             auth_sid = sid;
         }
         crate::config::AuthMode::Jwt => {
-            let (sid, expected_origin) = verify_jwt_sid(
-                state,
-                headers,
-                uri,
-                &origin_normalized_for_jwt,
-                token_present,
-                cookie_present,
-                client_ip,
-            )?;
+            let (sid, expected_origin) = verify_jwt_sid(ctx, uri, &origin_normalized_for_jwt)?;
             auth_sid = Some(sid);
             if let Some(expected_origin) = expected_origin {
                 if origin_claim_mismatch(
@@ -607,13 +618,7 @@ fn enforce_security(
                     origin_normalized_for_jwt.as_deref(),
                     &expected_origin,
                 ) {
-                    reject_jwt_origin_mismatch(
-                        state,
-                        headers,
-                        token_present,
-                        cookie_present,
-                        client_ip,
-                    )?;
+                    reject_jwt_origin_mismatch(ctx)?;
                 }
             }
         }
@@ -638,24 +643,12 @@ fn enforce_security(
                         AuthRejectReason::MissingCredentials
                     };
                     return Err(reject_auth_unauthorized(
-                        state,
-                        headers,
-                        token_present,
-                        cookie_present,
-                        client_ip,
+                        ctx,
                         reject_reason,
                         "missing or invalid auth",
                     ));
                 }
-                let (sid, expected_origin) = verify_jwt_sid(
-                    state,
-                    headers,
-                    uri,
-                    &origin_normalized_for_jwt,
-                    token_present,
-                    cookie_present,
-                    client_ip,
-                )?;
+                let (sid, expected_origin) = verify_jwt_sid(ctx, uri, &origin_normalized_for_jwt)?;
                 auth_sid = Some(sid);
                 if let Some(expected_origin) = expected_origin {
                     if origin_claim_mismatch(
@@ -663,13 +656,7 @@ fn enforce_security(
                         origin_normalized_for_jwt.as_deref(),
                         &expected_origin,
                     ) {
-                        reject_jwt_origin_mismatch(
-                            state,
-                            headers,
-                            token_present,
-                            cookie_present,
-                            client_ip,
-                        )?;
+                        reject_jwt_origin_mismatch(ctx)?;
                     }
                 }
             }
@@ -705,11 +692,7 @@ fn enforce_security(
                         AuthRejectReason::MissingCredentials
                     };
                     return Err(reject_auth_unauthorized(
-                        state,
-                        headers,
-                        token_present,
-                        cookie_present,
-                        client_ip,
+                        ctx,
                         reject_reason,
                         "missing or invalid auth",
                     ));
@@ -745,11 +728,7 @@ fn enforce_security(
                     AuthRejectReason::MissingCredentials
                 };
                 return Err(reject_auth_unauthorized(
-                    state,
-                    headers,
-                    token_present,
-                    cookie_present,
-                    client_ip,
+                    ctx,
                     reject_reason,
                     "missing or invalid auth",
                 ));
@@ -763,11 +742,7 @@ fn enforce_security(
         let mut origin_values = headers.get_all(axum::http::header::ORIGIN).iter();
         let Some(origin_header) = origin_values.next() else {
             return Err(reject_origin_forbidden(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
+                ctx,
                 "origin_missing",
                 "<missing>",
                 "missing Origin header".to_string(),
@@ -776,11 +751,7 @@ fn enforce_security(
         };
         if origin_values.next().is_some() {
             return Err(reject_origin_forbidden(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
+                ctx,
                 "origin_invalid",
                 "<multiple>",
                 "invalid Origin header: multiple values".to_string(),
@@ -795,11 +766,7 @@ fn enforce_security(
             .filter(|v| !v.is_empty());
         let Some(origin_header) = origin_header else {
             return Err(reject_origin_forbidden(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
+                ctx,
                 "origin_missing",
                 "<missing>",
                 "missing Origin header".to_string(),
@@ -811,11 +778,7 @@ fn enforce_security(
             Some(origin) => origin,
             None => {
                 return Err(reject_origin_forbidden(
-                    state,
-                    headers,
-                    token_present,
-                    cookie_present,
-                    client_ip,
+                    ctx,
                     "origin_invalid",
                     origin_header,
                     format!("invalid Origin header: {origin_header}"),
@@ -839,11 +802,7 @@ fn enforce_security(
 
                 if !allowed {
                     return Err(reject_origin_forbidden(
-                        state,
-                        headers,
-                        token_present,
-                        cookie_present,
-                        client_ip,
+                        ctx,
                         "origin_not_allowed",
                         &origin,
                         format!("Origin not allowed: {origin}"),
@@ -860,11 +819,7 @@ fn enforce_security(
         let raw_host = effective_host_value(headers, trust_proxy);
         let Some(raw_host) = raw_host else {
             return Err(reject_host_forbidden(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
+                ctx,
                 "host_missing",
                 "<missing>",
                 "missing Host header".to_string(),
@@ -874,11 +829,7 @@ fn enforce_security(
 
         let Some(host) = normalize_host_for_compare(&raw_host, scheme) else {
             return Err(reject_host_forbidden(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
+                ctx,
                 "host_invalid",
                 &raw_host,
                 "malformed Host header".to_string(),
@@ -892,11 +843,7 @@ fn enforce_security(
 
         if !is_allowed {
             return Err(reject_host_forbidden(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
+                ctx,
                 "host_not_allowed",
                 &host,
                 format!("Host not allowed: {host}"),
@@ -909,21 +856,24 @@ fn enforce_security(
 }
 
 fn verify_jwt_sid(
-    state: &AppState,
-    headers: &HeaderMap,
+    ctx: UpgradeContext<'_>,
     uri: &axum::http::Uri,
     _origin_normalized_for_jwt: &Option<String>,
-    token_present: bool,
-    cookie_present: bool,
-    client_ip: IpAddr,
 ) -> Result<(String, Option<String>), Box<axum::response::Response>> {
+    let UpgradeContext {
+        state,
+        headers,
+        token_present,
+        ..
+    } = ctx;
     let secret = state.cfg.security.jwt_secret.as_deref().unwrap_or_default();
     let now_unix = now_unix_seconds();
     let claims = bearer_token(headers)
         .and_then(|token| crate::auth::verify_relay_jwt_hs256(token, secret, now_unix).ok())
         .or_else(|| {
-            token_from_query(uri)
-                .and_then(|token| crate::auth::verify_relay_jwt_hs256(token.as_ref(), secret, now_unix).ok())
+            token_from_query(uri).and_then(|token| {
+                crate::auth::verify_relay_jwt_hs256(token.as_ref(), secret, now_unix).ok()
+            })
         })
         .or_else(|| {
             token_from_subprotocol(headers)
@@ -938,41 +888,19 @@ fn verify_jwt_sid(
             } else {
                 AuthRejectReason::MissingCredentials
             };
-            return Err(reject_auth_unauthorized(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
-                reject_reason,
-                "invalid jwt",
-            ));
+            return Err(reject_auth_unauthorized(ctx, reject_reason, "invalid jwt"));
         }
     };
 
     if let Some(expected) = state.cfg.security.jwt_audience.as_deref() {
         if claims.aud.as_deref() != Some(expected) {
-            return Err(reject_invalid_jwt(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
-                "jwt audience mismatch",
-            ));
+            return Err(reject_invalid_jwt(ctx, "jwt audience mismatch"));
         }
     }
 
     if let Some(expected) = state.cfg.security.jwt_issuer.as_deref() {
         if claims.iss.as_deref() != Some(expected) {
-            return Err(reject_invalid_jwt(
-                state,
-                headers,
-                token_present,
-                cookie_present,
-                client_ip,
-                "jwt issuer mismatch",
-            ));
+            return Err(reject_invalid_jwt(ctx, "jwt issuer mismatch"));
         }
     }
 
@@ -981,14 +909,7 @@ fn verify_jwt_sid(
         Some(raw) => match crate::origin::normalize_origin(raw) {
             Some(origin) => Some(origin),
             None => {
-                return Err(reject_invalid_jwt(
-                    state,
-                    headers,
-                    token_present,
-                    cookie_present,
-                    client_ip,
-                    "jwt origin claim invalid",
-                ));
+                return Err(reject_invalid_jwt(ctx, "jwt origin claim invalid"));
             }
         },
     };
@@ -1004,18 +925,10 @@ fn origin_claim_mismatch(open: bool, actual: Option<&str>, expected: &str) -> bo
 }
 
 fn reject_jwt_origin_mismatch(
-    state: &AppState,
-    headers: &HeaderMap,
-    token_present: bool,
-    cookie_present: bool,
-    client_ip: IpAddr,
+    ctx: UpgradeContext<'_>,
 ) -> Result<(), Box<axum::response::Response>> {
     Err(reject_auth_unauthorized_with_reason(
-        state,
-        headers,
-        token_present,
-        cookie_present,
-        client_ip,
+        ctx,
         AuthRejectReason::JwtOriginMismatch,
         "jwt_origin_mismatch",
         "invalid jwt",
@@ -1298,7 +1211,6 @@ fn token_from_subprotocol(headers: &HeaderMap) -> Option<&str> {
         proto
             .strip_prefix(aero_l2_protocol::L2_TUNNEL_TOKEN_SUBPROTOCOL_PREFIX)
             .filter(|v| !v.is_empty())
-            .map(|v| v)
     })
 }
 

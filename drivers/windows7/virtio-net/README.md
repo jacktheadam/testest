@@ -14,7 +14,7 @@ This directory contains a clean-room, spec-based **virtio-net** driver for **Win
 > - `disable-legacy=on` (ensures the device enumerates as `DEV_1041`)
 > - `x-pci-revision=0x01` (ensures the device enumerates as `REV_01`)
 >
-> See [`docs/windows7-virtio-driver-contract.md`](../../../docs/windows7-virtio-driver-contract.md) (§3.2).
+> See [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md) (§3.2).
 
 ## What it provides
 
@@ -171,7 +171,7 @@ You can also use `aero-virtio-selftest.exe`:
       scheduled task with `-RequireNetMsix`.
   - See `../tests/guest-selftest/README.md` for how to build/run the tool.
 
-See also: [`docs/windows/virtio-pci-modern-interrupt-debugging.md`](../../../docs/windows/virtio-pci-modern-interrupt-debugging.md).
+See also: [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md).
 
 ### User-mode diagnostics interface (`\\.\AeroVirtioNetDiag`)
 
@@ -278,8 +278,8 @@ From a Windows host with the WDK installed:
 
 ```powershell
 # From the repo root:
-.\ci\install-wdk.ps1
-.\ci\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers windows7/virtio-net
+.\drivers\build\install-wdk.ps1
+.\drivers\build\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers windows7/virtio-net
 ```
 
 Build outputs are staged under:

@@ -16,9 +16,9 @@ import { fileURLToPath } from "node:url";
 
 import { transform } from "esbuild";
 import { RunningStats } from "../packages/aero-stats/src/running-stats.js";
-import { formatOneLineError, truncateUtf8 } from "../src/text.js";
-import { destroyBestEffort } from "../src/socket_safe.js";
-import { tryWriteResponse } from "../src/http_response_safe.js";
+import { formatOneLineError, truncateUtf8 } from "../packages/transport-safety/src/text.js";
+import { destroyBestEffort } from "../packages/transport-safety/src/socket_safe.js";
+import { tryWriteResponse } from "../packages/transport-safety/src/http_response_safe.js";
 
 const execFile = promisify(execFileCb);
 
@@ -224,8 +224,8 @@ export async function runGpuBenchmarksInPage(page, opts = {}) {
   ];
 
   const scriptPaths = [
-    path.join(repoRoot, "web/gpu-cache/persistent_cache.ts"),
-    path.join(repoRoot, "web/src/gpu/telemetry.ts"),
+    path.join(repoRoot, "apps/web/gpu-cache/persistent_cache.ts"),
+    path.join(repoRoot, "apps/web/src/gpu/telemetry.ts"),
     path.join(repoRoot, "bench/scenarios/vga_text_scroll.ts"),
     path.join(repoRoot, "bench/scenarios/vbe_lfb_blit.ts"),
     path.join(repoRoot, "bench/scenarios/webgpu_triangle_batch.ts"),

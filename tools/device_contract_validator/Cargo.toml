@@ -1,8 +1,9 @@
 [package]
 name = "device-contract-validator"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
+publish = false
 
 [dependencies]
 anyhow = "1"
@@ -11,6 +12,7 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
+workspace-hack = { version = "0.1", path = "../../crates/workspace-hack" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tempfile = "3"

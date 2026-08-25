@@ -42,6 +42,11 @@ where
                 PciBarKind::Mmio32 | PciBarKind::Mmio64 => command |= 0x2,
             }
         }
+        let class = cfg.class_code();
+        // VGA-compatible functions own fixed legacy I/O ranges that cannot be inferred from BARs.
+        if class.class == 0x03 && class.subclass == 0x00 {
+            command |= 0x1;
+        }
         if command != 0 {
             pci.write_config(addr, 0x04, 2, u32::from(command));
         }

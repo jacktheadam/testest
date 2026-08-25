@@ -1,7 +1,7 @@
 //! Native-only helper for streaming chunked disk images (`manifest.json` + `chunks/*.bin`).
 //!
 //! This is the Rust/native counterpart to `web/src/storage/remote_chunked_disk.ts` and implements
-//! the format specified in `docs/18-chunked-disk-image-format.md`.
+//! the format specified in `wiki/areas/storage.md`.
 //!
 //! Unlike [`crate::StreamingDisk`], this implementation does **not** rely on HTTP `Range`
 //! requests. Each chunk is fetched with a plain `GET` to a stable per-chunk URL.

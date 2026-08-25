@@ -25,6 +25,25 @@ fn read_sdt(m: &mut Machine, addr: u64) -> Vec<u8> {
     table
 }
 
+fn read_published_fadt_and_dsdt(m: &mut Machine) -> (Vec<u8>, Vec<u8>) {
+    let rsdp_addr = m
+        .acpi_rsdp_addr()
+        .expect("expected ACPI RSDP to be present");
+    let rsdp = m.read_physical_bytes(rsdp_addr, 36);
+    let xsdt_addr = u64::from_le_bytes(rsdp[24..32].try_into().unwrap());
+    let xsdt = read_sdt(m, xsdt_addr);
+    let fadt_addr = xsdt[36..]
+        .chunks_exact(8)
+        .map(|entry| u64::from_le_bytes(entry.try_into().unwrap()))
+        .find(|&addr| addr != 0 && m.read_physical_bytes(addr, 4) == b"FACP")
+        .expect("missing FADT (FACP) in XSDT");
+    let fadt = read_sdt(m, fadt_addr);
+    let dsdt_32 = u64::from(u32::from_le_bytes(fadt[40..44].try_into().unwrap()));
+    let dsdt_64 = u64::from_le_bytes(fadt[140..148].try_into().unwrap());
+    let dsdt_addr = if dsdt_64 != 0 { dsdt_64 } else { dsdt_32 };
+    (fadt, read_sdt(m, dsdt_addr))
+}
+
 #[test]
 fn machine_config_explicitly_controls_acpi_publication() {
     // Even when the PC platform is wired, ACPI publication should be explicitly controlled.
@@ -110,4 +129,45 @@ fn machine_config_explicitly_controls_acpi_publication() {
 
     let dsdt = read_sdt(&mut m, dsdt_addr);
     assert_eq!(&dsdt[0..4], b"DSDT");
+}
+
+#[test]
+fn machine_i8042_topology_controls_published_acpi_contract() {
+    // Known AML EISA-ID encodings for PNP0303 and PNP0F13. Assert against the
+    // firmware bytes, not the table generator's encoding helper.
+    const PNP0303: [u8; 4] = 0x0303_D041u32.to_le_bytes();
+    const PNP0F13: [u8; 4] = 0x130F_D041u32.to_le_bytes();
+    const IAPC_BOOT_ARCH_8042: u16 = 1 << 1;
+
+    let mut with_i8042 = Machine::new(MachineConfig {
+        ram_size_bytes: 16 * 1024 * 1024,
+        enable_pc_platform: true,
+        enable_acpi: true,
+        enable_i8042: true,
+        ..Default::default()
+    })
+    .unwrap();
+    let (fadt, dsdt) = read_published_fadt_and_dsdt(&mut with_i8042);
+    assert!(dsdt.windows(4).any(|bytes| bytes == PNP0303));
+    assert!(dsdt.windows(4).any(|bytes| bytes == PNP0F13));
+    assert_ne!(
+        u16::from_le_bytes(fadt[109..111].try_into().unwrap()) & IAPC_BOOT_ARCH_8042,
+        0
+    );
+
+    let mut without_i8042 = Machine::new(MachineConfig {
+        ram_size_bytes: 16 * 1024 * 1024,
+        enable_pc_platform: true,
+        enable_acpi: true,
+        enable_i8042: false,
+        ..Default::default()
+    })
+    .unwrap();
+    let (fadt, dsdt) = read_published_fadt_and_dsdt(&mut without_i8042);
+    assert!(!dsdt.windows(4).any(|bytes| bytes == PNP0303));
+    assert!(!dsdt.windows(4).any(|bytes| bytes == PNP0F13));
+    assert_eq!(
+        u16::from_le_bytes(fadt[109..111].try_into().unwrap()) & IAPC_BOOT_ARCH_8042,
+        0
+    );
 }

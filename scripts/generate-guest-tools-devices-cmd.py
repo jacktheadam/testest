@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Generate `guest-tools/config/devices.cmd` from `docs/windows-device-contract.json`.
+Generate `guest-tools/config/devices.cmd` from `protocol-vectors/windows-device-contract.json`.
 
 Why:
 - `devices.cmd` is consumed by Guest Tools install/verify scripts.
 - Manually editing PCI HWIDs / service names tends to drift from:
-  - `docs/windows7-virtio-driver-contract.md` (AERO-W7-VIRTIO),
-  - `docs/windows-device-contract.json` (machine-readable manifest),
+  - the Windows guest drivers area page (AERO-W7-VIRTIO),
+  - `protocol-vectors/windows-device-contract.json` (machine-readable manifest),
   - in-tree Windows driver INFs (AddService + HWIDs).
 
-This generator makes `docs/windows-device-contract.json` the single source of truth
+This generator makes `protocol-vectors/windows-device-contract.json` the single source of truth
 and provides a `--check` mode suitable for CI.
 """
 
@@ -24,7 +24,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONTRACT_PATH = REPO_ROOT / "docs/windows-device-contract.json"
+DEFAULT_CONTRACT_PATH = REPO_ROOT / "protocol-vectors/windows-device-contract.json"
 DEFAULT_OUTPUT_PATH = REPO_ROOT / "guest-tools/config/devices.cmd"
 
 
@@ -201,7 +201,7 @@ def main(argv: list[str]) -> int:
         "--contract",
         type=Path,
         default=DEFAULT_CONTRACT_PATH,
-        help="Path to docs/windows-device-contract.json (default: repo copy).",
+        help="Path to protocol-vectors/windows-device-contract.json (default: repo copy).",
     )
     parser.add_argument(
         "--output",
@@ -233,7 +233,7 @@ def main(argv: list[str]) -> int:
             )
             sys.stderr.write(diff if diff else "devices.cmd is out of date\n")
             sys.stderr.write(
-                "\nERROR: guest-tools/config/devices.cmd is out of sync with docs/windows-device-contract.json.\n"
+                "\nERROR: guest-tools/config/devices.cmd is out of sync with protocol-vectors/windows-device-contract.json.\n"
                 "Run: python3 scripts/generate-guest-tools-devices-cmd.py\n"
             )
             return 1

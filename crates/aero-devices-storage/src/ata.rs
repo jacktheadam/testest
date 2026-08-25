@@ -29,6 +29,9 @@ pub const ATA_CMD_WRITE_DMA_EXT: u8 = 0x35;
 pub const ATA_CMD_FLUSH_CACHE: u8 = 0xE7;
 pub const ATA_CMD_FLUSH_CACHE_EXT: u8 = 0xEA;
 pub const ATA_CMD_SET_FEATURES: u8 = 0xEF;
+pub const ATA_CMD_READ_VERIFY: u8 = 0x40;
+pub const ATA_CMD_READ_VERIFY_EXT: u8 = 0x42;
+pub const ATA_CMD_INIT_DEV_PARAMS: u8 = 0x91;
 
 /// Highest Ultra DMA mode we advertise and accept.
 ///
@@ -341,6 +344,12 @@ fn build_identify_sector(sector_count: u64) -> [u8; SECTOR_SIZE] {
     words[1] = 16383; // cylinders
     words[3] = 16; // heads
     words[6] = 63; // sectors/track
+    // ATA-2 words 4/5 (retired): unformatted bytes/track and bytes/sector.
+    // QEMU still publishes them. Win7 FormatEx / VDS alignment queries that
+    // fall back to IDENTIFY instead of word 106 treat a zero word 5 as
+    // BytesPerSector=0 and fail with ERROR_INVALID_PARAMETER (0x80070057).
+    words[4] = (512u16).saturating_mul(words[6]);
+    words[5] = 512;
 
     // Words 10-19: serial number (20 bytes).
     write_ata_string(&mut words, 10, 10, "AERO0000000000000000");
@@ -351,18 +360,32 @@ fn build_identify_sector(sector_count: u64) -> [u8; SECTOR_SIZE] {
     // Words 27-46: model number (40 bytes).
     write_ata_string(&mut words, 27, 20, "Aero Virtual ATA Disk");
 
-    // Word 47: max sectors per interrupt on READ/WRITE MULTIPLE. We don't implement it.
-    words[47] = 0;
+    // Word 47: max sectors per READ/WRITE MULTIPLE. Bits 15:8 must be 0x80 when bits 7:0
+    // are valid (ATA/ATAPI-7). QEMU advertises 16; we do the same even though MULTIPLE
+    // itself is not implemented — guests use this field as a "this IDENTIFY is sane" check.
+    words[47] = 0x8000 | 16;
 
-    // Word 49: capabilities.
-    // Bit 9: LBA supported, Bit 8: DMA supported.
-    words[49] = (1 << 9) | (1 << 8);
+    // Word 49: capabilities. Match QEMU: IORDY (bit 11), IORDY can be disabled (bit 10),
+    // LBA (bit 9), DMA (bit 8). Win7 ataport consults IORDY when picking PIO timings.
+    words[49] = (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8);
 
     // Word 53: field validity.
-    //
-    // Set bit 2 to indicate word 88 (UDMA modes) is valid. Some guests consult this bit before
-    // parsing word 88.
-    words[53] = 1 << 2;
+    //   bit 0 = words 54-58 (current CHS) valid
+    //   bit 1 = words 64-70 (PIO) valid
+    //   bit 2 = word 88 (UDMA) valid
+    // Win7 classpnp only publishes MediaType=FixedMedia after Tracks*Sectors != 0;
+    // that product is taken from current CHS when bit 0 is set. ATAPI already uses 0x07.
+    words[53] = (1 << 0) | (1 << 1) | (1 << 2);
+
+    // Words 54-58: current CHS translation. Copy the default geometry so guests that
+    // ignore words 1/3/6 unless this validity bit is set still see a non-zero CHS.
+    words[54] = words[1];
+    words[55] = words[3];
+    words[56] = words[6];
+    let chs_capacity = (u32::from(words[1]) * u32::from(words[3]) * u32::from(words[6]))
+        .min(sector_count.min(u32::MAX as u64) as u32);
+    words[57] = (chs_capacity & 0xFFFF) as u16;
+    words[58] = (chs_capacity >> 16) as u16;
 
     // Word 60-61: total number of user addressable sectors for 28-bit.
     let lba28 = sector_count.min(u32::MAX as u64) as u32;
@@ -373,18 +396,35 @@ fn build_identify_sector(sector_count: u64) -> [u8; SECTOR_SIZE] {
     // `AtaDrive::update_identify_transfer_mode_words()` since it depends on negotiated state.
     words[63] = 0;
 
+    // Words 64-68: PIO modes 3/4 + cycle times (valid because word 53 bit 1 is set).
+    // Values match QEMU / our ATAPI IDENTIFY PACKET so ataport does not reject the
+    // "valid but empty" combination.
+    words[64] = 0x0003;
+    words[65] = 0x00B4;
+    words[66] = 0x00B4;
+    words[67] = 0x012C;
+    words[68] = 0x00B4;
+
     // Words 80: major version number.
     words[80] = 0x007E; // up to ATA/ATAPI-8 (a loose claim, but common in emulators)
 
-    // Words 82-84: command set supported. Mark FLUSH CACHE and SET FEATURES as supported.
-    words[82] = 1 << 5; // write cache
-    words[83] = 1 << 10; // 48-bit addressing supported.
-    words[84] = 0;
+    // Words 82-84: command set supported.
+    // ATA/ATAPI-7: word 83 bit 14 must be 1 and bit 15 must be 0 or words 82-83
+    // are ignored. Same rule for word 84 and for word 87 (enabled). Without the
+    // validity bits, guests discard LBA48 (word 83 bit 10) and related features.
+    const IDENTIFY_WORD_VALID: u16 = 1 << 14;
+    words[82] = (1 << 5) | (1 << 14); // write cache + NOP
+    // Bit 10 = LBA48, bit 12 = FLUSH CACHE, bit 13 = FLUSH CACHE EXT.
+    // Aero already implements E7/EA; advertising them matches QEMU and keeps
+    // storahci from treating flush as an illegal parameter.
+    words[83] = IDENTIFY_WORD_VALID | (1 << 13) | (1 << 12) | (1 << 10);
+    words[84] = IDENTIFY_WORD_VALID;
 
-    // Words 85-87: command set enabled.
+    // Words 85-87: command set enabled. Word 85 bit 5 is kept in sync with
+    // `write_cache_enabled` by `sync_identify_write_cache_enabled`.
     words[85] = words[82];
     words[86] = words[83];
-    words[87] = words[84];
+    words[87] = IDENTIFY_WORD_VALID;
 
     // Words 88: Ultra DMA modes supported/selected. Filled in by
     // `AtaDrive::update_identify_transfer_mode_words()`.
@@ -396,6 +436,17 @@ fn build_identify_sector(sector_count: u64) -> [u8; SECTOR_SIZE] {
     words[101] = ((lba48 >> 16) & 0xFFFF) as u16;
     words[102] = ((lba48 >> 32) & 0xFFFF) as u16;
     words[103] = ((lba48 >> 48) & 0xFFFF) as u16;
+
+    // Word 106: physical/logical sector size. Bit 14 = word valid, bit 13 =
+    // device reports a physical sector size, bits 3:0 = log2(phys/logical).
+    // 0x6000 means 512-byte logical and physical sectors (QEMU default when
+    // physical_block_size is 512). Without this, StorageAccessAlignment
+    // queries can surface BytesPerLogicalSector=0 and FormatEx returns 87.
+    words[106] = 0x6000;
+
+    // Word 93: hardware reset result. Bit 14 valid, bit 13 = 80-conductor
+    // cable detected (CBLID). QEMU publishes 0x6001.
+    words[93] = (1 << 14) | (1 << 13) | 1;
 
     let mut out = [0u8; SECTOR_SIZE];
     for (idx, word) in words.into_iter().enumerate() {
@@ -516,5 +567,57 @@ mod tests {
             id_enabled, id_enabled_again,
             "IDENTIFY data should return to its original value after toggling back"
         );
+    }
+
+    #[test]
+    fn identify_sector_sets_ata_validity_bits_and_current_chs() {
+        // Win7 classpnp / ataport ignore command-set and current-CHS words unless the
+        // ATA validity bits are set (word 53 bit 0, word 83/84/87 bit 14 set and bit 15
+        // clear). Missing those bits leaves Tracks*Sectors=0, so MediaType never becomes
+        // FixedMedia and Setup's Win32 disk path skips the drive.
+        let capacity = 1024 * SECTOR_SIZE as u64;
+        let disk = RawDisk::create(MemBackend::new(), capacity).unwrap();
+        let drive = AtaDrive::new(Box::new(disk)).unwrap();
+        let id = drive.identify_sector();
+
+        fn word(id: &[u8; SECTOR_SIZE], idx: usize) -> u16 {
+            let off = idx * 2;
+            u16::from_le_bytes([id[off], id[off + 1]])
+        }
+
+        assert_eq!(word(id, 47) & 0xFF00, 0x8000, "word 47 high byte must be 0x80");
+        assert_ne!(word(id, 49) & (1 << 11), 0, "IORDY must be advertised");
+        assert_eq!(word(id, 53) & 0x7, 0x7, "words 54-58, 64-70, and 88 must be valid");
+
+        assert_eq!(word(id, 54), word(id, 1), "current cylinders");
+        assert_eq!(word(id, 55), word(id, 3), "current heads");
+        assert_eq!(word(id, 56), word(id, 6), "current sectors/track");
+        assert_ne!(word(id, 55), 0);
+        assert_ne!(word(id, 56), 0);
+
+        let chs = u32::from(word(id, 57)) | (u32::from(word(id, 58)) << 16);
+        assert_ne!(chs, 0, "current CHS capacity");
+
+        assert_eq!(word(id, 64) & 0x3, 0x3, "PIO modes 3 and 4");
+
+        for idx in [83, 84, 87] {
+            let w = word(id, idx);
+            assert_eq!(
+                w & 0xC000,
+                1 << 14,
+                "word {idx} must have validity bit 14 set and bit 15 clear, got {w:#06x}"
+            );
+        }
+        assert_ne!(word(id, 83) & (1 << 10), 0, "LBA48 supported");
+        assert_ne!(word(id, 83) & (1 << 12), 0, "FLUSH CACHE supported");
+        assert_ne!(word(id, 83) & (1 << 13), 0, "FLUSH CACHE EXT supported");
+        assert_eq!(word(id, 5), 512, "retired IDENTIFY bytes-per-sector");
+        assert_eq!(
+            word(id, 106) & 0xC00F,
+            0x4000,
+            "word 106 must be valid (bit14) with 512-byte phys=logical (exp=0), got {:#06x}",
+            word(id, 106)
+        );
+        assert_ne!(word(id, 106) & (1 << 13), 0, "word 106 reports a physical sector size");
     }
 }

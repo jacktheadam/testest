@@ -1,12 +1,12 @@
 //! Legacy AeroGPU PCI/MMIO device model ("ARGP").
 //!
 //! This module implements the **legacy bring-up ABI** described in
-//! `docs/abi/aerogpu-pci-identity.md` and defined in
+//! `wiki/areas/graphics.md` and defined in
 //! `drivers/aerogpu/protocol/legacy/aerogpu_protocol_legacy.h`.
 //!
 //! The legacy model uses a deprecated PCI identity (legacy vendor bytes 0x1A,0xED; device ID
 //! 0x0001).
-//! Keep the literal tokens confined to `docs/abi/aerogpu-pci-identity.md` and legacy driver trees.
+//! Keep the literal tokens confined to `wiki/areas/graphics.md` and legacy driver trees.
 
 use memory::MemoryBus;
 use std::time::Duration;

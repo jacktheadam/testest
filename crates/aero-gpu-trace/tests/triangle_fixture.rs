@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 const COMMAND_ABI_VERSION: u32 = 1;
 
-// Packet opcodes (see docs/abi/gpu-trace-format.md Appendix A).
+// Packet opcodes (see wiki/areas/graphics.md Appendix A).
 const OP_CREATE_BUFFER: u32 = 0x0001;
 const OP_UPLOAD_BUFFER: u32 = 0x0002;
 const OP_CREATE_SHADER: u32 = 0x0003;

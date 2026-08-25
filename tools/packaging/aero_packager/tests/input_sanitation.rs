@@ -81,7 +81,10 @@ fn additional_secret_key_extensions_are_rejected() -> anyhow::Result<()> {
     let testdata = repo_root.join("testdata");
 
     let guest_tools_tmp = tempfile::tempdir()?;
-    copy_dir_all(&testdata.join("guest-tools-no-certs"), guest_tools_tmp.path())?;
+    copy_dir_all(
+        &testdata.join("guest-tools-no-certs"),
+        guest_tools_tmp.path(),
+    )?;
     fs::write(
         guest_tools_tmp.path().join("config/secret.p12"),
         b"dummy secret key material\n",
@@ -119,7 +122,10 @@ fn guest_tools_tools_must_be_directory_if_present() -> anyhow::Result<()> {
     let drivers_dir = testdata.join("drivers");
 
     let guest_tools_tmp = tempfile::tempdir()?;
-    copy_dir_all(&testdata.join("guest-tools-no-certs"), guest_tools_tmp.path())?;
+    copy_dir_all(
+        &testdata.join("guest-tools-no-certs"),
+        guest_tools_tmp.path(),
+    )?;
 
     // `guest-tools/tools/` is optional. However, if present, it must be a real directory (not a
     // file/symlink) so we have deterministic, safe packaging semantics.
@@ -233,7 +239,10 @@ fn case_insensitive_path_collisions_are_rejected() -> anyhow::Result<()> {
     let testdata = repo_root.join("testdata");
 
     let guest_tools_tmp = tempfile::tempdir()?;
-    copy_dir_all(&testdata.join("guest-tools-no-certs"), guest_tools_tmp.path())?;
+    copy_dir_all(
+        &testdata.join("guest-tools-no-certs"),
+        guest_tools_tmp.path(),
+    )?;
 
     let config_dir = guest_tools_tmp.path().join("config");
     fs::write(config_dir.join("Case.txt"), b"a")?;
@@ -283,7 +292,10 @@ fn non_utf8_paths_are_rejected() -> anyhow::Result<()> {
     let testdata = repo_root.join("testdata");
 
     let guest_tools_tmp = tempfile::tempdir()?;
-    copy_dir_all(&testdata.join("guest-tools-no-certs"), guest_tools_tmp.path())?;
+    copy_dir_all(
+        &testdata.join("guest-tools-no-certs"),
+        guest_tools_tmp.path(),
+    )?;
 
     let bad_name = OsString::from_vec(vec![0x66, 0x6f, 0x80, 0x2e, 0x74, 0x78, 0x74]); // fo\x80.txt
     let bad_path = guest_tools_tmp.path().join("config").join(bad_name);
@@ -332,6 +344,6 @@ fn device_contract_path() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }

@@ -91,7 +91,7 @@ fn snapshot_restore_preserves_pci_intx_refcounts_across_multiple_sources() {
     // Choose two distinct sources that intentionally swizzle onto the same PIRQ/GSI so the INTx
     // router's assert refcount logic is exercised across snapshot restore.
     //
-    // PIRQ index = (pin.index + device) mod 4; default PIRQ->GSI mapping is 10-13.
+    // PIRQ index = (pin.index + device) mod 4; the default Q35 GSI mapping is 20-23.
     let src1_bdf = PciBdf::new(0, 0, 0);
     let src1_pin = PciInterruptPin::IntA; // index 0
     let src2_bdf = PciBdf::new(0, 1, 0);
@@ -206,11 +206,8 @@ fn snapshot_restore_redrives_pci_intx_into_legacy_pic_after_ack() {
             pci_intx.gsi_for_intx(src2_bdf, src2_pin),
             "sanity: chosen sources should map to the same GSI"
         );
-        assert!(
-            gsi < 16,
-            "expected PCI INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-        );
-        let irq = u8::try_from(gsi).unwrap();
+        let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+            .expect("Q35 PCI GSI should have a compatibility PIC route");
         let vector = if irq < 8 {
             0x20 + irq
         } else {

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("Boot device debug API is installed on window.aero.debug", async ({ page }) => {
   test.setTimeout(20_000);
-  await page.goto("/", { waitUntil: "load" });
+  await page.goto("/apps/web/", { waitUntil: "load" });
 
   await page.waitForFunction(() => {
     const dbg = (window as any).aero?.debug;
@@ -14,22 +14,26 @@ test("Boot device debug API is installed on window.aero.debug", async ({ page })
   });
 
   // No VM started yet, so boot disks, active boot device, and boot config should all be null.
+  //
+  // These call the accessors directly. A `?? "missing"` fallback here would replace exactly the
+  // `null` being asserted, so the checks could never pass; the `waitForFunction` above has already
+  // established that the functions exist.
   await expect(
     page.evaluate(() => {
       const dbg = (window as any).aero?.debug;
-      return dbg?.getBootDisks?.() ?? "missing";
+      return dbg.getBootDisks();
     }),
   ).resolves.toBe(null);
   await expect(
     page.evaluate(() => {
       const dbg = (window as any).aero?.debug;
-      return dbg?.getMachineCpuActiveBootDevice?.() ?? "missing";
+      return dbg.getMachineCpuActiveBootDevice();
     }),
   ).resolves.toBe(null);
   await expect(
     page.evaluate(() => {
       const dbg = (window as any).aero?.debug;
-      return dbg?.getMachineCpuBootConfig?.() ?? "missing";
+      return dbg.getMachineCpuBootConfig();
     }),
   ).resolves.toBe(null);
 

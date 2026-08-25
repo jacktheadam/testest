@@ -79,7 +79,7 @@ browser DataChannel "l2"  <->  webrtc-udp-relay  <->  backend WebSocket /l2 (leg
   single DataChannel message.
 - The relay negotiates WebSocket subprotocol **`aero-l2-tunnel-v1`**.
 - Message format and semantics are defined by `aero-l2-tunnel-v1` (see
-  `docs/l2-tunnel-protocol.md`).
+  `wiki/areas/networking.md`).
 - The Go implementation keeps protocol constants + codec helpers in
   `internal/l2tunnel/` (validated against `crates/conformance/test-vectors/aero-vectors-v1.json`).
 - The relay enforces a per-message size limit (`L2_MAX_MESSAGE_BYTES`, default

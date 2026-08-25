@@ -187,6 +187,48 @@ fn movd_and_movq_roundtrip() {
 }
 
 #[test]
+fn punpckqdq_interleaves_low_and_high_qwords() {
+    let cfg = Tier0Config::default();
+    let mut state = new_sse_state(CpuMode::Bit64);
+    let mut bus = FlatTestBus::new(BUS_SIZE);
+
+    set_xmm(
+        &mut state,
+        0,
+        u128_from_u64x2([0x0011_2233_4455_6677, 0x8899_aabb_ccdd_eeff]),
+    );
+    set_xmm(
+        &mut state,
+        1,
+        u128_from_u64x2([0x1021_3243_5465_7687, 0x98a9_bacb_dced_fe0f]),
+    );
+    exec_once(&cfg, &mut state, &mut bus, &[0x66, 0x0F, 0x6C, 0xC1]).unwrap();
+    assert_eq!(
+        xmm(&state, 0),
+        u128_from_u64x2([0x0011_2233_4455_6677, 0x1021_3243_5465_7687])
+    );
+
+    // Exercise the memory-source encoding from the Win7 ESENT failure. Packed
+    // integer arithmetic permits an unaligned m128 source.
+    state.write_reg(Register::RCX, 3);
+    set_xmm(
+        &mut state,
+        7,
+        u128_from_u64x2([0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210]),
+    );
+    bus.write_u128(
+        3,
+        u128_from_u64x2([0x0f1e_2d3c_4b5a_6978, 0x8796_a5b4_c3d2_e1f0]),
+    )
+    .unwrap();
+    exec_once(&cfg, &mut state, &mut bus, &[0x66, 0x0F, 0x6D, 0x39]).unwrap();
+    assert_eq!(
+        xmm(&state, 7),
+        u128_from_u64x2([0xfedc_ba98_7654_3210, 0x8796_a5b4_c3d2_e1f0])
+    );
+}
+
+#[test]
 fn movhlps_movlhps_and_unpcklps_unpckhps() {
     let cfg = Tier0Config::default();
     let mut state = new_sse_state(CpuMode::Bit64);
@@ -453,6 +495,122 @@ fn fp_scalar_and_conversions_with_rounding_modes() {
     exec_once(&cfg, &mut state, &mut bus, &[0xF2, 0x0F, 0x2D, 0xC5]).unwrap(); // cvtsd2si eax,xmm5
     assert_eq!(state.read_reg(Register::EAX) as i32, i32::MIN);
     assert_ne!(state.sse.mxcsr & MXCSR_IE, 0);
+}
+
+/// Win7 `msvcrt!sqrt` is `sqrtsd xmm1, xmm0` (`F2 0F 51 C8`). Missing that
+/// opcode was `#UD` → `STATUS_ILLEGAL_INSTRUCTION` (`0xC000001D`) inside
+/// `unregmp2.exe /FirstLogon` (WerFault `-u -p 1256`).
+#[test]
+fn sqrtsd_msvcrt_sqrt_encodings_and_ieee() {
+    let cfg = Tier0Config::default();
+    let mut state = new_sse_state(CpuMode::Bit64);
+    let mut bus = FlatTestBus::new(BUS_SIZE);
+
+    let high = 0x1111_2222_3333_4444_u128 << 64;
+    set_xmm(&mut state, 0, 4.0f64.to_bits() as u128);
+    set_xmm(&mut state, 1, 1.0f64.to_bits() as u128 | high);
+    exec_once(&cfg, &mut state, &mut bus, &[0xF2, 0x0F, 0x51, 0xC8]).unwrap(); // sqrtsd xmm1,xmm0
+    assert_eq!(f64::from_bits(xmm(&state, 1) as u64), 2.0);
+    assert_eq!(xmm(&state, 1) >> 64, 0x1111_2222_3333_4444_u128);
+
+    // Memory source: sqrtsd xmm0, [rax]
+    set_xmm(&mut state, 0, high);
+    state.write_reg(Register::RAX, 0x80);
+    bus.write_u64(0x80, 9.0f64.to_bits()).unwrap();
+    exec_once(&cfg, &mut state, &mut bus, &[0xF2, 0x0F, 0x51, 0x00]).unwrap();
+    assert_eq!(f64::from_bits(xmm(&state, 0) as u64), 3.0);
+    assert_eq!(xmm(&state, 0) >> 64, 0x1111_2222_3333_4444_u128);
+
+    // -0 stays -0; negative finite sets IE (masked → no #XM) and a NaN.
+    clear_exception_flags(&mut state.sse.mxcsr);
+    set_xmm(&mut state, 2, (-0.0f64).to_bits() as u128);
+    exec_once(&cfg, &mut state, &mut bus, &[0xF2, 0x0F, 0x51, 0xD2]).unwrap(); // sqrtsd xmm2,xmm2
+    assert_eq!(
+        f64::from_bits(xmm(&state, 2) as u64).to_bits(),
+        (-0.0f64).to_bits()
+    );
+    assert_eq!(state.sse.mxcsr & MXCSR_IE, 0);
+
+    clear_exception_flags(&mut state.sse.mxcsr);
+    set_xmm(&mut state, 3, (-4.0f64).to_bits() as u128);
+    exec_once(&cfg, &mut state, &mut bus, &[0xF2, 0x0F, 0x51, 0xDB]).unwrap(); // sqrtsd xmm3,xmm3
+    assert!(f64::from_bits(xmm(&state, 3) as u64).is_nan());
+    assert_ne!(state.sse.mxcsr & MXCSR_IE, 0);
+
+    // SQRTSS / SQRTPS / SQRTPD share the 0F 51 leaf.
+    set_xmm(
+        &mut state,
+        4,
+        (16.0f32.to_bits() as u128) | (0xaaaa_bbbb_cccc_dddd_u128 << 32),
+    );
+    exec_once(&cfg, &mut state, &mut bus, &[0xF3, 0x0F, 0x51, 0xE4]).unwrap(); // sqrtss xmm4,xmm4
+    assert_eq!(f32::from_bits(xmm(&state, 4) as u32), 4.0);
+    assert_eq!(xmm(&state, 4) >> 32, 0xaaaa_bbbb_cccc_dddd_u128);
+
+    set_xmm(
+        &mut state,
+        5,
+        u128_from_u32x4([
+            4.0f32.to_bits(),
+            9.0f32.to_bits(),
+            16.0f32.to_bits(),
+            25.0f32.to_bits(),
+        ]),
+    );
+    exec_once(&cfg, &mut state, &mut bus, &[0x0F, 0x51, 0xED]).unwrap(); // sqrtps xmm5,xmm5
+    assert_eq!(
+        xmm(&state, 5),
+        u128_from_u32x4([
+            2.0f32.to_bits(),
+            3.0f32.to_bits(),
+            4.0f32.to_bits(),
+            5.0f32.to_bits(),
+        ])
+    );
+
+    set_xmm(
+        &mut state,
+        6,
+        u128_from_u64x2([4.0f64.to_bits(), 9.0f64.to_bits()]),
+    );
+    exec_once(&cfg, &mut state, &mut bus, &[0x66, 0x0F, 0x51, 0xF6]).unwrap(); // sqrtpd xmm6,xmm6
+    assert_eq!(
+        xmm(&state, 6),
+        u128_from_u64x2([2.0f64.to_bits(), 3.0f64.to_bits()])
+    );
+}
+
+/// Win7 `msvcrt` pow after `fyl2x`: `movlpd xmm3, [rsp+0xf8]` (`66 0F 12`).
+#[test]
+fn movlpd_preserves_high_half_from_memory() {
+    let cfg = Tier0Config::default();
+    let mut state = new_sse_state(CpuMode::Bit64);
+    let mut bus = FlatTestBus::new(BUS_SIZE);
+
+    let high = 0x1111_2222_3333_4444u64;
+    set_xmm(
+        &mut state,
+        3,
+        u128_from_u64x2([0xaaaa_bbbb_cccc_dddd, high]),
+    );
+    state.write_reg(Register::RAX, 0x80);
+    bus.write_u64(0x80, 0x5555_6666_7777_8888).unwrap();
+    exec_once(&cfg, &mut state, &mut bus, &[0x66, 0x0F, 0x12, 0x18]).unwrap(); // movlpd xmm3,[rax]
+    assert_eq!(
+        xmm(&state, 3),
+        u128_from_u64x2([0x5555_6666_7777_8888, high])
+    );
+
+    state.write_reg(Register::RBX, 0x90);
+    exec_once(&cfg, &mut state, &mut bus, &[0x66, 0x0F, 0x13, 0x1B]).unwrap(); // movlpd [rbx],xmm3
+    assert_eq!(bus.read_u64(0x90).unwrap(), 0x5555_6666_7777_8888);
+
+    set_xmm(&mut state, 1, u128_from_u64x2([0xfeed_face, 0]));
+    exec_once(&cfg, &mut state, &mut bus, &[0x66, 0x0F, 0x16, 0x08]).unwrap(); // movhpd xmm1,[rax]
+    assert_eq!(
+        xmm(&state, 1),
+        u128_from_u64x2([0xfeed_face, 0x5555_6666_7777_8888])
+    );
 }
 
 #[test]

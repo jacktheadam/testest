@@ -162,7 +162,7 @@ The BIOS uses the following **drive numbers** in `DL`:
 > it via **INT 13h AH=4Bh** ("El Torito disk emulation services"), which some CD boot images use.
 >
 > For the detailed El Torito + INT 13h Extensions behavior expected by Windows install media, see
-> [`docs/09b-eltorito-cd-boot.md`](../../docs/09b-eltorito-cd-boot.md).
+> [`wiki/areas/platform-firmware.md`](wiki/areas/platform-firmware.md).
 
 #### Firmware lifecycle wiring
 
@@ -226,8 +226,8 @@ CD drive numbers (`DL=0xE0..`).
   2048-byte sector translation.
 
 For the canonical Windows 7 topology (AHCI HDD + IDE/ATAPI CD-ROM) and the CD-first boot/install
-flow, see [`docs/05-storage-topology-win7.md`](../../docs/05-storage-topology-win7.md).
-For more BIOS/INT 13h background, see [`docs/09-bios-firmware.md`](../../docs/09-bios-firmware.md).
+flow, see [`wiki/areas/storage.md`](wiki/areas/storage.md).
+For more BIOS/INT 13h background, see [`wiki/areas/platform-firmware.md`](wiki/areas/platform-firmware.md).
 
 In the canonical full-system VM stack, [`aero_machine::Machine`](../aero-machine/src/lib.rs)
 handles this automatically by dispatching BIOS interrupts when Tier-0 reports a `BiosInterrupt`
@@ -235,7 +235,7 @@ exit.
 
 For the canonical machine wiring / integration reference, see `crates/aero-machine`
 ([`aero_machine::Machine`](../aero-machine/src/lib.rs); see
-[ADR 0014](../../docs/adr/0014-canonical-machine-stack.md)).
+[Canonical machine stack](wiki/decisions/0014-canonical-machine-stack.md)).
 
 `crates/legacy/vm` (formerly `crates/vm`) remains as a deprecated, reference-only VM stack and is
 **not built by default** (it is excluded from the workspace).

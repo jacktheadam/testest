@@ -52,7 +52,8 @@ impl GsiLevelSink for PlatformInterrupts {
 /// A helper sink that fans out GSI level changes to both an IOAPIC and the legacy PIC.
 ///
 /// This is useful for supporting both APIC and legacy PIC mode during early bring-up.
-/// If the routed GSI is not in the ISA range (0-15), mirroring to the PIC is skipped.
+/// Q35 PCI GSIs 20-23 use their compatibility PIC routes 10-13. Other GSIs outside the ISA
+/// range are not mirrored.
 pub struct IoApicPicMirrorSink<'a> {
     ioapic: &'a mut dyn GsiLevelSink,
     pic: &'a mut dyn PicIrqLevelSink,
@@ -67,10 +68,12 @@ impl<'a> IoApicPicMirrorSink<'a> {
 impl GsiLevelSink for IoApicPicMirrorSink<'_> {
     fn set_gsi_level(&mut self, gsi: u32, level: bool) {
         self.ioapic.set_gsi_level(gsi, level);
-        if let Ok(irq) = u8::try_from(gsi) {
-            if irq < 16 {
-                self.pic.set_irq_level(irq, level);
-            }
+        let pic_irq = u8::try_from(gsi)
+            .ok()
+            .filter(|irq| *irq < 16)
+            .or_else(|| pci_routing::q35_legacy_pic_irq_for_gsi(gsi));
+        if let Some(irq) = pic_irq {
+            self.pic.set_irq_level(irq, level);
         }
     }
 }
@@ -83,7 +86,7 @@ pub struct PciIntxRouterConfig {
 
 impl Default for PciIntxRouterConfig {
     fn default() -> Self {
-        // Match a typical PC-compatible setup where PCI INTx ends up on IRQ/GSI 10-13.
+        // Match the dedicated Q35/ICH9 APIC routing window used by Aero's root-bus devices.
         Self {
             pirq_to_gsi: pci_routing::DEFAULT_PIRQ_TO_GSI,
         }
@@ -126,6 +129,11 @@ impl PciIntxRouter {
     /// Returns the routed GSI for a device/pin pair.
     pub fn gsi_for_intx(&self, bdf: PciBdf, pin: PciInterruptPin) -> u32 {
         pci_routing::gsi_for_intx(self.cfg.pirq_to_gsi, bdf.device, pin.index() as u8)
+    }
+
+    /// Return the legacy PIC compatibility route for a PCI INTx source, when one exists.
+    pub fn legacy_pic_irq_for_intx(&self, bdf: PciBdf, pin: PciInterruptPin) -> Option<u8> {
+        pci_routing::q35_legacy_pic_irq_for_gsi(self.gsi_for_intx(bdf, pin))
     }
 
     /// Updates a device's config-space `Interrupt Line` and `Interrupt Pin` registers.
@@ -512,43 +520,43 @@ mod tests {
         // Device 0: no swizzle.
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 0, 0), PciInterruptPin::IntA),
-            10
+            20
         );
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 0, 0), PciInterruptPin::IntB),
-            11
+            21
         );
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 0, 0), PciInterruptPin::IntC),
-            12
+            22
         );
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 0, 0), PciInterruptPin::IntD),
-            13
+            23
         );
 
         // Device 1: swizzled by one.
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 1, 0), PciInterruptPin::IntA),
-            11
+            21
         );
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 1, 0), PciInterruptPin::IntB),
-            12
+            22
         );
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 1, 0), PciInterruptPin::IntC),
-            13
+            23
         );
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 1, 0), PciInterruptPin::IntD),
-            10
+            20
         );
 
         // Device 4 wraps back to the same PIRQ.
         assert_eq!(
             router.gsi_for_intx(PciBdf::new(0, 4, 0), PciInterruptPin::IntA),
-            10
+            20
         );
     }
 
@@ -564,13 +572,13 @@ mod tests {
         router.assert_intx(dev4, PciInterruptPin::IntA, &mut sink);
 
         // Only the first assertion should transition the line high.
-        assert_eq!(sink.events, vec![(10, true)]);
+        assert_eq!(sink.events, vec![(20, true)]);
 
         router.deassert_intx(dev0, PciInterruptPin::IntA, &mut sink);
-        assert_eq!(sink.events, vec![(10, true)]);
+        assert_eq!(sink.events, vec![(20, true)]);
 
         router.deassert_intx(dev4, PciInterruptPin::IntA, &mut sink);
-        assert_eq!(sink.events, vec![(10, true), (10, false)]);
+        assert_eq!(sink.events, vec![(20, true), (20, false)]);
     }
 
     #[test]
@@ -581,7 +589,11 @@ mod tests {
         router.configure_device_intx(PciBdf::new(0, 1, 0), Some(PciInterruptPin::IntA), &mut cfg);
 
         assert_eq!(cfg.interrupt_pin(), 1);
-        assert_eq!(cfg.interrupt_line(), 11);
+        assert_eq!(cfg.interrupt_line(), 21);
+        assert_eq!(
+            router.legacy_pic_irq_for_intx(PciBdf::new(0, 1, 0), PciInterruptPin::IntA),
+            Some(11)
+        );
     }
 
     #[test]

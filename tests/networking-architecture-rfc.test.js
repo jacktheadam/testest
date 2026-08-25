@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import { EventEmitter } from "node:events";
 
-import { unrefBestEffort } from "../src/unref_safe.js";
+import { unrefBestEffort } from "../packages/transport-safety/src/unref_safe.js";
 
-import { startProxyServer } from "../prototype/nt-arch-rfc/proxy-server.js";
-import { runNetworkingProbe } from "../prototype/nt-arch-rfc/client.js";
+import { startProxyServer } from "./helpers/proxy-server.js";
+import { runNetworkingProbe } from "./helpers/client.js";
 import WebSocket from "../tools/minimal_ws.js";
 import { wsSendSafe } from "../scripts/_shared/ws_safe.js";
 import {
@@ -19,8 +19,8 @@ import {
   parseEthernetFrame,
   parseIPv4,
   parseTCP,
-} from "../prototype/nt-arch-rfc/packets.js";
-import { L2_TUNNEL_SUBPROTOCOL, L2_TUNNEL_TYPE_FRAME, decodeL2Message, encodeL2Frame } from "../prototype/nt-arch-rfc/l2_tunnel_proto.js";
+} from "./helpers/packets.js";
+import { L2_TUNNEL_SUBPROTOCOL, L2_TUNNEL_TYPE_FRAME, decodeL2Message, encodeL2Frame } from "./helpers/l2_tunnel_proto.js";
 
 async function startTcpEchoServer() {
   const server = net.createServer((socket) => {

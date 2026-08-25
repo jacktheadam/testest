@@ -93,7 +93,9 @@ pub fn exec<B: CpuBus>(
                 _ => 0,
             };
 
-            if instr.has_lock_prefix() {
+            // Memory-dest RMW (even without LOCK) uses write-intent so #PF W/R=1.
+            let mem_rmw = instr.mnemonic() != Mnemonic::Cmp && instr.op_kind(0) == OpKind::Memory;
+            if instr.has_lock_prefix() || mem_rmw {
                 // LOCK is only valid for RMW operations with a memory destination operand.
                 if instr.mnemonic() == Mnemonic::Cmp || instr.op_kind(0) != OpKind::Memory {
                     return Err(Exception::InvalidOpcode);
@@ -139,7 +141,7 @@ pub fn exec<B: CpuBus>(
         Mnemonic::Inc | Mnemonic::Dec => {
             let bits = op_bits(state, instr, 0)?;
             let cf = state.get_flag(FLAG_CF);
-            if instr.has_lock_prefix() {
+            if instr.has_lock_prefix() || instr.op_kind(0) == OpKind::Memory {
                 if instr.op_kind(0) != OpKind::Memory {
                     return Err(Exception::InvalidOpcode);
                 }
@@ -176,7 +178,7 @@ pub fn exec<B: CpuBus>(
         }
         Mnemonic::Neg => {
             let bits = op_bits(state, instr, 0)?;
-            if instr.has_lock_prefix() {
+            if instr.has_lock_prefix() || instr.op_kind(0) == OpKind::Memory {
                 if instr.op_kind(0) != OpKind::Memory {
                     return Err(Exception::InvalidOpcode);
                 }
@@ -199,7 +201,12 @@ pub fn exec<B: CpuBus>(
             let bits = op_bits(state, instr, 0)?;
             let src = read_op_sized(state, bus, instr, 1, bits, next_ip)?;
 
-            if instr.has_lock_prefix() {
+            // Memory-destination RMW (even without LOCK) must use write-intent
+            // translation so #PF error_code.W/R=1 (Intel SDM). A plain read-then-
+            // write path reported W/R=0, which made Win7 Mm treat a kernel bitmap
+            // touch as a read fault and eventually bugcheck 0x50/0x1E.
+            let mem_rmw = instr.mnemonic() != Mnemonic::Test && instr.op_kind(0) == OpKind::Memory;
+            if instr.has_lock_prefix() || mem_rmw {
                 if instr.mnemonic() == Mnemonic::Test || instr.op_kind(0) != OpKind::Memory {
                     return Err(Exception::InvalidOpcode);
                 }
@@ -313,10 +320,19 @@ pub(crate) fn add_with_flags(
     let mask = mask_bits(bits);
     let a_m = a & mask;
     let b_m = b & mask;
-    let full = (a_m as u128) + (b_m as u128) + (carry_in as u128);
-    let res = (full as u64) & mask;
+    // For bits < 64, a_m/b_m/cin fit in u64 with room for the carry-out bit
+    // (max 32-bit sum is 0x1_FFFF_FFFE). CF is "sum exceeds the operand mask",
+    // NOT "u64 wrapped" (`sum < a_m`) — that only works for same-width wrap and
+    // left CF stuck at 0 for 8/16/32-bit ADD/ADC (broke bootmgr PE checksum →
+    // "BOOTMGR image is corrupt" on cold CD boot).
+    let (res, cf) = if bits < 64 {
+        let sum = a_m.wrapping_add(b_m).wrapping_add(carry_in);
+        (sum & mask, sum > mask)
+    } else {
+        let full = (a_m as u128) + (b_m as u128) + (carry_in as u128);
+        ((full as u64) & mask, full > mask as u128)
+    };
 
-    let cf = full > (mask as u128);
     let sign_mask = 1u64 << (bits - 1);
     let of = ((a_m ^ res) & (b_m ^ res) & sign_mask) != 0;
     let af = ((a_m ^ b_m ^ res) & 0x10) != 0;
@@ -345,12 +361,18 @@ pub(crate) fn sub_with_flags(
     let mask = mask_bits(bits);
     let a_m = a & mask;
     let b_m = b & mask;
-    let subtrahend = (b_m as u128) + (borrow_in as u128);
-    let minuend = a_m as u128;
-    let full = (minuend + (1u128 << bits)) - subtrahend;
-    let res = (full as u64) & mask;
+    // For bits < 64, u64 wrapping arithmetic suffices to detect borrow.
+    // For bits==64, use u128 to detect the borrow-out cleanly.
+    let (res, cf) = if bits < 64 {
+        let diff = a_m.wrapping_sub(b_m.wrapping_add(borrow_in));
+        (diff & mask, a_m < b_m.wrapping_add(borrow_in))
+    } else {
+        let subtrahend = (b_m as u128) + (borrow_in as u128);
+        let minuend = a_m as u128;
+        let full = (minuend + (1u128 << bits)) - subtrahend;
+        ((full as u64) & mask, minuend < subtrahend)
+    };
 
-    let cf = minuend < subtrahend;
     let sign_mask = 1u64 << (bits - 1);
     let of = ((a_m ^ b_m) & (a_m ^ res) & sign_mask) != 0;
     let af = ((a_m ^ b_m ^ res) & 0x10) != 0;
@@ -392,6 +414,7 @@ fn neg_with_flags(state: &CpuState, v: u64, bits: u32) -> (u64, u64) {
     (res, flags)
 }
 
+#[inline]
 fn logic_flags(state: &CpuState, res: u64, bits: u32) -> u64 {
     let mut flags = state.rflags() & !(FLAG_CF | FLAG_OF | FLAG_SF | FLAG_ZF | FLAG_PF | FLAG_AF);
     set_logic_szp(&mut flags, res, bits);
@@ -399,6 +422,7 @@ fn logic_flags(state: &CpuState, res: u64, bits: u32) -> u64 {
     flags
 }
 
+#[inline]
 fn set_logic_szp(flags: &mut u64, res: u64, bits: u32) {
     let r = res & mask_bits(bits);
     if r == 0 {
@@ -412,6 +436,7 @@ fn set_logic_szp(flags: &mut u64, res: u64, bits: u32) {
     }
 }
 
+#[inline]
 fn parity8(v: u8) -> bool {
     v.count_ones().is_multiple_of(2)
 }
@@ -1164,6 +1189,39 @@ fn exec_cdx(state: &mut CpuState, m: Mnemonic) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn add_adc_width_overflow_sets_cf_for_8_16_32_bit() {
+        // Regression: a u64-wrap CF check (`sum < a`) never fired for operands
+        // narrower than 64 bits, so ADD/ADC left CF=0 on 8/16/32-bit overflow.
+        // Bootmgr's PE checksum (ADC chain) then failed → "BOOTMGR image is corrupt".
+        let state = CpuState::new(crate::state::CpuMode::Real);
+
+        // 32-bit ADD: 0x8000_0000 + 0x8000_0000 → 0, CF=1
+        let (res, flags) = add_with_flags(&state, 0x8000_0000, 0x8000_0000, 0, 32);
+        assert_eq!(res, 0);
+        assert_ne!(flags & FLAG_CF, 0, "32-bit ADD overflow must set CF");
+
+        // 32-bit ADC with cin: 0xFFFF_FFFF + 0 + 1 → 0, CF=1
+        let (res, flags) = add_with_flags(&state, 0xFFFF_FFFF, 0, 1, 32);
+        assert_eq!(res, 0);
+        assert_ne!(flags & FLAG_CF, 0, "32-bit ADC cin overflow must set CF");
+
+        // 16-bit ADD: 0xFFFF + 1 → 0, CF=1
+        let (res, flags) = add_with_flags(&state, 0xFFFF, 1, 0, 16);
+        assert_eq!(res, 0);
+        assert_ne!(flags & FLAG_CF, 0, "16-bit ADD overflow must set CF");
+
+        // 8-bit ADD: 0x80 + 0x80 → 0, CF=1
+        let (res, flags) = add_with_flags(&state, 0x80, 0x80, 0, 8);
+        assert_eq!(res, 0);
+        assert_ne!(flags & FLAG_CF, 0, "8-bit ADD overflow must set CF");
+
+        // No overflow: CF clear
+        let (res, flags) = add_with_flags(&state, 0x10, 0x20, 0, 32);
+        assert_eq!(res, 0x30);
+        assert_eq!(flags & FLAG_CF, 0, "non-overflow ADD must clear CF");
+    }
 
     #[test]
     fn shl_count_exceeding_operand_width_does_not_panic() {

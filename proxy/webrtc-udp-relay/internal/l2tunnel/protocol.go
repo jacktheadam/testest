@@ -7,7 +7,7 @@ import (
 )
 
 // Keep these constants in sync with:
-// - docs/l2-tunnel-protocol.md
+// - wiki/areas/networking.md
 // - crates/aero-l2-protocol/src/lib.rs
 // - web/src/shared/l2TunnelProtocol.ts
 
@@ -34,7 +34,7 @@ const (
 
 	headerLen = 4
 
-	// Recommended default payload limits (see docs/l2-tunnel-protocol.md).
+	// Recommended default payload limits (see wiki/areas/networking.md).
 	defaultMaxFramePayload   = 2048
 	defaultMaxControlPayload = 256
 
@@ -42,7 +42,7 @@ const (
 	//   code(u16 BE) | msg_len(u16 BE)
 	errorStructuredHeaderLen = 4
 
-	// Structured ERROR payload codes (see docs/l2-tunnel-protocol.md).
+	// Structured ERROR payload codes (see wiki/areas/networking.md).
 	errorCodeProtocolError    = 1
 	errorCodeAuthRequired     = 2
 	errorCodeAuthInvalid      = 3
@@ -108,7 +108,7 @@ func (e *decodeError) Error() string {
 }
 
 // EncodeMessage encodes an L2 tunnel message (header + payload) using the
-// protocol's default payload limits (see docs/l2-tunnel-protocol.md).
+// protocol's default payload limits (see wiki/areas/networking.md).
 func EncodeMessage(msgType byte, flags byte, payload []byte) ([]byte, error) {
 	return encodeWithLimits(msgType, flags, payload, defaultLimits)
 }
@@ -170,7 +170,7 @@ func decodeWithLimits(buf []byte, limits limits) (message, error) {
 }
 
 // DecodeMessage decodes an L2 tunnel message using the protocol's default
-// payload limits (see docs/l2-tunnel-protocol.md).
+// payload limits (see wiki/areas/networking.md).
 func DecodeMessage(buf []byte) (message, error) {
 	return decodeWithLimits(buf, defaultLimits)
 }

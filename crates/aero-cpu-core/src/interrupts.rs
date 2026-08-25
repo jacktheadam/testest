@@ -496,6 +496,48 @@ mod tests {
         assert_eq!(file, expected_file);
         assert_eq!(line, expected_line);
     }
+
+    /// RC#26 residual: mismatched (non-Long64) bookkeeping while in long mode
+    /// must still perform architectural IRETQ (pop SS:RSP), not #GP(0).
+    /// Win7 KiExceptionExit hits this after soft-fault #PF bookkeeping is consumed.
+    #[test]
+    fn iretq_long_mode_mismatched_bookkeeping_still_pops_ss_rsp() {
+        use super::InterruptFrame;
+        use crate::mem::CpuBus;
+        use crate::state::{gpr, RFLAGS_IF, SEG_ACCESS_PRESENT};
+
+        let mut mem = FlatTestBus::new(0x40000);
+        let mut cpu = CpuCore::new(CpuMode::Long);
+        cpu.state.segments.cs.selector = 0x08;
+        cpu.state.segments.ss.selector = 0x10;
+        cpu.state.segments.ss.access = SEG_ACCESS_PRESENT | 0x2;
+        cpu.state.set_rip(0x5000);
+        cpu.state.set_rflags(0x2);
+
+        // Stale protected-mode bookkeeping left after soft-fault path.
+        cpu.pending
+            .push_interrupt_frame(InterruptFrame::Protected32 {
+                stack_switched: false,
+            })
+            .expect("bookkeeping push");
+
+        let rsp = 0x8000u64;
+        mem.write_u64(rsp, 0x4000_00BB).unwrap();
+        mem.write_u64(rsp + 8, 0x08).unwrap();
+        mem.write_u64(rsp + 16, 0x202).unwrap();
+        mem.write_u64(rsp + 24, 0x9100).unwrap();
+        mem.write_u64(rsp + 32, 0x10).unwrap();
+        cpu.state.write_gpr64(gpr::RSP, rsp);
+
+        cpu.iret(&mut mem)
+            .expect("IRETQ with mismatched bookkeeping");
+
+        assert_eq!(cpu.state.rip(), 0x4000_00BB);
+        assert_eq!(cpu.state.segments.cs.selector, 0x08);
+        assert_eq!(cpu.state.segments.ss.selector, 0x10);
+        assert_eq!(cpu.state.read_gpr64(gpr::RSP), 0x9100);
+        assert_ne!(cpu.state.rflags() & RFLAGS_IF, 0);
+    }
 }
 
 /// Convenience wrapper that owns both the JIT ABI state and the non-ABI
@@ -602,7 +644,17 @@ pub fn exec_interrupt_assist_decoded<B: CpuBus>(
                 cpu.deliver_pending_event(bus)?;
                 return Ok(InterruptAssistOutcome::FaultDelivered);
             }
-            cpu.state.set_flag(RFLAGS_IF, false);
+            // Bring-up: AERO_FORCE_IF keeps IF sticky so HAL clock-sync waits can
+            // still take RTC/PIC IRQs after a guest CLI (otherwise 0x5C/0x10B).
+            let force_if = std::env::var_os("AERO_FORCE_IF").is_some_and(|v| {
+                matches!(
+                    v.to_str().unwrap_or(""),
+                    "1" | "true" | "on" | "yes" | "TRUE" | "ON" | "YES"
+                )
+            });
+            if !force_if {
+                cpu.state.set_flag(RFLAGS_IF, false);
+            }
             cpu.state.set_rip(next_ip);
             Ok(InterruptAssistOutcome::Retired {
                 block_boundary: false,
@@ -758,30 +810,63 @@ pub fn iret<B: CpuBus>(
 ) -> Result<(), CpuExit> {
     bus.sync(state);
     let saved_rip = state.rip();
-    let Some(frame) = pending.interrupt_frames.last().copied() else {
-        // No pending frame; on real hardware this would be #GP(0).
-        return deliver_exception(
-            bus,
-            state,
-            pending,
-            Exception::GeneralProtection,
-            saved_rip,
-            Some(0),
-        );
-    };
+    let frame = pending.interrupt_frames.last().copied();
 
-    let outcome = match frame {
-        InterruptFrame::Real16 => iret_real(state, bus, pending, saved_rip)?,
-        InterruptFrame::Protected32 { stack_switched } => {
-            iret_protected(state, bus, pending, saved_rip, stack_switched)?
+    // Real hardware does not track "interrupt frames" — IRET always pops from the
+    // stack according to the current mode. Our `interrupt_frames` bookkeeping is only
+    // a hint for 32-bit protected-mode stack layout (whether SS:ESP was pushed).
+    //
+    // Win7 `KiExceptionExit` builds a full IA-32e return frame in software and
+    // executes `IRETQ` with *no* matching hardware delivery in this model (e.g. after
+    // a soft-fault path that already consumed the #PF bookkeeping frame, or a pure
+    // software context restore). Requiring a bookkeeping entry there #GP(0)'d and
+    // became KeBugCheckEx(0x1E) with Arg2 = the IRETQ itself and Arg4 = -1.
+    let (outcome, pop_bookkeeping) = match (state.mode, frame) {
+        (state::CpuMode::Long, Some(InterruptFrame::Long64 { stack_switched })) => (
+            iret_long(state, bus, pending, saved_rip, stack_switched)?,
+            true,
+        ),
+        (state::CpuMode::Long, _) => {
+            // IA-32e IRET always pops SS:RSP (SDM §6.14.2); ignore mismatched/empty bookkeeping.
+            (
+                iret_long(state, bus, pending, saved_rip, true)?,
+                frame.is_some(),
+            )
         }
-        InterruptFrame::Long64 { stack_switched } => {
-            iret_long(state, bus, pending, saved_rip, stack_switched)?
+        (_, Some(InterruptFrame::Real16)) => (iret_real(state, bus, pending, saved_rip)?, true),
+        (_, Some(InterruptFrame::Protected32 { stack_switched })) => (
+            iret_protected(state, bus, pending, saved_rip, stack_switched)?,
+            true,
+        ),
+        (_, Some(InterruptFrame::Long64 { .. })) => {
+            // Bookkeeping says long frame but CPU is not in long mode — treat as empty.
+            return deliver_exception(
+                bus,
+                state,
+                pending,
+                Exception::GeneralProtection,
+                saved_rip,
+                Some(0),
+            );
+        }
+        (_, None) => {
+            // Legacy modes still need the layout hint; without it we cannot know
+            // whether SS:ESP is on the stack.
+            return deliver_exception(
+                bus,
+                state,
+                pending,
+                Exception::GeneralProtection,
+                saved_rip,
+                Some(0),
+            );
         }
     };
 
     if outcome == IretOutcome::Completed {
-        pending.interrupt_frames.pop();
+        if pop_bookkeeping {
+            pending.interrupt_frames.pop();
+        }
         bus.sync(state);
     }
 
@@ -934,9 +1019,16 @@ fn deliver_real_mode<B: CpuBus>(
     let new_flags = (state.rflags() & !(RFLAGS_IF | RFLAGS_TF)) | RFLAGS_RESERVED1;
     state.set_rflags(new_flags);
 
-    // BIOS firmware installs IVT entries that point into ROM "stubs" that begin with
-    // `HLT; IRET` (F4 CF). This is used as a hypercall boundary: Tier-0 surfaces
-    // `HLT` as `BiosInterrupt(vector)` only when `pending_bios_int_valid` is set.
+    // BIOS firmware installs IVT entries that point into ROM stubs containing a
+    // host-HLE `HLT; IRET` hypercall boundary. Most begin directly with F4 CF.
+    // INT 10h is hybrid: it first routes AH=4Fh to a self-contained VBE ROM
+    // implementation and routes all other video services to `HLT; IRET` at +8:
+    //
+    //   cmp ah,4fh; jne +3; jmp rel16; hlt; iret
+    //
+    // Tier-0 surfaces the HLT as `BiosInterrupt(vector)` only when
+    // `pending_bios_int_valid` is set. The marker is cleared by IRET if the
+    // executable VBE branch returns without taking the HLE boundary.
     //
     // Real/v8086 vector delivery can enter these stubs from both software `INT n`
     // and externally injected interrupts/exceptions. Without priming the marker
@@ -945,10 +1037,38 @@ fn deliver_real_mode<B: CpuBus>(
     //
     // Best-effort: if the handler bytes cannot be read, skip stub detection.
     let handler_linear = ((segment as u64) << 4).wrapping_add(offset);
-    if let (Ok(0xF4), Ok(0xCF)) = (
-        bus.read_u8(state.apply_a20(handler_linear)),
-        bus.read_u8(state.apply_a20(handler_linear.wrapping_add(1))),
-    ) {
+    let mut read_handler_byte = |delta: u64| {
+        bus.read_u8(state.apply_a20(handler_linear.wrapping_add(delta)))
+            .ok()
+    };
+    let direct_hle = matches!(
+        (read_handler_byte(0), read_handler_byte(1)),
+        (Some(0xF4), Some(0xCF))
+    );
+    let hybrid_int10 = vector == 0x10
+        && matches!(
+            (
+                read_handler_byte(0),
+                read_handler_byte(1),
+                read_handler_byte(2),
+                read_handler_byte(3),
+                read_handler_byte(4),
+                read_handler_byte(5),
+                read_handler_byte(8),
+                read_handler_byte(9),
+            ),
+            (
+                Some(0x80),
+                Some(0xFC),
+                Some(0x4F),
+                Some(0x75),
+                Some(0x03),
+                Some(0xE9),
+                Some(0xF4),
+                Some(0xCF),
+            )
+        );
+    if direct_hle || hybrid_int10 {
         state.set_pending_bios_int(vector);
     }
 
@@ -1205,35 +1325,50 @@ fn deliver_long_mode<B: CpuBus>(
         state.write_gpr64(gpr::RSP, new_rsp);
     }
 
-    let stack_switched = used_ist || new_cpl < current_cpl;
-    if stack_switched {
-        if new_cpl < current_cpl {
-            // Switch to the handler's privilege level before touching the new stack
-            // so paging permission checks observe the updated CPL.
-            state.segments.cs.selector = gate.selector;
-            bus.sync(state);
-        }
+    // IA-32e: the processor forces 16-byte stack alignment *before* pushing the
+    // interrupt/exception frame (Intel SDM Vol. 3, "Interrupt Stack Frame").
+    // Without this, kernel trap handlers that `movaps` into the frame take #GP
+    // (seen at Win7 `KiDebugTrapOrFault` after `DbgBreakPointWithStatus`).
+    // IST and privilege-switched stacks are also aligned: firmware/OS stacks are
+    // 16-byte based, but masking is still required for IST values that may not be.
+    {
+        let rsp = state.read_gpr64(gpr::RSP) & !0xFu64;
+        state.write_gpr64(gpr::RSP, rsp);
+    }
 
-        if push64(bus, state, pending, old_ss as u64, delivery.saved_rip)?
-            == PushOutcome::NestedExceptionDelivered
-        {
-            return Ok(());
-        }
-        if push64(bus, state, pending, old_rsp, delivery.saved_rip)?
-            == PushOutcome::NestedExceptionDelivered
-        {
-            return Ok(());
-        }
-        if new_cpl < current_cpl {
-            // In IA-32e mode the CPU loads a NULL selector into SS on privilege transition.
-            state.segments.ss.selector = 0;
-            state.segments.ss.base = 0;
-            state.segments.ss.limit = 0xFFFF_FFFF;
-            state.segments.ss.access = 0;
-        }
+    // In 64-bit mode the interrupt stack frame *always* includes SS:RSP, even on
+    // same-privilege delivery without IST (Intel SDM Vol. 3 §6.14.2). Previously
+    // we only pushed SS:RSP on privilege/IST switches, so same-CPL #PF frames were
+    // 32 bytes instead of 48 — Win7 KiPageFault then read garbage for "old RSP/SS"
+    // and eventually KeBugCheckEx(0x50) with a corrupted address.
+    let _stack_switched = used_ist || new_cpl < current_cpl;
+    if new_cpl < current_cpl {
+        // Switch to the handler's privilege level before touching the new stack
+        // so paging permission checks observe the updated CPL.
+        state.segments.cs.selector = gate.selector;
+        bus.sync(state);
+    }
+
+    if push64(bus, state, pending, old_ss as u64, delivery.saved_rip)?
+        == PushOutcome::NestedExceptionDelivered
+    {
+        return Ok(());
+    }
+    if push64(bus, state, pending, old_rsp, delivery.saved_rip)?
+        == PushOutcome::NestedExceptionDelivered
+    {
+        return Ok(());
+    }
+    if new_cpl < current_cpl {
+        // In IA-32e mode the CPU loads a NULL selector into SS on privilege transition.
+        state.segments.ss.selector = 0;
+        state.segments.ss.base = 0;
+        state.segments.ss.limit = 0xFFFF_FFFF;
+        state.segments.ss.access = 0;
     }
 
     // Push return frame (RFLAGS, CS, RIP, error code).
+    // Layout at final RSP (low → high): error, RIP, CS, RFLAGS, old RSP, old SS.
     let rflags = state.rflags();
     if push64(bus, state, pending, rflags, delivery.saved_rip)?
         == PushOutcome::NestedExceptionDelivered
@@ -1271,7 +1406,11 @@ fn deliver_long_mode<B: CpuBus>(
     state.segments.cs.selector = gate.selector;
     state.set_ip(gate.offset);
 
-    pending.push_interrupt_frame(InterruptFrame::Long64 { stack_switched })
+    // Always true for long-mode frames now (SS:RSP always present); keep the
+    // flag for IRET so it always pops the full 5/6-qword frame.
+    pending.push_interrupt_frame(InterruptFrame::Long64 {
+        stack_switched: true,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1468,39 +1607,35 @@ fn iret_long<B: CpuBus>(
         return Ok(IretOutcome::ExceptionDelivered);
     }
 
-    let (new_rsp, new_ss) = if stack_switched || return_cpl > current_cpl {
-        let rsp = match pop64(bus, state) {
-            Ok(v) => v,
-            Err(e) => {
-                deliver_cpu_exception(bus, state, pending, e, saved_rip)?;
-                return Ok(IretOutcome::ExceptionDelivered);
-            }
-        };
-        let ss = match pop64(bus, state) {
-            Ok(v) => v as u16,
-            Err(e) => {
-                deliver_cpu_exception(bus, state, pending, e, saved_rip)?;
-                return Ok(IretOutcome::ExceptionDelivered);
-            }
-        };
-        (Some(rsp), Some(ss))
-    } else {
-        (None, None)
-    };
-
-    if let Some(rsp) = new_rsp {
-        if !is_canonical(rsp) {
-            // Non-canonical return RSP faults with #GP(0).
-            deliver_exception(
-                bus,
-                state,
-                pending,
-                Exception::GeneralProtection,
-                saved_rip,
-                Some(0),
-            )?;
+    // 64-bit IRET always pops SS:RSP (matches always-pushed long-mode frame).
+    // `stack_switched` is retained for older bookkeeping; treat as always on.
+    let _ = stack_switched;
+    let new_rsp = match pop64(bus, state) {
+        Ok(v) => v,
+        Err(e) => {
+            deliver_cpu_exception(bus, state, pending, e, saved_rip)?;
             return Ok(IretOutcome::ExceptionDelivered);
         }
+    };
+    let new_ss = match pop64(bus, state) {
+        Ok(v) => v as u16,
+        Err(e) => {
+            deliver_cpu_exception(bus, state, pending, e, saved_rip)?;
+            return Ok(IretOutcome::ExceptionDelivered);
+        }
+    };
+
+    if !is_canonical(new_rsp) {
+        // Non-canonical return RSP faults with #GP(0).
+        deliver_exception(
+            bus,
+            state,
+            pending,
+            Exception::GeneralProtection,
+            saved_rip,
+            Some(0),
+        )?;
+        return Ok(IretOutcome::ExceptionDelivered);
     }
 
     state.segments.cs.selector = new_cs;
@@ -1519,13 +1654,32 @@ fn iret_long<B: CpuBus>(
         write_mask &= !RFLAGS_IF;
     }
     write_mask &= !(RFLAGS_VM | RFLAGS_VIF | RFLAGS_VIP);
+    // Hardware loads only the architecturally defined RFLAGS bits from the
+    // stack frame. Guests often write CS/SS as 16-bit and RFLAGS as 32-bit into
+    // an 8-byte slot, leaving stale high bytes; merging those into RFLAGS made
+    // the register look like 0xfffff88000000202 after KiExceptionExit.
+    write_mask &= 0xFFFF_FFFF;
 
     let merged = (cur & !write_mask) | (new_rflags & write_mask) | RFLAGS_RESERVED1;
     state.set_rflags(merged);
 
-    if let (Some(rsp), Some(ss)) = (new_rsp, new_ss) {
-        state.write_gpr64(gpr::RSP, rsp);
-        state.segments.ss.selector = ss;
+    state.write_gpr64(gpr::RSP, new_rsp);
+    // Restore SS properly: null selector is valid in 64-bit mode and must be
+    // marked unusable (same as `load_seg`). A bare selector write left base/limit
+    // /access stale and could mis-handle the next stack op after IRETQ.
+    if new_ss == 0 && matches!(state.mode, state::CpuMode::Long) {
+        state.segments.ss.selector = 0;
+        state.segments.ss.base = 0;
+        state.segments.ss.limit = 0;
+        state.segments.ss.access = state::SEG_ACCESS_UNUSABLE;
+    } else if matches!(state.mode, state::CpuMode::Long) {
+        // Long-mode SS base is always 0; clear UNUSABLE if we previously returned
+        // with a null SS. Full GDT reload is not required for stack address formation.
+        state.segments.ss.selector = new_ss;
+        state.segments.ss.base = 0;
+        state.segments.ss.access &= !state::SEG_ACCESS_UNUSABLE;
+    } else {
+        state.segments.ss.selector = new_ss;
     }
 
     Ok(IretOutcome::Completed)
@@ -1613,11 +1767,15 @@ fn push16<B: CpuBus>(
     value: u16,
     saved_rip: u64,
 ) -> Result<PushOutcome, CpuExit> {
+    // Commit SP only after the store succeeds so a stack #PF leaves the
+    // instruction (or frame construction step) restartable.
     let sp = state.read_gpr16(gpr::RSP).wrapping_sub(2);
-    state.write_gpr16(gpr::RSP, sp);
     let addr = state.apply_a20(stack_base(state).wrapping_add(sp as u64));
     match write_u16_wrapped(state, bus, addr, value) {
-        Ok(()) => Ok(PushOutcome::Pushed),
+        Ok(()) => {
+            state.write_gpr16(gpr::RSP, sp);
+            Ok(PushOutcome::Pushed)
+        }
         Err(e) => deliver_cpu_exception(bus, state, pending, e, saved_rip)
             .map(|()| PushOutcome::NestedExceptionDelivered),
     }
@@ -1631,10 +1789,12 @@ fn push32<B: CpuBus>(
     saved_rip: u64,
 ) -> Result<PushOutcome, CpuExit> {
     let esp = state.read_gpr32(gpr::RSP).wrapping_sub(4);
-    state.write_gpr32(gpr::RSP, esp);
     let addr = state.apply_a20(stack_base(state).wrapping_add(esp as u64));
     match write_u32_wrapped(state, bus, addr, value) {
-        Ok(()) => Ok(PushOutcome::Pushed),
+        Ok(()) => {
+            state.write_gpr32(gpr::RSP, esp);
+            Ok(PushOutcome::Pushed)
+        }
         Err(e) => deliver_cpu_exception(bus, state, pending, e, saved_rip)
             .map(|()| PushOutcome::NestedExceptionDelivered),
     }
@@ -1648,10 +1808,12 @@ fn push64<B: CpuBus>(
     saved_rip: u64,
 ) -> Result<PushOutcome, CpuExit> {
     let rsp = state.read_gpr64(gpr::RSP).wrapping_sub(8);
-    state.write_gpr64(gpr::RSP, rsp);
     let addr = state.apply_a20(stack_base(state).wrapping_add(rsp));
     match write_u64_wrapped(state, bus, addr, value) {
-        Ok(()) => Ok(PushOutcome::Pushed),
+        Ok(()) => {
+            state.write_gpr64(gpr::RSP, rsp);
+            Ok(PushOutcome::Pushed)
+        }
         Err(e) => deliver_cpu_exception(bus, state, pending, e, saved_rip)
             .map(|()| PushOutcome::NestedExceptionDelivered),
     }

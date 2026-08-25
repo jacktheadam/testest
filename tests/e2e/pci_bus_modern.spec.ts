@@ -1,15 +1,15 @@
 import { expect, test } from "@playwright/test";
 
 test("PCI bus: multifunction + mmio64 BAR + capability list", async ({ page }) => {
-  await page.goto("/", { waitUntil: "load" });
+  await page.goto("/apps/web/", { waitUntil: "load" });
 
   const result = await page.evaluate(async () => {
     if (!globalThis.crossOriginIsolated || typeof SharedArrayBuffer === "undefined") {
       throw new Error("test requires crossOriginIsolated + SharedArrayBuffer");
     }
 
-    const { createIpcBuffer } = await import("/web/src/ipc/ipc.ts");
-    const { queueKind } = await import("/web/src/ipc/layout.ts");
+    const { createIpcBuffer } = await import("/apps/web/src/ipc/ipc.ts");
+    const { queueKind } = await import("/apps/web/src/ipc/layout.ts");
 
     const { buffer } = createIpcBuffer([
       { kind: queueKind.CMD, capacityBytes: 1 << 17 },
@@ -17,9 +17,9 @@ test("PCI bus: multifunction + mmio64 BAR + capability list", async ({ page }) =
     ]);
 
     const cpuWorkerCode = `
-      import { openRingByKind } from "${location.origin}/web/src/ipc/ipc.ts";
-      import { queueKind } from "${location.origin}/web/src/ipc/layout.ts";
-      import { AeroIpcIoClient } from "${location.origin}/web/src/io/ipc/aero_ipc_io.ts";
+      import { openRingByKind } from "${location.origin}/apps/web/src/ipc/ipc.ts";
+      import { queueKind } from "${location.origin}/apps/web/src/ipc/layout.ts";
+      import { AeroIpcIoClient } from "${location.origin}/apps/web/src/io/ipc/aero_ipc_io.ts";
 
       const PCI_ADDR = 0x0cf8;
       const PCI_DATA = 0x0cfc;
@@ -128,11 +128,11 @@ test("PCI bus: multifunction + mmio64 BAR + capability list", async ({ page }) =
     // WebKit can fail to load large module workers directly via `new Worker(httpUrl, { type: "module" })`
     // (it emits an `error` event without useful details). Wrap the module entrypoint in a tiny
     // blob-based module worker and import the real worker from there for cross-browser stability.
-    const ioWorkerEntrypoint = new URL("/web/src/workers/io_aipc.worker.ts", location.href).toString();
+    const ioWorkerEntrypoint = new URL("/apps/web/src/workers/io_aipc.worker.ts", location.href).toString();
     const ioWorkerWrapperUrl = URL.createObjectURL(
       new Blob(
         [
-          `\n            (async () => {\n              const MAX_ERROR_CHARS = 512;\n              const fallbackFormatErr = (err) => {\n                const msg = err instanceof Error ? err.message : err;\n                return String(msg ?? \"Error\")\n                  .replace(/[\\x00-\\x1F\\x7F]/g, \" \")\n                  .replace(/\\s+/g, \" \")\n                  .trim()\n                  .slice(0, MAX_ERROR_CHARS);\n              };\n\n              let formatErr = fallbackFormatErr;\n              try {\n                const mod = await import(\"/web/src/text.ts\");\n                const formatOneLineUtf8 = mod?.formatOneLineUtf8;\n                if (typeof formatOneLineUtf8 === \"function\") {\n                  formatErr = (err) => {\n                    const msg = err instanceof Error ? err.message : err;\n                    return formatOneLineUtf8(String(msg ?? \"\"), 512) || \"Error\";\n                  };\n                }\n              } catch {\n                // ignore: keep fallbackFormatErr\n              }\n\n              try {\n                await import(${JSON.stringify(ioWorkerEntrypoint)});\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_imported\" }), 0);\n              } catch (err) {\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_import_failed\", message: formatErr(err) }), 0);\n              }\n            })();\n          `,
+          `\n            (async () => {\n              const MAX_ERROR_CHARS = 512;\n              const fallbackFormatErr = (err) => {\n                const msg = err instanceof Error ? err.message : err;\n                return String(msg ?? \"Error\")\n                  .replace(/[\\x00-\\x1F\\x7F]/g, \" \")\n                  .replace(/\\s+/g, \" \")\n                  .trim()\n                  .slice(0, MAX_ERROR_CHARS);\n              };\n\n              let formatErr = fallbackFormatErr;\n              try {\n                const mod = await import(\"/packages/transport-safety/src/text.js\");\n                const formatOneLineUtf8 = mod?.formatOneLineUtf8;\n                if (typeof formatOneLineUtf8 === \"function\") {\n                  formatErr = (err) => {\n                    const msg = err instanceof Error ? err.message : err;\n                    return formatOneLineUtf8(String(msg ?? \"\"), 512) || \"Error\";\n                  };\n                }\n              } catch {\n                // ignore: keep fallbackFormatErr\n              }\n\n              try {\n                await import(${JSON.stringify(ioWorkerEntrypoint)});\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_imported\" }), 0);\n              } catch (err) {\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_import_failed\", message: formatErr(err) }), 0);\n              }\n            })();\n          `,
         ],
         { type: "text/javascript" },
       ),

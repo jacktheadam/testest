@@ -29,7 +29,7 @@ const DEFAULT_CACHE_CONTROL_LATEST: &str = "public, max-age=60, no-transform";
 const IDENTITY_CONTENT_ENCODING: &str = "identity";
 const DEFAULT_CHUNK_SIZE_BYTES: u64 = 4 * 1024 * 1024;
 // Defensive bounds to avoid producing manifests that the reference clients will reject. Keep
-// aligned with `docs/18-chunked-disk-image-format.md`.
+// aligned with `wiki/areas/storage.md`.
 const MAX_CHUNK_SIZE_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB
 const MAX_COMPAT_CHUNK_COUNT: u64 = 500_000;
 const DEFAULT_CONCURRENCY: usize = 8;

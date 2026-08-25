@@ -406,15 +406,20 @@ fn bios_vbe_sync_mode_and_lfb_base() {
             // VBE mode info block was written to 0x0000:0x0500 by INT 10h AX=4F01.
             let mode_info_addr = 0x0500u64;
             let attrs = m.read_physical_u16(mode_info_addr);
+            // VBE 3.0 ModeAttributes (see firmware::video::vbe).
             const MODE_ATTR_SUPPORTED: u16 = 1 << 0;
-            const MODE_ATTR_COLOR: u16 = 1 << 2;
-            const MODE_ATTR_GRAPHICS: u16 = 1 << 3;
-            const MODE_ATTR_WINDOWED: u16 = 1 << 5;
+            const MODE_ATTR_OPTIONAL_INFO: u16 = 1 << 1;
+            const MODE_ATTR_BIOS_OUTPUT: u16 = 1 << 2;
+            const MODE_ATTR_COLOR: u16 = 1 << 3;
+            const MODE_ATTR_GRAPHICS: u16 = 1 << 4;
+            const MODE_ATTR_NOT_VGA_COMPATIBLE: u16 = 1 << 5;
             const MODE_ATTR_LFB: u16 = 1 << 7;
             const REQUIRED_MODE_ATTRS: u16 = MODE_ATTR_SUPPORTED
+                | MODE_ATTR_OPTIONAL_INFO
+                | MODE_ATTR_BIOS_OUTPUT
                 | MODE_ATTR_COLOR
                 | MODE_ATTR_GRAPHICS
-                | MODE_ATTR_WINDOWED
+                | MODE_ATTR_NOT_VGA_COMPATIBLE
                 | MODE_ATTR_LFB;
             assert_eq!(attrs & REQUIRED_MODE_ATTRS, REQUIRED_MODE_ATTRS);
 

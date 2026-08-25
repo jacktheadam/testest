@@ -3,20 +3,20 @@
 //! This is a small shared library intended to keep proxy-side implementations
 //! consistent with the browser-side TypeScript codec in
 //! `web/src/shared/l2TunnelProtocol.ts` and the normative spec in
-//! `docs/l2-tunnel-protocol.md`.
+//! `wiki/areas/networking.md`.
 
 pub const L2_TUNNEL_MAGIC: u8 = 0xA2;
 pub const L2_TUNNEL_VERSION: u8 = 0x03;
 
 // Keep in sync with:
-// - docs/l2-tunnel-protocol.md
+// - wiki/areas/networking.md
 // - web/src/shared/l2TunnelProtocol.ts
 pub const L2_TUNNEL_SUBPROTOCOL: &str = "aero-l2-tunnel-v1";
 
-// WebRTC DataChannel label for the L2 tunnel (see docs/l2-tunnel-protocol.md).
+// WebRTC DataChannel label for the L2 tunnel (see wiki/areas/networking.md).
 pub const L2_TUNNEL_DATA_CHANNEL_LABEL: &str = "l2";
 
-// Optional auth token WebSocket subprotocol prefix (see docs/l2-tunnel-protocol.md).
+// Optional auth token WebSocket subprotocol prefix (see wiki/areas/networking.md).
 //
 // Clients MAY offer an additional `Sec-WebSocket-Protocol` value
 // `aero-l2-token.<token>` alongside `aero-l2-tunnel-v1`. The server still
@@ -35,7 +35,7 @@ pub const L2_TUNNEL_DEFAULT_MAX_FRAME_PAYLOAD: usize = 2048;
 pub const L2_TUNNEL_DEFAULT_MAX_CONTROL_PAYLOAD: usize = 256;
 pub const L2_TUNNEL_ERROR_STRUCTURED_HEADER_LEN: usize = 4;
 
-// Structured `ERROR` payload codes (see `docs/l2-tunnel-protocol.md`).
+// Structured `ERROR` payload codes (see `wiki/areas/networking.md`).
 pub const L2_TUNNEL_ERROR_CODE_PROTOCOL_ERROR: u16 = 1;
 pub const L2_TUNNEL_ERROR_CODE_AUTH_REQUIRED: u16 = 2;
 pub const L2_TUNNEL_ERROR_CODE_AUTH_INVALID: u16 = 3;
@@ -236,7 +236,7 @@ pub fn decode_message(buf: &[u8]) -> Result<L2Message<'_>, DecodeError> {
 /// ```
 ///
 /// This is used as the payload bytes for an `L2_TUNNEL_TYPE_ERROR` message (see
-/// `docs/l2-tunnel-protocol.md`).
+/// `wiki/areas/networking.md`).
 ///
 /// The returned payload is truncated as needed to fit within `max_payload_bytes`.
 pub fn encode_structured_error_payload(

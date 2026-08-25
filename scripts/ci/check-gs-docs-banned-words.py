@@ -2,10 +2,9 @@
 """
 CI guardrail: keep GS docs wording stable.
 
-Two docs are treated as canonical for geometry-shader (GS) emulation status:
+The canonical reference for geometry-shader (GS) emulation status is:
 
-- docs/graphics/geometry-shader-emulation.md
-- docs/graphics/status.md
+- wiki/areas/graphics.md
 
 Historically these docs have drifted during rebases/conflict resolutions and
 reintroduced a couple of ambiguous bring-up terms:
@@ -34,8 +33,7 @@ def repo_root() -> pathlib.Path:
 ROOT = repo_root()
 
 FILES = [
-    ROOT / "docs" / "graphics" / "geometry-shader-emulation.md",
-    ROOT / "docs" / "graphics" / "status.md",
+    ROOT / "wiki" / "areas" / "graphics.md",
 ]
 
 PATTERN = re.compile(r"accepted-but-ignored|placeholder", flags=re.IGNORECASE)

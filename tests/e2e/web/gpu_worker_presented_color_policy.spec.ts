@@ -7,7 +7,7 @@ async function waitForReady(page: Page) {
 }
 
 async function runBackend(page: Page, backend: string) {
-  await page.goto(`/web/gpu-worker-color-policy.html?backend=${encodeURIComponent(backend)}`, { waitUntil: "load" });
+  await page.goto(`/apps/web/gpu-worker-color-policy.html?backend=${encodeURIComponent(backend)}`, { waitUntil: "load" });
   await waitForReady(page);
 
   return await page.evaluate(async () => {

@@ -233,6 +233,66 @@ fn wasmtime_backend_executes_blocks_via_exec_dispatcher() {
 }
 
 #[test]
+fn wasmtime_ror_eax_8_is_32bit_rotate_not_i64_rotr() {
+    // i64.rotr of zero-extended 0x12345678 by 8 is 0x00123456. x86 ror eax,8
+    // is 0x78123456. cryptsp SHA-256 is the latter.
+    let mut b = IrBuilder::new(0x1000);
+    let eax = b.read_reg(GuestReg::Gpr {
+        reg: Gpr::Rax,
+        width: Width::W32,
+        high8: false,
+    });
+    let eight = b.const_int(Width::W32, 8);
+    let res = b.binop(BinOp::Ror, Width::W32, eax, eight, FlagSet::EMPTY);
+    b.write_reg(
+        GuestReg::Gpr {
+            reg: Gpr::Rax,
+            width: Width::W32,
+            high8: false,
+        },
+        res,
+    );
+    let wasm = compile_tier1_block(b, IrTerminator::ExitToInterpreter { next_rip: 0x2000 });
+    let mut backend: WasmtimeBackend<TestCpu> = WasmtimeBackend::new();
+    let idx = backend.add_compiled_block(&wasm);
+    let config = JitConfig {
+        enabled: true,
+        hot_threshold: 1,
+        cache_max_blocks: 4,
+        cache_max_bytes: 0,
+        code_version_max_pages: DEFAULT_CODE_VERSION_MAX_PAGES,
+    };
+    let jit = JitRuntime::new(config, backend, NullCompileSink);
+    let interpreter = TestInterpreter {
+        calls: Rc::new(Cell::new(0)),
+    };
+    let mut dispatcher = ExecDispatcher::new(interpreter, jit);
+    {
+        let jit = dispatcher.jit_mut();
+        jit.install_handle(CompiledBlockHandle {
+            entry_rip: 0x1000,
+            table_index: idx,
+            meta: jit.make_meta(0, 0),
+        });
+    }
+    let mut cpu = TestCpu::default();
+    cpu.state.rip = 0x1000;
+    cpu.state.gpr[Gpr::Rax.as_u8() as usize] = 0x1234_5678;
+    match dispatcher.step(&mut cpu) {
+        StepOutcome::Block {
+            tier: ExecutedTier::Jit,
+            ..
+        } => {}
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(
+        cpu.state.gpr[Gpr::Rax.as_u8() as usize],
+        0x7812_3456,
+        "WASM ror r32 must not be i64.rotr+trunc"
+    );
+}
+
+#[test]
 #[cfg(feature = "tier1-inline-tlb")]
 fn wasmtime_backend_executes_inline_tlb_load_store() {
     fn read_u32_le(backend: &WasmtimeBackend<CpuState>, addr: u64) -> u32 {

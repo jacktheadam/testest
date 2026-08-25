@@ -10577,7 +10577,7 @@ static HRESULT MapLocked11(Device* dev,
       return E_INVALIDARG;
   }
 
-  // Enforce the D3D11 Map/Usage rules (see docs/graphics/win7-d3d11-map-unmap.md).
+  // Enforce the D3D11 Map/Usage rules (see wiki/areas/graphics.md).
   switch (res->usage) {
     case kD3D11UsageDynamic:
       if (map_u32 != kD3D11MapWriteDiscard && map_u32 != kD3D11MapWriteNoOverwrite) {

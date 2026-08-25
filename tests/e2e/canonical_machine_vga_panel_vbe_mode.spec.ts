@@ -2,19 +2,19 @@ import { expect, test, type Page } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const SINGLE_WASM_BINARY_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-single/aero_wasm_bg.wasm", import.meta.url));
-const SINGLE_WASM_JS_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-single/aero_wasm.js", import.meta.url));
-const SINGLE_WASM_BINARY_DEV = fileURLToPath(new URL("../../web/src/wasm/pkg-single-dev/aero_wasm_bg.wasm", import.meta.url));
-const SINGLE_WASM_JS_DEV = fileURLToPath(new URL("../../web/src/wasm/pkg-single-dev/aero_wasm.js", import.meta.url));
+const SINGLE_WASM_BINARY_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-single/aero_wasm_bg.wasm", import.meta.url));
+const SINGLE_WASM_JS_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-single/aero_wasm.js", import.meta.url));
+const SINGLE_WASM_BINARY_DEV = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-single-dev/aero_wasm_bg.wasm", import.meta.url));
+const SINGLE_WASM_JS_DEV = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-single-dev/aero_wasm.js", import.meta.url));
 
 const THREADED_WASM_BINARY_RELEASE = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
 );
-const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
+const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
 const THREADED_WASM_BINARY_DEV = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
 );
-const THREADED_WASM_JS_DEV = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url));
+const THREADED_WASM_JS_DEV = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url));
 
 const HAS_WASM_BUNDLE =
   (existsSync(SINGLE_WASM_BINARY_RELEASE) && existsSync(SINGLE_WASM_JS_RELEASE)) ||
@@ -49,7 +49,10 @@ test("canonical Machine panel: VBE mode switch (1280x720x32) updates scanout dim
     test.skip(true, message);
   }
 
-  await page.goto("/web/index.html?machineVbe=1280x720", { waitUntil: "load" });
+  // Bochs VBE programming needs the legacy VGA device model, and the panel builds its
+  // machine with AeroGPU unless asked otherwise — without this it ignores the VBE request
+  // and stays in 720x400 text mode. The bringup page documents the same requirement.
+  await page.goto("/apps/web/bringup.html?machineVbe=1280x720&machineVga=1", { waitUntil: "load" });
   await waitForMachinePanelReady(page);
 
   const state = await page.evaluate(() => (window as any).__aeroMachinePanelTest);

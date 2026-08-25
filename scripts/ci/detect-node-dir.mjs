@@ -40,7 +40,7 @@ function fallbackFormatOneLineError(err, maxLen = 512) {
 // implementation when this script is copied into a synthetic checkout (tests do that).
 let formatOneLineError = fallbackFormatOneLineError;
 try {
-    const mod = await import(new URL("../../src/text.js", import.meta.url));
+    const mod = await import(new URL("../../packages/transport-safety/src/text.js", import.meta.url));
     if (typeof mod?.formatOneLineError === "function") {
         formatOneLineError = mod.formatOneLineError;
     }
@@ -221,7 +221,7 @@ if (overrideDir) {
     workspaceAbs = resolveWorkspace(searchRoot, overrideDir, "override");
     resolutionReason = "override";
 } else {
-    const candidates = [searchRoot, path.join(searchRoot, "frontend"), path.join(searchRoot, "web")];
+    const candidates = [searchRoot, path.join(searchRoot, "frontend"), path.join(searchRoot, "apps/web")];
     for (const candidate of candidates) {
         if (existsSync(path.join(candidate, "package.json"))) {
             workspaceAbs = candidate;

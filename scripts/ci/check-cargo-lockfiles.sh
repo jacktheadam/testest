@@ -5,7 +5,7 @@ set -euo pipefail
 # corresponding Cargo.toml manifests.
 #
 # Why this exists:
-# - Aero commits lockfiles for reproducible Rust builds (see ADR 0012).
+# - Aero commits lockfiles for reproducible Rust builds (see the Cargo.lock policy decision).
 # - `cargo metadata --locked` is the most reliable drift check (it fails if the
 #   lockfile would need to be updated), without the flakiness of
 #   `cargo generate-lockfile --locked` which re-resolves versions.
@@ -54,7 +54,13 @@ end_group() {
   fi
 }
 
-mapfile -t lockfiles < <(git ls-files | grep -E '(^|/)Cargo\.lock$' || true)
+# Purges in this repo are deliberately uncommitted, so `git ls-files` still lists
+# lockfiles whose crates are gone from disk. Filter to what actually exists —
+# the same thing `tests/repo_hygiene_contract.test.js` does, and for the same
+# reason. Without this the check fails on manifests that were removed on purpose.
+mapfile -t lockfiles < <(git ls-files | grep -E '(^|/)Cargo\.lock$' | while read -r f; do
+  [[ -f "$f" ]] && printf '%s\n' "$f"
+done || true)
 
 if [[ "${#lockfiles[@]}" -eq 0 ]]; then
   echo "error: no Cargo.lock files are tracked (Aero policy requires committed lockfiles)." >&2

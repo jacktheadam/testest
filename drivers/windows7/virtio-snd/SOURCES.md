@@ -31,7 +31,7 @@ request/response structures.
 
 Aero constrains virtio to a small, testable subset. The definitive contract is:
 
-- `docs/windows7-virtio-driver-contract.md`
+- `wiki/areas/drivers-windows.md`
   - §1: virtio-pci modern transport subset
   - §2: split-ring virtqueue subset
   - §3.4: virtio-snd device contract (queue layout, minimum feature set, minimal PCM)
@@ -45,10 +45,10 @@ be treated as the shipping driver-binding contract.
 
 ## In-repo implementation guides consulted
  
-- Virtqueue split-ring implementation guide (Windows 7): `docs/virtio/virtqueue-split-ring-win7.md`
-- virtio-pci modern interrupts on Windows 7 (MSI-X vs INTx): `docs/windows/virtio-pci-modern-interrupts.md`
-- WDM virtio-pci modern bring-up notes (PCI caps, BAR mapping, feature negotiation, queues): `docs/windows/virtio-pci-modern-wdm.md`
-- Legacy/transitional virtio-pci overview (I/O port vs modern capabilities): `docs/16-virtio-pci-legacy-transitional.md`
+- Virtqueue split-ring implementation guide (Windows 7): `wiki/areas/drivers-windows.md`
+- virtio-pci modern interrupts on Windows 7 (MSI-X vs INTx): `wiki/areas/drivers-windows.md`
+- WDM virtio-pci modern bring-up notes (PCI caps, BAR mapping, feature negotiation, queues): `wiki/areas/drivers-windows.md`
+- Legacy/transitional virtio-pci overview (I/O port vs modern capabilities): `wiki/areas/drivers-windows.md`
 
 ## Microsoft public documentation (PortCls / WaveRT)
 

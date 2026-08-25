@@ -14,7 +14,7 @@ test("AudioWorklet producer does not burst after worker-VM snapshot restore", as
   // Worker VM snapshots require OPFS SyncAccessHandle. Probe early so unsupported browser variants
   // skip without paying the cost of booting workers + AudioWorklet graphs.
   // We only need an origin context for the OPFS capability probe; avoid waiting for full page load.
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: "domcontentloaded" });
   const snapshotSupport = await probeOpfsSyncAccessHandle(page);
 
   if (!snapshotSupport.ok || !snapshotSupport.supported) {

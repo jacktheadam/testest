@@ -132,6 +132,7 @@ pub fn mmu_state_from_cpu_core(core: &CoreCpuState) -> MmuState {
         kernel_gs_base: core.msr.kernel_gs_base,
         apic_base: core.msr.apic_base,
         tsc: core.msr.tsc,
+        tsc_aux: core.msr.tsc_aux,
         ..Default::default()
     }
 }
@@ -218,6 +219,7 @@ pub fn apply_mmu_state_to_cpu_core(mmu: &MmuState, core: &mut CoreCpuState) {
     core.msr.kernel_gs_base = mmu.kernel_gs_base;
     core.msr.apic_base = mmu.apic_base;
     core.msr.tsc = mmu.tsc;
+    core.msr.tsc_aux = mmu.tsc_aux;
 
     core.tables.gdtr.base = mmu.gdtr_base;
     core.tables.gdtr.limit = mmu.gdtr_limit;

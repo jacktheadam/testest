@@ -4,16 +4,16 @@ Drivers intended to be built/packaged by CI must include a manifest at:
 
 `drivers/<driver>/ci-package.json`
 
-This file is consumed by `ci/make-catalogs.ps1` to control what gets staged into
+This file is consumed by `drivers/build/make-catalogs.ps1` to control what gets staged into
 `out/packages/<driver>/<arch>/` before INF stamping + `Inf2Cat`.
 
-For the canonical documentation, see: [`docs/16-driver-packaging-and-signing.md`](../../docs/16-driver-packaging-and-signing.md).
+For the canonical documentation, see: [`wiki/areas/drivers-windows.md`](../../wiki/areas/drivers-windows.md).
 
 ## Fields
 
 ### `$schema` (optional)
 
-JSON Schema reference for editor tooling (example: `"../../ci/driver-package.schema.json"`). CI ignores this field.
+JSON Schema reference for editor tooling (example: `"../../drivers/build/driver-package.schema.json"`). CI ignores this field.
 Update the relative path as needed if your driver directory is nested (for example, `drivers/windows7/<driver>/`).
 
 ### `infFiles` (optional)
@@ -62,7 +62,7 @@ that must exist after building.
 
 This is a guardrail to ensure auxiliary build products that should ship alongside the driver (for
 example, helper tools built by CI and staged into `out/drivers/...`) were actually produced before
-`ci/make-catalogs.ps1` stages packages.
+`drivers/build/make-catalogs.ps1` stages packages.
 
 Note: CI already copies the entire build output directory into `out/packages/<driver>/<arch>/`.
 This field is only a validation check; it does not copy extra files by itself.
@@ -111,7 +111,7 @@ Declare that the driver package requires a WDF coinstaller (`WdfCoInstaller*.dll
   - If provided, `dllName` must be a simple filename (not a path).
 - To include it, you must:
   1. declare `wdfCoInstaller` in the manifest, and
-  2. run `ci/make-catalogs.ps1` with `-IncludeWdfCoInstaller`.
+  2. run `drivers/build/make-catalogs.ps1` with `-IncludeWdfCoInstaller`.
 
 Examples in this directory:
 

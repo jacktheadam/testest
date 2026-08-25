@@ -1,4 +1,4 @@
-import type { AeroPhase } from '../../shared/aero_status.ts';
+import type { AeroPhase } from '../../packages/shared/aero_status.ts';
 
 export type ScenarioKind = 'micro' | 'macro';
 

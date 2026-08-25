@@ -3,7 +3,7 @@
 //! PF-008 Tier-1 JIT correctness regression tests (64-bit payloads).
 //!
 //! These tests execute the canonical PF-008 payload byte streams (from
-//! `docs/16-guest-cpu-benchmark-suite.md`) through the *real* tiered runtime
+//! the CPU and JIT area page) through the *real* tiered runtime
 //! path (`ExecDispatcher` + `JitRuntime` + `WasmBackend`) and assert the final
 //! checksum in `RAX`.
 

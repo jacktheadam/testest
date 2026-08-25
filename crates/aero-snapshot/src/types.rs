@@ -644,7 +644,7 @@ impl VcpuSnapshot {
 
 /// Per-vCPU MMU state entry keyed by `apic_id`.
 ///
-/// This is stored in the `MMUS` section payload (see `docs/16-snapshots.md`).
+/// This is stored in the `MMUS` section payload (see the platform and firmware area page).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct VcpuMmuSnapshot {
     /// vCPU identifier used to map snapshot entries back to a runtime CPU.
@@ -718,6 +718,7 @@ pub struct MmuState {
     pub kernel_gs_base: u64,
     pub apic_base: u64,
     pub tsc: u64,
+    pub tsc_aux: u32,
     pub gdtr_base: u64,
     pub gdtr_limit: u16,
     pub idtr_base: u64,
@@ -793,11 +794,14 @@ impl MmuState {
         w.write_u16_le(self.idtr_limit)?;
         self.ldtr.encode(w)?;
         self.tr.encode(w)?;
+        // Trailing optional field: must stay at the end so older v2 payloads
+        // (written before tsc_aux existed) remain byte-aligned through `tr`.
+        w.write_u32_le(self.tsc_aux)?;
         Ok(())
     }
 
     pub fn decode_v2<R: Read>(r: &mut R) -> Result<Self> {
-        Ok(Self {
+        let mut state = Self {
             cr0: r.read_u64_le()?,
             cr2: r.read_u64_le()?,
             cr3: r.read_u64_le()?,
@@ -826,6 +830,7 @@ impl MmuState {
             kernel_gs_base: r.read_u64_le()?,
             apic_base: r.read_u64_le()?,
             tsc: r.read_u64_le()?,
+            tsc_aux: 0,
 
             gdtr_base: r.read_u64_le()?,
             gdtr_limit: r.read_u16_le()?,
@@ -833,7 +838,14 @@ impl MmuState {
             idtr_limit: r.read_u16_le()?,
             ldtr: SegmentState::decode(r)?,
             tr: SegmentState::decode(r)?,
-        })
+        };
+        // Backward-compat: pre-tsc_aux v2 MMU payloads end at `tr`. The section
+        // reader is bounded by header.len, so a short read here means "absent"
+        // (default 0). New writers append tsc_aux after `tr`.
+        // Never insert optional fields mid-stream — that misaligns every
+        // subsequent field and surfaces as UnexpectedEof / "fill whole buffer".
+        state.tsc_aux = r.read_u32_le().unwrap_or(0);
+        Ok(state)
     }
 
     /// Encode using the latest supported MMU section version.
@@ -844,6 +856,92 @@ impl MmuState {
     /// Decode using the latest supported MMU section version.
     pub fn decode<R: Read>(r: &mut R) -> Result<Self> {
         Self::decode_v2(r)
+    }
+}
+
+#[cfg(test)]
+mod mmu_state_tsc_aux_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// Pre-tsc_aux v2 payload: everything through `tr`, no trailing u32.
+    fn encode_v2_without_tsc_aux(state: &MmuState) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&state.cr0.to_le_bytes());
+        buf.extend_from_slice(&state.cr2.to_le_bytes());
+        buf.extend_from_slice(&state.cr3.to_le_bytes());
+        buf.extend_from_slice(&state.cr4.to_le_bytes());
+        buf.extend_from_slice(&state.cr8.to_le_bytes());
+        for dr in [
+            state.dr0, state.dr1, state.dr2, state.dr3, state.dr4, state.dr5, state.dr6, state.dr7,
+        ] {
+            buf.extend_from_slice(&dr.to_le_bytes());
+        }
+        for msr in [
+            state.efer,
+            state.star,
+            state.lstar,
+            state.cstar,
+            state.sfmask,
+            state.sysenter_cs,
+            state.sysenter_eip,
+            state.sysenter_esp,
+            state.fs_base,
+            state.gs_base,
+            state.kernel_gs_base,
+            state.apic_base,
+            state.tsc,
+        ] {
+            buf.extend_from_slice(&msr.to_le_bytes());
+        }
+        buf.extend_from_slice(&state.gdtr_base.to_le_bytes());
+        buf.extend_from_slice(&state.gdtr_limit.to_le_bytes());
+        buf.extend_from_slice(&state.idtr_base.to_le_bytes());
+        buf.extend_from_slice(&state.idtr_limit.to_le_bytes());
+        state.ldtr.encode(&mut buf).unwrap();
+        state.tr.encode(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn decode_v2_accepts_legacy_payload_without_tsc_aux() {
+        let original = MmuState {
+            cr3: 0x0018_7000,
+            tsc: 0x1111_2222_3333_4444,
+            gdtr_base: 0xffff_f800_0123_4560,
+            gdtr_limit: 0x57,
+            tsc_aux: 0, // legacy files never had this field
+            ..MmuState::default()
+        };
+
+        let legacy = encode_v2_without_tsc_aux(&original);
+        assert_eq!(legacy.len(), 264, "legacy MMU v2 body is 264 bytes");
+
+        let decoded = MmuState::decode_v2(&mut Cursor::new(legacy)).expect("legacy decode");
+        assert_eq!(decoded.cr3, original.cr3);
+        assert_eq!(decoded.tsc, original.tsc);
+        assert_eq!(decoded.gdtr_base, original.gdtr_base);
+        assert_eq!(decoded.gdtr_limit, original.gdtr_limit);
+        assert_eq!(decoded.tsc_aux, 0);
+    }
+
+    #[test]
+    fn encode_decode_v2_roundtrips_tsc_aux_at_end() {
+        let state = MmuState {
+            cr3: 0x2a46_8000,
+            tsc: 0xabc,
+            tsc_aux: 0x55aa_33cc,
+            gdtr_base: 0xffff_f800_0c34_b000,
+            gdtr_limit: 0x7f,
+            ..MmuState::default()
+        };
+
+        let mut buf = Vec::new();
+        state.encode_v2(&mut buf).unwrap();
+        assert_eq!(buf.len(), 268, "new MMU v2 body is legacy+4");
+
+        let decoded = MmuState::decode_v2(&mut Cursor::new(buf)).unwrap();
+        assert_eq!(decoded, state);
     }
 }
 

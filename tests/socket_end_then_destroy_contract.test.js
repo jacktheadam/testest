@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { endThenDestroyQuietly } from "../src/socket_end_then_destroy.js";
-import socketEndThenDestroyCjs from "../src/socket_end_then_destroy.cjs";
+import { endThenDestroyQuietly } from "../packages/transport-safety/src/socket_end_then_destroy.js";
+import socketEndThenDestroyCjs from "../packages/transport-safety/src/socket_end_then_destroy.cjs";
 
 const implementations = [
   { name: "esm", endThenDestroyQuietly },

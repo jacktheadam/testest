@@ -47,8 +47,8 @@ via BAR0 MMIO magic:
 
 - **Versioned ABI device**: `PCI\VEN_A3A0&DEV_0001` ("AGPU")  
   Ring = `aerogpu_ring_header` + `aerogpu_submit_desc` slots.
-- **Legacy bring-up ABI device**: legacy bring-up PCI identity ("ARGP", deprecated; see `docs/abi/aerogpu-pci-identity.md`)  
-  Ring = legacy `aerogpu_legacy_ring_entry` entries (see `drivers/aerogpu/kmd/include/aerogpu_legacy_abi.h` and `docs/abi/aerogpu-pci-identity.md`).
+- **Legacy bring-up ABI device**: legacy bring-up PCI identity ("ARGP", deprecated; see `wiki/areas/graphics.md`)  
+  Ring = legacy `aerogpu_legacy_ring_entry` entries (see `drivers/aerogpu/kmd/include/aerogpu_legacy_abi.h` and `wiki/areas/graphics.md`).
   Note: the emulator legacy device model is optional (feature `emulator/aerogpu-legacy`).
 
 Note: the shipped Win7 driver packages (`drivers/aerogpu/packaging/win7`) bind to the canonical `PCI\VEN_A3A0&DEV_0001`
@@ -557,7 +557,7 @@ Additional WDDM queries (do not use the escape channel):
 - If `D3DKMTEscape` returns an error, ensure the AeroGPU driver is installed and exposes the required escapes.
 - If `--wait-vblank` times out, the process may skip `D3DKMTCloseAdapter` to avoid deadlocking on broken vblank implementations.
 - For the cmd-stream dump + decode workflow used to debug hangs/incorrect rendering without attaching WinDbg, see:
-  - [`docs/windows7-driver-troubleshooting.md` (dumping the last submission)](../../../../docs/windows7-driver-troubleshooting.md#dumping-the-last-aerogpu-submission-cmd-stream-and-alloc-table)
+  - [`wiki/areas/drivers-windows.md` (dumping the last submission)](wiki/areas/drivers-windows.md#troubleshooting-quick-map)
 
 ## Not implemented (intentional)
 

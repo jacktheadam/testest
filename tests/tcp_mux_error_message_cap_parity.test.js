@@ -10,11 +10,11 @@ const repoRoot = path.resolve(__dirname, "..");
 
 const EXPECTED_CAP = 1024;
 const FILES = [
-  "backend/aero-gateway/src/protocol/tcpMux.ts",
-  "net-proxy/src/tcpMuxProtocol.ts",
+  "services/gateway/src/protocol/tcpMux.ts",
+  "services/net-proxy/src/tcpMuxProtocol.ts",
   "tools/net-proxy-server/src/protocol.js",
   "tools/net-proxy-server/src/server.js",
-  "web/src/net/tcpMuxProxy.ts",
+  "apps/web/src/net/tcpMuxProxy.ts",
 ].map((p) => path.join(repoRoot, p));
 
 function extractCap(source) {

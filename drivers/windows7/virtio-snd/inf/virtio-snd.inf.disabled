@@ -28,7 +28,7 @@ CatalogFile = aero_virtio_snd.cat
 ; Aero Windows 7 virtio device contract:
 ;   - Modern virtio-pci only (PCI vendor-specific capabilities + MMIO)
 ;   - PCI Revision ID encodes the contract major version (v1 == REV_01)
-; See: docs/windows7-virtio-driver-contract.md
+; See: wiki/areas/drivers-windows.md
 ;
 ; Aero virtio-snd (virtio device id 25) uses the modern virtio-pci ID space:
 ;   DEV = 0x1040 + 25 = 0x1059

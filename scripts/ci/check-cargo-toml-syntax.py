@@ -35,7 +35,19 @@ def git_tracked_cargo_tomls() -> list[str]:
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         raise RuntimeError("failed to list tracked files (is this a git checkout?)") from exc
 
-    tomls = [line for line in out.splitlines() if line.endswith("Cargo.toml")]
+    # Purges in this repo are deliberately uncommitted, so `git ls-files` still
+    # lists manifests that are gone from disk. Filter to what actually exists —
+    # the same thing `tests/repo_hygiene_contract.test.js` does, and for the same
+    # reason. Without this the check prints a wall of "failed to read" noise for
+    # crates that were removed on purpose.
+    repo_root = pathlib.Path(
+        subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+    )
+    tomls = [
+        line
+        for line in out.splitlines()
+        if line.endswith("Cargo.toml") and (repo_root / line).is_file()
+    ]
     tomls.sort()
     return tomls
 

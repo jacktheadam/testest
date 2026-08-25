@@ -11,12 +11,12 @@ so the browser capture side and the PS/2 device model stay in sync.
 
 Running the generator updates:
 
-- `web/src/input/scancodes.ts`
+- `apps/web/src/input/scancodes.ts`
 - `crates/aero-devices-input/src/scancodes_generated.rs`
 
-The Rust `crates/emulator/` harness consumes the mapping via the shared
+The Rust input stack consumes the mapping via the shared
 `aero-devices-input` crate (there is no longer a separate generated copy under
-`crates/emulator/`).
+`crates/aero-devices-input`).
 
 ## Regenerating
 
@@ -39,12 +39,10 @@ silently diverge:
   `git diff` shows the checked-in generated files are out of date.
   - Convenience alias: `npm run check:scancodes`
   - Convenience alias: `just check-scancodes`
-- `web/test/scancodes_generated_sync.test.ts` compares `scancodes.json` against
-  the generated TypeScript mapping in `web/src/input/scancodes.ts`.
+- `apps/web/test/scancodes_generated_sync.test.ts` compares `scancodes.json` against
+  the generated TypeScript mapping in `apps/web/src/input/scancodes.ts`.
 - `crates/aero-devices-input/tests/scancodes_json_sync.rs` compares
   `scancodes.json` against the generated Rust lookup (`browser_code_to_set2_bytes`).
-- `crates/emulator/tests/scancodes_json_sync.rs` performs the same check for the
-  emulator crate (which re-exports the shared mapping from `aero-devices-input`).
 
 If any of these tests fail, regenerate using the command above and commit the
 updated generated files.

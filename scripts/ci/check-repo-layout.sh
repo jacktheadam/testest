@@ -21,29 +21,23 @@ need_file() {
 
 cd "$(git rev-parse --show-toplevel)"
 
-need_file "docs/repo-layout.md"
-need_file "docs/adr/0001-repo-layout.md"
+need_file "wiki/state/repo-state-and-structure.md"
+need_file "wiki/decisions/0001-repo-layout.md"
 
-# Canonical VM wiring guardrail:
-# `crates/emulator` is legacy/compat and must not become part of the "canonical"
-# dependency graph via new `[dependencies] emulator = { ... }` edges.
-if command -v python3 >/dev/null 2>&1; then
-  python3 scripts/ci/check-no-emulator-deps.py
-else
-  echo "warning: python3 not found; skipping emulator dependency guardrail" >&2
-fi
-
-# VirtIO guardrail:
-# VirtIO device models (including `virtio-input`) live in `crates/aero-virtio` and are wired up by
-# the canonical machine stack (`crates/aero-machine`). The legacy emulator-local VirtIO stack has
-# been removed to avoid contract drift (the Windows 7 driver depends on exact device semantics).
+# Canonical stack guardrail:
+# `crates/emulator` was a second, parallel device stack — its own PCI framework, storage traits,
+# disk formats, USB glue, audio device models, and AeroGPU device and executor — none of which
+# anything depended on. It has been retired: the pieces with no canonical equivalent moved to
+# `crates/aero-gpu-software`, `crates/aero-storage`, and `crates/aero-audio`, and the rest was a
+# duplicate of a canonical crate or a re-export shim.
 #
-# Fail CI if `emulator::io::virtio` is reintroduced.
-mapfile -t tracked_emulator_virtio < <(git ls-files | grep -E '^crates/emulator/src/io/virtio(\.rs|/)' || true)
-if (( ${#tracked_emulator_virtio[@]} > 0 )); then
-  die "legacy emulator-local VirtIO module file(s) are tracked; VirtIO devices must be implemented in crates/aero-virtio: ${tracked_emulator_virtio[*]}"
+# The failure mode worth guarding is not a dependency edge any more; it is the directory coming
+# back. `tests/repo_hygiene.contract.test.js` enforces that, along with the rest of the ban list.
+mapfile -t tracked_emulator < <(git ls-files | grep -E '^crates/emulator/' || true)
+if (( ${#tracked_emulator[@]} > 0 )); then
+  die "crates/emulator is retired; the canonical stack is aero-machine plus the aero-* device crates (found ${#tracked_emulator[@]} tracked file(s))"
 fi
-unset tracked_emulator_virtio
+unset tracked_emulator
 
 # Local-only agent notes should never be checked in. They're ignored by default, but
 # `git add -f` would still stage them. Keep the repo clean by failing CI if they
@@ -142,9 +136,7 @@ unset qemu_boot_test_missing_pkg
 # These are the primary human-facing entrypoints for running the QEMU boot tests, and they should
 # explicitly mention `crates/aero-boot-tests/Cargo.toml` `[[test]]` to prevent future drift.
 qemu_boot_test_docs=(
-  "docs/TESTING.md"
-  "instructions/integration.md"
-  "instructions/io-storage.md"
+  "wiki/areas/testing.md"
 )
 for doc in "${qemu_boot_test_docs[@]}"; do
   if [[ ! -f "${doc}" ]]; then
@@ -197,7 +189,7 @@ for raw in subprocess.check_output(["git", "ls-tree", "-r", "HEAD"], text=True).
 # - Explicit invocations: `./foo.sh`, `./some/path/foo.sh` (POSIX)
 # - Explicit invocations: `.\foo.ps1`, `.\some\path\foo.cmd` (Windows)
 # - Repo-root relative paths: `drivers/scripts/foo.sh`, `scripts/ci/bar.sh`, etc.
-# - Repo-root relative paths: `drivers\scripts\foo.ps1`, `ci\build-drivers.ps1`, etc.
+# - Repo-root relative paths: `drivers\scripts\foo.ps1`, `drivers\build\build-drivers.ps1`, etc.
 # - Other repo-local helper scripts referenced in docs (PowerShell, Python, CMD, Node).
 #
 # Note: many docs embed commands inside backticks, so treat backtick as a stop
@@ -243,7 +235,12 @@ def normalize_rel(path_str):
     return norm
 
 for md in md_files:
-    text = (repo_root / md).read_text(encoding="utf-8", errors="ignore")
+    md_path = repo_root / md
+    if not md_path.is_file():
+        # Deleted in the working tree but not yet committed (purge in flight);
+        # there is nothing to scan.
+        continue
+    text = md_path.read_text(encoding="utf-8", errors="ignore")
     md_dir = Path(md).parent
     # Track line numbers incrementally as we scan matches. This is much faster than
     # `text.count("\n", 0, m.start())` per match for large markdown files.
@@ -313,6 +310,12 @@ for path in sorted(doc_refs.keys()):
     mode = git_mode(path)
     refs = ", ".join("%s:%d:%s" % (md, line_no, ref) for md, line_no, ref in sorted(doc_refs[path]))
     if mode is None:
+        if (repo_root / path).is_file():
+            # Present in the working tree but not yet tracked. Purges/moves land
+            # uncommitted by policy (no automatic commits), so warn instead of
+            # failing — the checkpoint commit must track these before push.
+            print("warning: %s: referenced by docs but not yet tracked by git (uncommitted move; refs: %s)" % (path, refs), file=sys.stderr)
+            continue
         errors.append("%s: referenced by docs but is not present in git (refs: %s)" % (path, refs))
         continue
 
@@ -820,92 +823,98 @@ if (( ${#unexpected_lockfiles[@]} > 0 )); then
   die "unexpected package-lock.json checked in outside the repo root (npm workspaces use a single root lockfile): ${unexpected_lockfiles[*]}"
 fi
 
-# Canonical frontend (ADR 0001): repo-root Vite app (used by CI/Playwright).
-need_file "index.html"
-need_file "src/main.ts"
+# The browser application. Both shells live in one tree (`apps/web/`): the canonical host that
+# CI and Playwright drive, and the fuller shell used for manual Windows 7 bring-up. They share one
+# module library, which is the point of the merge — before it, the canonical shell reached sideways
+# into a second tree for most of what it rendered.
+need_file "apps/web/index.html"
+need_file "apps/web/src/main.ts"
+need_file "apps/web/bringup.html"
+need_file "apps/web/src/bringup_main.ts"
+need_file "apps/web/package.json"
+need_file "apps/web/README.md"
+need_file "apps/web/vite.config.ts"
 need_file "vite.harness.config.ts"
 
-# Shared web runtime + WASM build tooling (and a legacy/experimental Vite entrypoint).
-need_file "web/package.json"
-need_file "web/README.md"
-if ! grep -q "legacy/experimental" web/README.md; then
-  die "web/README.md should clearly mark the web/ Vite entrypoint as legacy/experimental"
-fi
-need_file "web/index.html"
-need_file "web/vite.config.ts"
-
-# Non-canonical prototype markers (repo hygiene).
-need_file "poc/README.md"
-need_file "prototype/README.md"
-need_file "server/LEGACY.md"
-
-# Repo-root Vite app should be explicitly marked so it is not mistaken for a prototype.
-if [[ -f "index.html" ]]; then
-  if ! grep -q "canonical browser host" index.html; then
-    die "repo-root index.html exists but is not marked as the canonical browser host (expected the phrase 'canonical browser host')"
+# The old layout kept the canonical shell at the repo root. Nothing should recreate it there.
+for stray in "index.html" "src" "web"; do
+  if [[ -e "$stray" ]]; then
+    die "'$stray' is back at the repo root; the browser application lives in apps/web/"
   fi
+done
+
+# Each entry point should name itself, so neither is mistaken for the other.
+if ! grep -q "canonical browser host" apps/web/index.html; then
+  die "apps/web/index.html should identify itself as the canonical browser host"
+fi
+if ! grep -qi "bring-up" apps/web/bringup.html; then
+  die "apps/web/bringup.html should identify itself as the Windows 7 bring-up shell"
 fi
 
 if ! grep -q "repo-root Vite app" vite.harness.config.ts; then
   die "vite.harness.config.ts should include the phrase 'repo-root Vite app' to make its role unambiguous"
 fi
 
-# Legacy Windows driver layout guardrails.
-#
-# The repo used to have a standalone GitHub Actions workflow for building a legacy Windows
-# driver stack. It was removed in favor of the consolidated Win7 pipeline:
-#   .github/workflows/drivers-win7.yml + ci/*.ps1 + drivers/*
-legacy_windows_driver_workflow=".github/workflows/windows-""drivers.yml"
-if [[ -f "$legacy_windows_driver_workflow" ]]; then
-  die "legacy Windows driver workflow must not exist (use '.github/workflows/drivers-win7.yml')"
-fi
-legacy_guest_windows_dir="guest/""windows"
-if [[ -d "$legacy_guest_windows_dir" ]]; then
-  # The legacy driver directory is kept as a tombstone for old links. It must remain a stub
-  # (no buildable driver projects). We allow a tiny set of redirect/stub files so older
-  # links keep working. A comment-only stub INF is allowed so references to the old
-  # `guest/` `windows/inf/aerogpu.inf` path fail loudly while still pointing at the supported
-  # package location.
-  allowed_guest_windows_files=(
-    "guest/""windows/README.md"
-    "guest/""windows/docs/driver_install.md"
-    "guest/""windows/inf/aerogpu.inf"
-  )
-
-  # Use a simple prefix scan instead of relying on pathspec glob support (`**`).
-  legacy_guest_windows_prefix="$legacy_guest_windows_dir/"
-  guest_windows_files=()
-  while IFS= read -r f; do
-    if [[ "$f" == "$legacy_guest_windows_prefix"* ]]; then
-      guest_windows_files+=("$f")
-    fi
-  done < <(git ls-files || true)
-  for f in "${guest_windows_files[@]}"; do
-    allowed=0
-    for allow in "${allowed_guest_windows_files[@]}"; do
-      if [[ "$f" == "$allow" ]]; then
-        allowed=1
-        break
-      fi
-    done
-    if [[ "$allowed" -ne 1 ]]; then
-      die "unexpected file under ${legacy_guest_windows_dir}/ (tombstone should only contain README stub + driver_install stub + INF stub): $f"
-    fi
-  done
-fi
+# Banned paths (purged legacy/theater; must not be reintroduced — see the cleanup
+# doctrine in the wiki: CI automation, legal theater, duplicate/legacy stacks).
+banned_paths=(
+  ".github"
+  "deploy"
+  "infra"
+  ".devcontainer"
+  "server"
+  "poc"
+  "prototype"
+  "guest"
+  "instructions"
+  "windows-drivers"
+  "js"
+  "windows"
+  "images"
+  "test-images"
+  "tools/aero-gateway-rs"
+  "CODE_OF_CONDUCT.md"
+  "CONTRIBUTING.md"
+  "SECURITY.md"
+  "LEGAL.md"
+  "TRADEMARKS.md"
+  "DMCA_POLICY.md"
+  "TERMS_OF_SERVICE_TEMPLATE.md"
+  "PRIVACY_POLICY_TEMPLATE.md"
+  "AUTHORS"
+  "NOTICE"
+  "LICENSE-MIT"
+  "LICENSE-APACHE"
+  "codecov.yml"
+  "netlify.toml"
+  "vercel.json"
+  "docker-compose.yml"
+  "compose.yaml"
+  ".dockerignore"
+  "REFACTOR.md"
+)
+for banned in "${banned_paths[@]}"; do
+  if [[ -e "$banned" ]]; then
+    die "banned path exists: $banned (purged legacy/theater — do not reintroduce; see wiki: cleanup doctrine)"
+  fi
+done
 
 # Fail if someone reintroduces an ambiguous Vite config file name at the repo root
 # (it would be auto-picked up by `vite` and confuse dev/CI tooling).
 if [[ -f "vite.config.ts" || -f "vite.config.js" || -f "vite.config.mjs" || -f "vite.config.cjs" ]]; then
-  die "unexpected Vite config at repo root (vite.config.*). Use vite.harness.config.ts for the canonical repo-root app (and web/vite.config.ts only for the legacy web/ app)."
+  die "unexpected Vite config at repo root (vite.config.*). The repo-root config is vite.harness.config.ts; the application's own is apps/web/vite.config.ts."
 fi
 
 # Fail if any new Vite config is introduced outside the allowlist.
 mapfile -t vite_configs < <(git ls-files | grep -E '(^|/)vite\.config\.(ts|js|mjs|cjs)$' || true)
 allowed_vite_configs=(
-  "web/vite.config.ts"
+  "apps/web/vite.config.ts"
 )
 for cfg in "${vite_configs[@]}"; do
+  # A tracked path that no longer exists on disk is a move that has not been committed yet;
+  # the rest of this script treats those as warnings, so do the same here rather than failing
+  # on the old location of a file that has already moved.
+  [[ -e "$cfg" ]] || continue
   allowed=0
   for allow in "${allowed_vite_configs[@]}"; do
     if [[ "$cfg" == "$allow" ]]; then

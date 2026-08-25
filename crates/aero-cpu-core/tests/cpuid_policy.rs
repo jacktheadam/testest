@@ -38,6 +38,16 @@ fn win7_minimum_profile_sets_required_bits() {
     assert_ne!(leaf1.edx & bits::LEAF1_EDX_APIC, 0);
     assert_ne!(leaf1.edx & bits::LEAF1_EDX_TSC, 0);
     assert_ne!(leaf1.ecx & bits::LEAF1_ECX_CX16, 0);
+    // Win7 SP1 Phase-0 UNSUPPORTED_PROCESSOR mask (see CpuFeatureSet::WIN7_REQUIRED_LEAF1_EDX).
+    assert_eq!(
+        leaf1.edx & CpuFeatureSet::WIN7_REQUIRED_LEAF1_EDX,
+        CpuFeatureSet::WIN7_REQUIRED_LEAF1_EDX
+    );
+    assert_ne!(leaf1.edx & bits::LEAF1_EDX_PSE, 0);
+    assert_ne!(leaf1.edx & bits::LEAF1_EDX_PGE, 0);
+    assert_ne!(leaf1.edx & bits::LEAF1_EDX_MTRR, 0);
+    assert_ne!(leaf1.edx & bits::LEAF1_EDX_PAT, 0);
+    assert_ne!(leaf1.edx & bits::LEAF1_EDX_CLFSH, 0);
 
     let ext1 = cpuid(&features, 0x8000_0001, 0);
     assert_ne!(ext1.edx & bits::EXT1_EDX_NX, 0);
@@ -63,10 +73,8 @@ fn msr_efer_masks_nxe_when_cpuid_nx_is_disabled() {
 
     assert_eq!(cpuid(&features, 0x8000_0001, 0).edx & bits::EXT1_EDX_NX, 0);
 
-    let mut ctx = AssistContext {
-        features,
-        ..AssistContext::default()
-    };
+    let mut ctx = AssistContext::default();
+    ctx.features = features;
     let mut state = CpuState::new(CpuMode::Bit32);
     // Keep `CpuState::mode` coherent with `update_mode()` calls performed by the assist handler.
     state.control.cr0 |= CR0_PE;
@@ -106,10 +114,8 @@ fn msr_efer_masks_sce_when_cpuid_syscall_is_disabled() {
         0
     );
 
-    let mut ctx = AssistContext {
-        features,
-        ..AssistContext::default()
-    };
+    let mut ctx = AssistContext::default();
+    ctx.features = features;
     let mut state = CpuState::new(CpuMode::Bit32);
     state.control.cr0 |= CR0_PE;
     state.segments.cs.selector = 0x08; // CPL0 for WRMSR.

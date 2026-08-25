@@ -70,7 +70,9 @@ fn snapshot_restore_redrives_pci_intx_levels_to_interrupt_sink() {
     let bdf = PciBdf::new(0, 0, 0);
     let expected_irq = {
         let router = PciIntxRouter::new(PciIntxRouterConfig::default());
-        u8::try_from(router.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap()
+        router
+            .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+            .expect("Q35 PCI GSI should have a compatibility PIC route")
     };
 
     // Configure the legacy PIC so a raised IRQ is observable via get_pending_vector().
@@ -218,7 +220,7 @@ fn snapshot_restore_redrives_hpet_level_to_interrupt_sink() {
 
 #[test]
 fn snapshot_restore_keeps_hpet_level_asserted_when_pci_intx_sync_runs() {
-    // Regression test: HPET timer2 defaults to routing to GSI10, which is also commonly used for
+    // Regression test: route HPET timer2 onto Q35 PCI GSI20 so it shares the line with
     // PCI INTA#. During restore we re-drive PCI INTx levels via
     // `PciIntxRouter::sync_levels_to_sink()`, which *deasserts* GSIs that have no INTx sources.
     //
@@ -238,9 +240,11 @@ fn snapshot_restore_keeps_hpet_level_asserted_when_pci_intx_sync_runs() {
     const HPET_GEN_CONF_ENABLE: u64 = 1 << 0;
     const HPET_TIMER_CFG_INT_LEVEL: u64 = 1 << 1;
     const HPET_TIMER_CFG_INT_ENABLE: u64 = 1 << 2;
+    const HPET_TIMER_CFG_INT_ROUTE_SHIFT: u64 = 9;
+    const HPET_TIMER_CFG_INT_ROUTE_MASK: u64 = 0x1F << HPET_TIMER_CFG_INT_ROUTE_SHIFT;
 
     const TIMER2_INDEX: u64 = 2;
-    const TIMER2_GSI: u32 = 10;
+    const TIMER2_GSI: u32 = 20;
     const TIMER2_STATUS_BIT: u64 = 1 << TIMER2_INDEX;
 
     let mut pc = PcPlatform::new(RAM_SIZE);
@@ -270,7 +274,10 @@ fn snapshot_restore_keeps_hpet_level_asserted_when_pci_intx_sync_runs() {
         hpet.mmio_write(
             timer2_base + HPET_REG_TIMER_CONFIG,
             8,
-            timer2_cfg | HPET_TIMER_CFG_INT_ENABLE | HPET_TIMER_CFG_INT_LEVEL,
+            (timer2_cfg & !HPET_TIMER_CFG_INT_ROUTE_MASK)
+                | HPET_TIMER_CFG_INT_ENABLE
+                | HPET_TIMER_CFG_INT_LEVEL
+                | (u64::from(TIMER2_GSI) << HPET_TIMER_CFG_INT_ROUTE_SHIFT),
             &mut dummy_sink,
         );
         hpet.mmio_write(

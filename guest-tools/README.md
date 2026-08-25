@@ -18,7 +18,7 @@ It provides:
 
 `guest-tools/config/devices.cmd` is **generated** from the Windows device contract manifest:
 
-- `docs/windows-device-contract.json`
+- `protocol-vectors/windows-device-contract.json`
 
 To update device HWIDs / service names, edit the JSON manifest and regenerate:
 

@@ -9,7 +9,7 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
 await import('./gen_scancodes.mjs');
 
 const CANDIDATE_PATHS = [
-  'web/src/input/scancodes.ts',
+  'apps/web/src/input/scancodes.ts',
   'crates/aero-devices-input/src/scancodes_generated.rs',
 ];
 

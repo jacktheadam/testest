@@ -2,11 +2,22 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { isIdentContinue, isIdentStart } from "./js_scan_parse_helpers.js";
 
-export const DEFAULT_SOURCE_ROOTS = ["src", "web", "backend", "server", "services", "tools", "scripts", "bench", "net-proxy", "proxy", "packages", "emulator"];
+export const DEFAULT_SOURCE_ROOTS = ["apps/web", "services", "tools", "scripts", "bench", "proxy", "packages"];
 export const DEFAULT_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"]);
 
 export function isIgnoredDir(name) {
-  return name === "node_modules" || name === "dist" || name === "build" || name === "target" || name === ".git" || name === ".cargo" || name === ".turbo";
+  return name === "node_modules" || name === "dist" || name === "build" || name === "target" || name === ".git" || name === ".cargo" || name === ".turbo" || name === ".attic";
+}
+
+/// Generated output that happens to live under a source root.
+///
+/// These contract scanners assert things about code we write. wasm-bindgen's
+/// glue is emitted by the build, is gitignored, and legitimately uses
+/// constructs the scanners forbid — so including it makes every gate depend on
+/// whether the WebAssembly packages happen to have been built, passing on a
+/// fresh checkout and failing on any machine that has done real work.
+export function isGeneratedPath(rel) {
+  return /(^|\/)web\/src\/wasm\/pkg-[^/]*(\/|$)/.test(rel);
 }
 
 export function isTestPath(rel) {
@@ -38,6 +49,7 @@ async function collectUnderRoot(rootAbs, rootRel, extensions) {
     if (entry.isDirectory()) {
       if (isIgnoredDir(entry.name)) continue;
       if (isTestPath(rel)) continue;
+      if (isGeneratedPath(rel)) continue;
       out.push(...(await collectUnderRoot(full, rel, extensions)));
       continue;
     }
@@ -45,6 +57,7 @@ async function collectUnderRoot(rootAbs, rootRel, extensions) {
     const ext = path.extname(entry.name);
     if (!extensions.has(ext)) continue;
     if (isTestPath(rel)) continue;
+    if (isGeneratedPath(rel)) continue;
     out.push(rel);
   }
   return out;

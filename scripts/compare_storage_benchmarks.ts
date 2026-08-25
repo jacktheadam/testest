@@ -17,7 +17,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { formatOneLineError, truncateUtf8 } from "../src/text.js";
+import { formatOneLineError, truncateUtf8 } from "../packages/transport-safety/src/text.js";
 
 const REGISTER_TS_STRIP_LOADER_URL = new URL("./register-ts-strip-loader.mjs", import.meta.url);
 const BENCH_COMPARE_PATH = fileURLToPath(new URL("../bench/compare.ts", import.meta.url));

@@ -35,7 +35,7 @@ const MAX_KEYS: usize = 4;
 /// mapping failures are tolerated to avoid harness panics.
 struct FuzzBus {
     a20_enabled: bool,
-    inner: PhysicalMemoryBus,
+    inner: PhysicalMemoryBus<memory::DenseMemory>,
 }
 
 impl FuzzBus {
@@ -43,7 +43,7 @@ impl FuzzBus {
         let ram = DenseMemory::new(size).expect("guest RAM allocation failed");
         Self {
             a20_enabled: false,
-            inner: PhysicalMemoryBus::new(Box::new(ram)),
+            inner: PhysicalMemoryBus::new(ram),
         }
     }
 

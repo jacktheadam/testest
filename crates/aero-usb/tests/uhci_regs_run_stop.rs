@@ -53,8 +53,8 @@ fn uhci_regs_run_stop_egsm_and_frnum() {
     }
     assert_eq!(read_u16(&uhci, REG_FRNUM), frnum);
 
-    // Global Suspend Mode behaves as not-running in this model: HCHALTED is set and FRNUM does not
-    // advance even if RS=1.
+    // Global Suspend Mode (EGSM) pauses the frame list but per UHCI spec
+    // HCHALTED is a function of RS only — it stays clear when RS=1, EGSM=1.
     let cmd = read_u16(&uhci, REG_USBCMD);
     write_u16(&mut uhci, REG_USBCMD, cmd | USBCMD_RS);
     assert_eq!(read_u16(&uhci, REG_USBSTS) & USBSTS_HCHALTED, 0);
@@ -63,7 +63,7 @@ fn uhci_regs_run_stop_egsm_and_frnum() {
 
     let cmd = read_u16(&uhci, REG_USBCMD);
     write_u16(&mut uhci, REG_USBCMD, cmd | USBCMD_EGSM);
-    assert_ne!(read_u16(&uhci, REG_USBSTS) & USBSTS_HCHALTED, 0);
+    assert_eq!(read_u16(&uhci, REG_USBSTS) & USBSTS_HCHALTED, 0);
     for _ in 0..10 {
         uhci.tick_1ms(&mut mem);
     }

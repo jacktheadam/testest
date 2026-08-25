@@ -10,7 +10,7 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { unrefBestEffort } from "../../../../src/unref_safe.js";
+import { unrefBestEffort } from "../../../../packages/transport-safety/src/unref_safe.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4274,7 +4274,7 @@ test("bridges an L2 tunnel DataChannel to a backend WebSocket", async ({ page })
           );
         });
 
-        // PING per docs/l2-tunnel-protocol.md: magic (0xA2) + ver (0x03) + type (0x01) + flags (0).
+        // PING per wiki/areas/networking.md: magic (0xA2) + ver (0x03) + type (0x01) + flags (0).
         dc.send(new Uint8Array([0xa2, 0x03, 0x01, 0x00]));
 
         const res = await new Promise((resolve, reject) => {
@@ -4660,7 +4660,7 @@ test("bridges an L2 tunnel DataChannel to a backend WebSocket (session cookie fo
             return { status: dcState };
           }
 
-          // PING per docs/l2-tunnel-protocol.md: magic (0xA2) + ver (0x03) + type (0x01) + flags (0).
+          // PING per wiki/areas/networking.md: magic (0xA2) + ver (0x03) + type (0x01) + flags (0).
           dc.send(new Uint8Array([0xa2, 0x03, 0x01, 0x00]));
 
           const res = await new Promise((resolve) => {
@@ -4863,7 +4863,7 @@ test("forwards client Origin + auth credential when bridging an L2 tunnel (query
           );
         });
 
-        // PING per docs/l2-tunnel-protocol.md: magic (0xA2) + ver (0x03) + type (0x01) + flags (0).
+        // PING per wiki/areas/networking.md: magic (0xA2) + ver (0x03) + type (0x01) + flags (0).
         dc.send(new Uint8Array([0xa2, 0x03, 0x01, 0x00]));
 
         const res = await new Promise((resolve, reject) => {
@@ -5041,7 +5041,7 @@ test("forwards client Origin + auth credential when bridging an L2 tunnel (subpr
           );
         });
 
-        // PING per docs/l2-tunnel-protocol.md: magic (0xA2) + ver (0x03) + type (0x01) + flags (0).
+        // PING per wiki/areas/networking.md: magic (0xA2) + ver (0x03) + type (0x01) + flags (0).
         dc.send(new Uint8Array([0xa2, 0x03, 0x01, 0x00]));
 
         const res = await new Promise((resolve, reject) => {

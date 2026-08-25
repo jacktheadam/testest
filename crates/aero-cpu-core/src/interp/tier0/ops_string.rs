@@ -1,8 +1,8 @@
 use super::ExecOutcome;
 use crate::exception::Exception;
 use crate::linear_mem::{
-    read_u16_wrapped, read_u32_wrapped, read_u64_wrapped, write_u16_wrapped, write_u32_wrapped,
-    write_u64_wrapped,
+    read_u16_wrapped, read_u32_wrapped, read_u64_wrapped, watch_read, write_u16_wrapped,
+    write_u32_wrapped, write_u64_wrapped,
 };
 use crate::mem::CpuBus;
 use crate::state::{CpuMode, CpuState, FLAG_DF, FLAG_ZF};
@@ -34,9 +34,15 @@ enum StringOp {
     Scas,
 }
 
-pub fn handles(instr: &Instruction) -> bool {
-    let is_string_mnemonic = matches!(
-        instr.mnemonic(),
+/// The mnemonic half of [`handles`].
+///
+/// Split out so dispatch can classify an instruction from its mnemonic alone.
+/// The full [`handles`] check still has to run afterwards: `MOVSD` and `CMPSD`
+/// name both the string form and the SSE form, and only the operands tell them
+/// apart.
+pub fn handles_mnemonic(m: Mnemonic) -> bool {
+    matches!(
+        m,
         Mnemonic::Movsb
             | Mnemonic::Movsw
             | Mnemonic::Movsd
@@ -57,8 +63,11 @@ pub fn handles(instr: &Instruction) -> bool {
             | Mnemonic::Scasw
             | Mnemonic::Scasd
             | Mnemonic::Scasq
-    );
-    if !is_string_mnemonic {
+    )
+}
+
+pub fn handles(instr: &Instruction) -> bool {
+    if !handles_mnemonic(instr.mnemonic()) {
         return false;
     }
 
@@ -374,7 +383,11 @@ fn read_mem<B: CpuBus>(
     size: usize,
 ) -> Result<u64, Exception> {
     match size {
-        1 => Ok(bus.read_u8(state.apply_a20(addr))? as u64),
+        1 => {
+            let v = bus.read_u8(state.apply_a20(addr))?;
+            watch_read(state, addr, 1, u64::from(v));
+            Ok(u64::from(v))
+        }
         2 => Ok(read_u16_wrapped(state, bus, addr)? as u64),
         4 => Ok(read_u32_wrapped(state, bus, addr)? as u64),
         8 => Ok(read_u64_wrapped(state, bus, addr)?),

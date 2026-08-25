@@ -258,6 +258,26 @@ impl X87 {
         self.push(0.0)
     }
 
+    pub fn fldl2t(&mut self) -> Result<()> {
+        self.push(10.0f64.log2())
+    }
+
+    pub fn fldl2e(&mut self) -> Result<()> {
+        self.push(core::f64::consts::LOG2_E)
+    }
+
+    pub fn fldpi(&mut self) -> Result<()> {
+        self.push(core::f64::consts::PI)
+    }
+
+    pub fn fldlg2(&mut self) -> Result<()> {
+        self.push(2.0f64.log10())
+    }
+
+    pub fn fldln2(&mut self) -> Result<()> {
+        self.push(core::f64::consts::LN_2)
+    }
+
     pub fn fst_f32(&mut self) -> Result<f32> {
         Ok(self.read_st(0)? as f32)
     }
@@ -597,6 +617,74 @@ impl X87 {
     pub fn fabs(&mut self) -> Result<()> {
         let v = self.read_st(0)?;
         self.write_st(0, v.abs())
+    }
+
+    /// FSQRT: ST(0) := sqrt(ST(0)).
+    pub fn fsqrt(&mut self) -> Result<()> {
+        let v = self.read_st(0)?;
+        if v < 0.0 {
+            self.signal_invalid(false)?;
+            return self.write_st(0, f64::NAN);
+        }
+        self.write_st(0, v.sqrt())
+    }
+
+    /// FRNDINT: ST(0) := round(ST(0)) per FCW.RC.
+    pub fn frndint(&mut self) -> Result<()> {
+        let v = self.read_st(0)?;
+        let rounded = RoundingControl::from_fcw(self.fcw).round(v);
+        self.write_st(0, rounded)
+    }
+
+    /// FYL2X: ST(1) := ST(1) * log2(ST(0)); pop.
+    ///
+    /// Win7 `msvcrt` pow/log uses this (`D9 F1`). A missing decode was
+    /// `#UD` / `STATUS_ILLEGAL_INSTRUCTION` in `unregmp2` after SQRTSD.
+    pub fn fyl2x(&mut self) -> Result<()> {
+        let x = self.read_st(0)?;
+        let y = self.read_st(1)?;
+        if x < 0.0 {
+            self.signal_invalid(false)?;
+            self.write_st(1, f64::NAN)?;
+            return self.pop();
+        }
+        if x == 0.0 && y == 0.0 {
+            self.signal_invalid(false)?;
+            self.write_st(1, f64::NAN)?;
+            return self.pop();
+        }
+        if x == 0.0 {
+            self.signal_zero_divide()?;
+        }
+        self.write_st(1, y * x.log2())?;
+        self.pop()
+    }
+
+    /// FYL2XP1: ST(1) := ST(1) * log2(ST(0)+1); pop.
+    pub fn fyl2xp1(&mut self) -> Result<()> {
+        let x = self.read_st(0)?;
+        let y = self.read_st(1)?;
+        let arg = x + 1.0;
+        if arg <= 0.0 {
+            self.signal_invalid(false)?;
+            self.write_st(1, f64::NAN)?;
+            return self.pop();
+        }
+        self.write_st(1, y * arg.log2())?;
+        self.pop()
+    }
+
+    /// F2XM1: ST(0) := 2^ST(0) - 1. Hardware documents |ST(0)| ≤ 1.
+    pub fn f2xm1(&mut self) -> Result<()> {
+        let v = self.read_st(0)?;
+        self.write_st(0, v.exp2() - 1.0)
+    }
+
+    /// FSCALE: ST(0) := ST(0) * 2^trunc(ST(1)).
+    pub fn fscale(&mut self) -> Result<()> {
+        let st0 = self.read_st(0)?;
+        let st1 = self.read_st(1)?;
+        self.write_st(0, st0 * st1.trunc().exp2())
     }
 
     pub fn fcom_sti(&mut self, i: usize) -> Result<()> {

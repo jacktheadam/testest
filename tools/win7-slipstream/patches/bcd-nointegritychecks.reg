@@ -13,7 +13,7 @@ Windows Registry Editor Version 5.00
 ;   these library objects, so setting them here avoids needing to know per-entry GUIDs.
 ;
 ;   For maximum robustness (some OEM media differ), you may also want to set the same
-;   element on the actual OS loader objects. See: docs/win7-bcd-offline-patching.md.
+;   element on the actual OS loader objects. See: wiki/areas/drivers-windows.md.
 ;
 ; Apply to an offline BCD store loaded under HKLM\BCD, e.g.:
 ;   reg load HKLM\BCD X:\path\to\boot\BCD

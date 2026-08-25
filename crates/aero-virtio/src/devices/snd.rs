@@ -30,6 +30,9 @@ pub const VIRTIO_SND_R_PCM_START: u32 = 0x0104;
 pub const VIRTIO_SND_R_PCM_STOP: u32 = 0x0105;
 pub const VIRTIO_SND_R_CHMAP_INFO: u32 = 0x0200;
 
+/// Wire size of `virtio_snd_pcm_info`, which the spec fixes at 32 bytes.
+const PCM_INFO_BYTES: usize = 32;
+
 pub const VIRTIO_SND_S_OK: u32 = 0x0000;
 pub const VIRTIO_SND_S_BAD_MSG: u32 = 0x0001;
 pub const VIRTIO_SND_S_NOT_SUPP: u32 = 0x0002;
@@ -67,7 +70,7 @@ pub const PCM_SAMPLE_RATE_HZ: u32 = 48_000;
 /// Contract v1 safety cap for PCM payload bytes in a single TX/RX descriptor chain.
 ///
 /// This value is normative for the Windows 7 guest driver contract:
-/// `docs/windows7-virtio-driver-contract.md` §3.4.6.
+/// the Windows guest drivers area page §3.4.6.
 ///
 /// The cap is on **PCM payload bytes** (excluding the 8-byte TX header and excluding the RX
 /// header/status descriptors).
@@ -1150,19 +1153,23 @@ fn virtio_snd_hdr(status: u32) -> Vec<u8> {
     status.to_le_bytes().to_vec()
 }
 
-fn virtio_snd_pcm_info(stream_id: u32, direction: u8, channels: u8) -> [u8; 32] {
-    let mut buf = [0u8; 32];
-    // stream_id
+fn virtio_snd_pcm_info(stream_id: u32, direction: u8, channels: u8) -> [u8; PCM_INFO_BYTES] {
+    // `virtio_snd_pcm_info` opens with a `struct virtio_snd_info`, which the spec defines as a
+    // single `le32 hda_fn_nid` — not an `le64`. The 64-bit members that follow are already
+    // naturally aligned after it, so the structure is exactly 32 bytes with no implicit padding.
+    //
+    // `hda_fn_nid` names the HDA function node backing the stream. It is opaque to the driver, so
+    // this device numbers its nodes to match its stream IDs.
+    let mut buf = [0u8; PCM_INFO_BYTES];
     buf[0..4].copy_from_slice(&stream_id.to_le_bytes());
-    // features
+    // features: none advertised during bring-up.
     buf[4..8].copy_from_slice(&0u32.to_le_bytes());
-    // formats/rates bitmasks
     buf[8..16].copy_from_slice(&VIRTIO_SND_PCM_FMT_MASK_S16.to_le_bytes());
     buf[16..24].copy_from_slice(&VIRTIO_SND_PCM_RATE_MASK_48000.to_le_bytes());
-    // direction + channel bounds
     buf[24] = direction;
     buf[25] = channels;
     buf[26] = channels;
+    // buf[27..32] is the spec's trailing padding, left zeroed.
     buf
 }
 
@@ -2229,9 +2236,9 @@ mod tests {
 
         let resp = snd.handle_control_request(&req);
         assert_eq!(status(&resp), VIRTIO_SND_S_OK);
-        assert_eq!(resp.len(), 4 + 32 + 32);
+        assert_eq!(resp.len(), 4 + PCM_INFO_BYTES * 2);
 
-        let playback = &resp[4..4 + 32];
+        let playback = &resp[4..4 + PCM_INFO_BYTES];
         assert_eq!(
             u32::from_le_bytes(playback[0..4].try_into().unwrap()),
             PLAYBACK_STREAM_ID
@@ -2240,7 +2247,7 @@ mod tests {
         assert_eq!(playback[25], PLAYBACK_CHANNELS);
         assert_eq!(playback[26], PLAYBACK_CHANNELS);
 
-        let capture = &resp[4 + 32..4 + 64];
+        let capture = &resp[4 + PCM_INFO_BYTES..4 + PCM_INFO_BYTES * 2];
         assert_eq!(
             u32::from_le_bytes(capture[0..4].try_into().unwrap()),
             CAPTURE_STREAM_ID
@@ -2261,7 +2268,7 @@ mod tests {
 
         let resp = snd.handle_control_request(&req);
         assert_eq!(status(&resp), VIRTIO_SND_S_OK);
-        assert_eq!(resp.len(), 4 + 32);
+        assert_eq!(resp.len(), 4 + PCM_INFO_BYTES);
 
         let entry = &resp[4..];
         assert_eq!(

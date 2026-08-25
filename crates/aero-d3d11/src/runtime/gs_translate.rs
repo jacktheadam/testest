@@ -796,8 +796,7 @@ fn translate_gs_module_to_wgsl_compute_prepass_with_entry_point_impl(
                         mask: *mask,
                     });
             }
-            Sm4Decl::Output { reg, mask }
-            | Sm4Decl::OutputSiv { reg, mask, .. } => {
+            Sm4Decl::Output { reg, mask } | Sm4Decl::OutputSiv { reg, mask, .. } => {
                 output_masks
                     .entry(*reg)
                     .and_modify(|existing| existing.0 |= mask.0)
@@ -2098,8 +2097,8 @@ fn translate_gs_module_to_wgsl_compute_prepass_with_entry_point_impl(
     }
 
     // Ensure we always declare at least o0. Some expanded-vertex layouts also need us to declare
-    // additional output registers so missing GS outputs can default to `vec4<f32>(0.0)` via the
-    // zero-initialized output register file.
+    // additional output registers so missing GS outputs get the D3D default fill (0,0,0,1) via the
+    // initialized output register file.
     max_output_reg = max_output_reg.max(0);
     let mut emit_output_regs: Vec<u32> = Vec::new();
     match expanded_vertex_layout {
@@ -5633,9 +5632,14 @@ mod tests {
             wgsl.contains("varyings: array<vec4<f32>, 32>"),
             "expected fixed ExpandedVertex varyings array layout in WGSL:\n{wgsl}"
         );
+        // The codegen initializes all varying slots to the D3D default fill (0,0,0,1) in a
+        // per-element loop so missing outputs are deterministic (not a bulk array zero-init).
         assert!(
-            wgsl.contains("out_vertices.data[vtx_idx].varyings = array<vec4<f32>, 32>();"),
-            "expected gs_emit to zero-initialize the varyings array in WGSL:\n{wgsl}"
+            wgsl.contains("for (var i: u32 = 0u; i < 32u; i = i + 1u) {")
+                && wgsl.contains(
+                    "out_vertices.data[vtx_idx].varyings[i] = vec4<f32>(0.0, 0.0, 0.0, 1.0);"
+                ),
+            "expected gs_emit to initialize all varyings to the D3D default fill in WGSL:\n{wgsl}"
         );
         assert!(
             wgsl.contains("out_vertices.data[vtx_idx].varyings[1u] = o1;"),

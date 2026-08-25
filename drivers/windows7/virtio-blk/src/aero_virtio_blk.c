@@ -1343,7 +1343,7 @@ static VOID AerovblkHandleIoControl(_Inout_ PAEROVBLK_DEVICE_EXTENSION devExt, _
       WRITE_REGISTER_USHORT((volatile USHORT*)&devExt->Vdev.CommonCfg->queue_select, (USHORT)AEROVBLK_QUEUE_INDEX);
       KeMemoryBarrier();
       /*
-       * Flush posted MMIO selector writes (see docs/windows7-virtio-driver-contract.md §1.5.0).
+       * Flush posted MMIO selector writes (see wiki/areas/drivers-windows.md).
        *
        * Even though queue 0 is the contract v1 baseline, treat the selector as
        * write-posted and ensure subsequent reads observe the selected queue on

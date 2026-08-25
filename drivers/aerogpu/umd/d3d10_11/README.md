@@ -90,7 +90,7 @@ Feature matrix for the Win7 WDK-backed UMDs:
     - WebGPU has no geometry stage; AeroGPU uses a **compute prepass + indirect draw** path when GS/HS/DS emulation is required.
     - Prepass implementations:
       - A deterministic synthetic-expansion compute prepass used for bring-up/fallback (see `GEOMETRY_PREPASS_CS_WGSL` / `GEOMETRY_PREPASS_CS_VERTEX_PULLING_WGSL` in `crates/aero-d3d11/src/runtime/aerogpu_cmd_executor.rs`).
-      - GS prepass paths that can execute a translated SM4 GS DXBC subset for a small set of IA input topologies (`PointList`/`LineList`/`TriangleList`/`LineListAdj`/`TriangleListAdj`) (bring-up limitations apply: the VS-as-compute feeding path is still minimal; see `docs/graphics/geometry-shader-emulation.md`).
+      - GS prepass paths that can execute a translated SM4 GS DXBC subset for a small set of IA input topologies (`PointList`/`LineList`/`TriangleList`/`LineListAdj`/`TriangleListAdj`) (bring-up limitations apply: the VS-as-compute feeding path is still minimal; see `wiki/areas/graphics.md`).
     - A minimal SM4 GS DXBC→WGSL compute translator exists in `crates/aero-d3d11/src/runtime/gs_translate.rs` and is partially wired into the executor:
       - `CREATE_SHADER_DXBC` attempts to translate GS DXBC into a compute prepass.
       - Eligible draws can execute the translated prepass when translation succeeds (see `exec_geometry_shader_prepass_*` in `crates/aero-d3d11/src/runtime/aerogpu_cmd_executor.rs`).
@@ -107,11 +107,11 @@ Feature matrix for the Win7 WDK-backed UMDs:
       - End-to-end execution path: `Draw` and `DrawIndexed` for `PointList`/`LineList`/`TriangleList` and adjacency list variants (`LineListAdj`/`TriangleListAdj`).
       - Remaining work (translated-GS execution): strip input topologies (`LineStrip`/`TriangleStrip`) and strip-adjacency variants (`LineStripAdj`/`TriangleStripAdj`) (these currently route through synthetic expansion).
       - Output (end-to-end): GS output topology `pointlist`/`linestrip`/`triangle_strip` (stream 0). Strip output is expanded into indexed list topologies (`linestrip` → line list, `triangle_strip` → triangle list). The host executor currently expands indexed prepass output into a dense non-indexed vertex stream so it can always render via `draw_indirect` (avoiding `draw_indexed_indirect` on downlevel backends).
-      - Shader instructions/operands: a small SM4 subset plus a small SM5 UAV-buffer subset (see `docs/graphics/geometry-shader-emulation.md`), including `emit`/`cut`, basic ALU, structured control flow (`if`/`loop`/`break`/`continue`, etc), and a small set of resource ops:
+      - Shader instructions/operands: a small SM4 subset plus a small SM5 UAV-buffer subset (see `wiki/areas/graphics.md`), including `emit`/`cut`, basic ALU, structured control flow (`if`/`loop`/`break`/`continue`, etc), and a small set of resource ops:
         - Texture2D: `sample`/`sample_l`/`ld`/`resinfo`
         - SRV buffers: `ld_raw`/`ld_structured`/`bufinfo`
         - UAV buffers (SM5 subset): `ld_uav_raw`/`ld_structured_uav`/`store_raw`/`store_structured`/`atomic_add`/`bufinfo`
-    - Design notes: [`docs/graphics/geometry-shader-emulation.md`](../../../../docs/graphics/geometry-shader-emulation.md)
+    - Design notes: [`wiki/areas/graphics.md`](wiki/areas/graphics.md)
   - Known unsupported / not yet implemented:
     - Stream-output (SO):
       - D3D11 accepts `CreateGeometryShaderWithStreamOutput`, but ignores the stream-output declaration; binding real SO targets (`SOSetTargets`) reports `E_NOTIMPL`.
@@ -144,14 +144,7 @@ Host-side unit tests (portable; no WDK required) for command-stream encoding and
 
 For a full “bring-up spec” (Win7 driver model overview, minimal D3D10DDI/D3D11DDI entrypoints to implement, swapchain behavior expectations, shader handling, and a test plan), see:
 
-- [`docs/graphics/win7-d3d10-11-umd-minimal.md`](../../../../docs/graphics/win7-d3d10-11-umd-minimal.md)
-- [`docs/graphics/win7-aerogpu-validation.md`](../../../../docs/graphics/win7-aerogpu-validation.md) (Win7 validation/stability checklist: TDR, vblank, perf baseline, dbgctl playbook)
-- [`docs/windows/win7-wddm11-d3d10-11-umd-alloc-map.md`](../../../../docs/windows/win7-wddm11-d3d10-11-umd-alloc-map.md) (deprecated redirect; kept for link compatibility)
-- [`docs/graphics/win7-d3d11ddi-function-tables.md`](../../../../docs/graphics/win7-d3d11ddi-function-tables.md) (DDI function-table checklist: REQUIRED vs stub for FL10_0)
-- [`docs/graphics/win7-d3d10-11-umd-allocations.md`](../../../../docs/graphics/win7-d3d10-11-umd-allocations.md) (resource allocation contract: `CreateResource` → `pfnAllocateCb` + `D3DDDI_ALLOCATIONINFO`)
-- [`docs/graphics/win7-d3d11-map-unmap.md`](../../../../docs/graphics/win7-d3d11-map-unmap.md) (`Map`/`Unmap` contract: `LockCb`/`UnlockCb`, DO_NOT_WAIT, staging readback sync)
-- [`docs/graphics/win7-dxgi-swapchain-backbuffer.md`](../../../../docs/graphics/win7-dxgi-swapchain-backbuffer.md) (trace guide: swapchain backbuffer `CreateResource` parameters and allocation flags)
-- [`docs/graphics/aerogpu-protocols.md`](../../../../docs/graphics/aerogpu-protocols.md) (protocol header overview: where `aerogpu_cmd.h` and `aerogpu_format` live)
+- [`wiki/areas/graphics.md`](wiki/areas/graphics.md) (absorbed bring-up docs: the minimal D3D10/11 UMD spec; the Win7 validation/stability checklist — TDR, vblank, perf baseline, dbgctl playbook; the DDI function-table checklist — REQUIRED vs stub for FL10_0; the resource allocation contract — `CreateResource` → `pfnAllocateCb` + `D3DDDI_ALLOCATIONINFO`; the `Map`/`Unmap` contract — `LockCb`/`UnlockCb`, DO_NOT_WAIT, staging readback sync; the swapchain backbuffer `CreateResource` trace guide; and the protocol header overview — where `aerogpu_cmd.h` and `aerogpu_format` live)
 
 ## Bring-up tracing (Win7)
 
@@ -162,7 +155,7 @@ For early Win7 bring-up it is often useful to trace:
 
 See:
 
-* `docs/graphics/win7-d3d10-caps-tracing.md`
+* `wiki/areas/graphics.md`
 
 ## Feature level strategy
 
@@ -258,7 +251,7 @@ KMD can build the per-submit allocation table for guest-backed resources.
 
 For shared allocations, `alloc_id` must avoid collisions across guest processes and must stay in the UMD-owned range (`alloc_id <= 0x7fffffff`, non-zero).
 
-Canonical contract and rationale: `docs/graphics/win7-shared-surfaces-share-token.md`.
+Canonical contract and rationale: `wiki/areas/graphics.md`.
 
 Win7 validation/regression tests:
 
@@ -285,7 +278,7 @@ The trace hooks are implemented in both the WDK-backed Win7 DDIs and the
 repo-local ABI subset build so the same flag can be used regardless of header
 source (`/p:AeroGpuUseWdkHeaders=1` vs `0`).
 
-See `docs/graphics/win7-dxgi-swapchain-backbuffer.md` for the recommended probe
+See `wiki/areas/graphics.md` for the recommended probe
 app and log interpretation workflow.
 
 ### Optional tracing (instanced draws)
@@ -391,7 +384,7 @@ msbuild drivers\aerogpu\aerogpu.sln /m /p:Configuration=Release /p:Platform=Win3
 msbuild drivers\aerogpu\aerogpu.sln /m /p:Configuration=Release /p:Platform=x64
 ```
 
-CI builds the same solution (and stages outputs under `out/drivers/aerogpu/`) via `ci/build-drivers.ps1`.
+CI builds the same solution (and stages outputs under `out/drivers/aerogpu/`) via `drivers/build/build-drivers.ps1`.
 
 Optional: `drivers\aerogpu\build\build_all.cmd` is a convenience wrapper around MSBuild/WDK10 that stages outputs under `drivers\aerogpu\build\out\win7\...`.
 

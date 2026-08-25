@@ -372,6 +372,114 @@ fn tier0_preserves_bios_interrupt_vector_for_hlt_hypercall() {
 }
 
 #[test]
+fn tier0_recognizes_hybrid_int10_rom_entry_before_hlt_hypercall() {
+    let mut bus = FlatTestBus::new(0x100000);
+    let code_base = 0x0100u64;
+    bus.load(code_base, &[0xB4, 0x0F, 0xCD, 0x10]); // mov ah,0fh; int 10h
+
+    let vector = 0x10u8;
+    let stub_seg = 0xF000u16;
+    let stub_off = 0xE300u16;
+    let ivt_addr = (vector as u64) * 4;
+    bus.write_u16(ivt_addr, stub_off).unwrap();
+    bus.write_u16(ivt_addr + 2, stub_seg).unwrap();
+
+    // Firmware's interpreter-safe INT 10h entry executes VBE functions in ROM, but branches
+    // non-VBE functions to the host-HLE HLT boundary at +8:
+    //   cmp ah,4fh; jne +3; jmp rel16; hlt; iret
+    let stub_phys = ((stub_seg as u64) << 4) + u64::from(stub_off);
+    bus.load(
+        stub_phys,
+        &[0x80, 0xFC, 0x4F, 0x75, 0x03, 0xE9, 0x00, 0x00, 0xF4, 0xCF],
+    );
+
+    let mut cpu = Vcpu::new_with_mode(CpuMode::Real, bus);
+    cpu.cpu.state.write_reg(Register::CS, 0);
+    cpu.cpu.state.write_reg(Register::SS, 0);
+    cpu.cpu.state.write_reg(Register::SP, 0x8000);
+    cpu.cpu.state.set_rflags(0x0002);
+    cpu.cpu.state.set_rip(code_base);
+
+    let mut interp = Tier0Interpreter::new(1024);
+    interp.exec_block(&mut cpu);
+    assert_eq!(cpu.cpu.state.rip(), u64::from(stub_off));
+    assert!(cpu.cpu.state.pending_bios_int_valid);
+
+    for _ in 0..3 {
+        interp.exec_block(&mut cpu);
+        if cpu.cpu.state.rip() == u64::from(stub_off) + 9 {
+            break;
+        }
+    }
+    assert!(!cpu.cpu.state.halted);
+    assert_eq!(cpu.cpu.state.rip(), u64::from(stub_off) + 9);
+    assert!(cpu.cpu.state.pending_bios_int_valid);
+    assert_eq!(cpu.cpu.state.pending_bios_int, vector);
+}
+
+#[test]
+fn hybrid_int10_vbe_rom_iret_clears_unused_bios_hypercall_marker() {
+    let mut bus = FlatTestBus::new(0x100000);
+    let code_base = 0x0100u64;
+    bus.load(code_base, &[0xB4, 0x4F, 0xCD, 0x10, 0x90]); // mov ah,4fh; int 10h; nop
+
+    let vector = 0x10u8;
+    let stub_seg = 0xF000u16;
+    let stub_off = 0xE300u16;
+    let vbe_off = 0xE400u16;
+    let ivt_addr = (vector as u64) * 4;
+    bus.write_u16(ivt_addr, stub_off).unwrap();
+    bus.write_u16(ivt_addr + 2, stub_seg).unwrap();
+
+    let stub_phys = ((stub_seg as u64) << 4) + u64::from(stub_off);
+    let jump_next = stub_off.wrapping_add(8);
+    let displacement = vbe_off.wrapping_sub(jump_next);
+    let [disp_lo, disp_hi] = displacement.to_le_bytes();
+    bus.load(
+        stub_phys,
+        &[
+            0x80, 0xFC, 0x4F, 0x75, 0x03, 0xE9, disp_lo, disp_hi, 0xF4, 0xCF,
+        ],
+    );
+    bus.load(
+        ((stub_seg as u64) << 4) + u64::from(vbe_off),
+        &[0xCF], // IRET from the self-contained VBE implementation.
+    );
+
+    let mut cpu = Vcpu::new_with_mode(CpuMode::Real, bus);
+    cpu.cpu.state.write_reg(Register::CS, 0);
+    cpu.cpu.state.write_reg(Register::SS, 0);
+    cpu.cpu.state.write_reg(Register::SP, 0x8000);
+    cpu.cpu.state.set_rflags(0x0002);
+    cpu.cpu.state.set_rip(code_base);
+
+    let mut interp = Tier0Interpreter::new(1024);
+    interp.exec_block(&mut cpu);
+    assert!(cpu.cpu.state.pending_bios_int_valid);
+
+    for _ in 0..3 {
+        interp.exec_block(&mut cpu);
+        if cpu.cpu.state.rip() == u64::from(vbe_off) {
+            break;
+        }
+    }
+    assert_eq!(cpu.cpu.state.rip(), u64::from(vbe_off));
+    assert!(cpu.cpu.state.pending_bios_int_valid);
+
+    for _ in 0..2 {
+        interp.exec_block(&mut cpu);
+        if cpu.cpu.state.rip() == code_base + 4 {
+            break;
+        }
+    }
+    assert_eq!(cpu.cpu.state.rip(), code_base + 4);
+    assert!(
+        !cpu.cpu.state.pending_bios_int_valid,
+        "IRET from the executable VBE path must not leave a stale INT 10h marker"
+    );
+}
+
+#[test]
 fn tier0_external_interrupt_to_bios_stub_exits_instead_of_halting() {
     let mut bus = FlatTestBus::new(0x100000);
     let code_base = 0x0100u64;

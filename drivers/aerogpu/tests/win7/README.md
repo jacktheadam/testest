@@ -10,7 +10,7 @@ In particular, `d3d10_map_do_not_wait`, `d3d10_1_map_do_not_wait`, and `d3d11_ma
 
 For D3D11 UMD bring-up (Win7 FL10_0), including which `d3d11umddi.h` function-table entries must be non-null vs safely stubbable, see:
 
-* `docs/graphics/win7-d3d11ddi-function-tables.md`
+* `wiki/areas/graphics.md`
 
 For automation, tests can also optionally emit a machine-readable JSON report (`--json[=PATH]`) with a stable `schema_version`.
 
@@ -375,7 +375,7 @@ cargo run -p aero-gpu-trace-replay -- decode-cmd-stream cmd.bin
 ```
 
 For the canonical `aerogpu_dbgctl.exe` workflow (including `--force` and `--index-from-tail` tips), see:
-[`docs/windows7-driver-troubleshooting.md` → “Dumping the last AeroGPU submission”](../../../../docs/windows7-driver-troubleshooting.md#dumping-the-last-aerogpu-submission-cmd-stream-and-alloc-table).
+[`wiki/areas/drivers-windows.md` → “Dumping the last AeroGPU submission”](wiki/areas/drivers-windows.md#troubleshooting-quick-map).
 
 ### D3D9 UMD call tracing (bring-up / debugging)
 
@@ -384,7 +384,7 @@ it can be helpful to capture the **in-UMD D3D9UMDDI call trace**.
 
 See:
 
-* `docs/graphics/win7-d3d9-umd-tracing.md`
+* `wiki/areas/graphics.md`
 
 Example: dump the trace on the first stub-tagged DDI hit (useful for spotting which unimplemented entrypoint the runtime exercised):
 

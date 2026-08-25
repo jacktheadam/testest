@@ -1,0 +1,938 @@
+<#
+.SYNOPSIS
+  Generates Windows 7 catalog (.cat) files for each staged driver package.
+
+.DESCRIPTION
+  This script combines driver packaging assets (INF + optional coinstallers) from the
+  repository `drivers/<driver>` directories with built binaries from `out/drivers/<driver>`
+  and runs Inf2Cat to produce catalog files in a stable staging layout under `out/packages`.
+
+  `<driver>` is a path relative to the `drivers/` directory (it may be nested,
+  e.g. `drivers/windows7/virtio-net/...`).
+
+  If enabled (default), it stamps DriverVer in the staged INF(s) using `drivers/build/stamp-infs.ps1`
+  before running Inf2Cat. Catalogs hash INF contents, so stamping must happen first.
+
+  The output staging folders are intended to be consumed by later signing/packaging steps.
+
+  CI packaging gate:
+    - Only drivers that contain `ci-package.json` at the driver root are staged/packaged.
+      This is an explicit opt-in to avoid accidentally shipping dev/test drivers (or
+      conflicting INFs that match real HWIDs).
+
+.PARAMETER OsList
+  List of OS identifiers to pass to Inf2Cat. Defaults to @('7_X86','7_X64').
+  You may also include Server2008R2_X64 (it will be grouped into the x64 package).
+
+.PARAMETER InputRoot
+  Root directory containing staged build outputs (per driver). Defaults to out/drivers.
+
+.PARAMETER OutputRoot
+  Root directory to write staged packages (per driver + arch). Defaults to out/packages.
+
+.PARAMETER ToolchainJson
+  Optional JSON file describing toolchain paths. If provided, the script will try to
+  discover Inf2Cat.exe from it.
+
+.PARAMETER NoStampInfs
+  Disables stamping DriverVer in staged INFs before catalog generation. You can also set
+  AERO_STAMP_INFS=0/false/no/off to disable stamping in CI without changing arguments.
+
+.PARAMETER IncludeWdfCoInstaller
+  Explicit opt-in to copy Microsoft WDK redistributables (specifically WdfCoInstaller*.dll)
+  from the installed WDK into staged driver packages, but only for drivers that declare
+  a `wdfCoInstaller` requirement in `drivers/<driver>/ci-package.json`.
+
+.PARAMETER IncludeWdkRedist
+  Alternative opt-in mechanism to allow specific WDK redistributables by name
+  (example: -IncludeWdkRedist WdfCoInstaller). Default is empty.
+#>
+
+#Requires -Version 5.1
+
+[CmdletBinding()]
+param(
+  [string[]] $OsList = @('7_X86', '7_X64'),
+  [string] $InputRoot = 'out/drivers',
+  [string] $OutputRoot = 'out/packages',
+  [string] $ToolchainJson,
+  [switch] $NoStampInfs,
+  [switch] $IncludeWdfCoInstaller,
+  [string[]] $IncludeWdkRedist = @()
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+Import-Module -Force (Join-Path -Path $PSScriptRoot -ChildPath 'lib/Catalog.psm1')
+Import-Module -Force (Join-Path -Path $PSScriptRoot -ChildPath 'lib/DriverPackageManifest.psm1')
+
+$repoRoot = Resolve-Path (Join-Path -Path $PSScriptRoot -ChildPath '..') | Select-Object -ExpandProperty Path
+
+function Resolve-RepoPath {
+  param(
+    [Parameter(Mandatory)]
+    [string] $Path
+  )
+
+  if ([System.IO.Path]::IsPathRooted($Path)) {
+    return [System.IO.Path]::GetFullPath($Path)
+  }
+
+  return [System.IO.Path]::GetFullPath((Join-Path -Path $repoRoot -ChildPath $Path))
+}
+
+function Get-RelativePathFromRoot {
+  param(
+    [Parameter(Mandatory)]
+    [string] $Root,
+    [Parameter(Mandatory)]
+    [string] $Path
+  )
+
+  $sep = [System.IO.Path]::DirectorySeparatorChar
+  $alt = [System.IO.Path]::AltDirectorySeparatorChar
+
+  $rootResolved = (Resolve-Path -LiteralPath $Root | Select-Object -ExpandProperty Path).TrimEnd($sep, $alt)
+  $pathResolved = (Resolve-Path -LiteralPath $Path | Select-Object -ExpandProperty Path).TrimEnd($sep, $alt)
+
+  $prefix = $rootResolved + $sep
+  if (-not $pathResolved.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Path '$pathResolved' is not under root '$rootResolved'."
+  }
+
+  return $pathResolved.Substring($prefix.Length)
+}
+
+function Resolve-ChildPathUnderRoot {
+  param(
+    [Parameter(Mandatory)]
+    [string] $Root,
+    [Parameter(Mandatory)]
+    [string] $ChildPath
+  )
+
+  if ([System.IO.Path]::IsPathRooted($ChildPath)) {
+    throw "Path '$ChildPath' must be relative to '$Root'."
+  }
+
+  $sep = [System.IO.Path]::DirectorySeparatorChar
+  $alt = [System.IO.Path]::AltDirectorySeparatorChar
+  $rootResolved = [System.IO.Path]::GetFullPath($Root).TrimEnd($sep, $alt)
+  $full = [System.IO.Path]::GetFullPath((Join-Path -Path $rootResolved -ChildPath $ChildPath))
+
+  $prefix = $rootResolved + $sep
+  if (-not $full.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Path '$ChildPath' resolves outside root '$rootResolved'."
+  }
+
+  return $full
+}
+
+function Find-DriverBuildDirs {
+  param(
+    [Parameter(Mandatory)]
+    [string] $InputRoot
+  )
+
+  if (-not (Test-Path -LiteralPath $InputRoot)) {
+    throw "InputRoot not found: $InputRoot"
+  }
+
+  # A driver build directory is expected to contain per-arch subdirectories (x86/x64, etc).
+  # We identify driver roots by scanning for directories which have an immediate child directory
+  # matching a known architecture directory name.
+  $archDirNames = @(
+    'x86', 'X86', 'Win32', 'win32', 'i386', 'I386',
+    'x64', 'X64', 'amd64', 'AMD64', 'x86_64', 'X86_64',
+    '7_X86', '7_X64', 'Server2008R2_X64'
+  )
+
+  $seen = @{}
+  $results = New-Object System.Collections.Generic.List[object]
+
+  $dirs = @(Get-ChildItem -LiteralPath $InputRoot -Directory -Recurse -ErrorAction SilentlyContinue)
+  foreach ($dir in $dirs) {
+    $children = @(Get-ChildItem -LiteralPath $dir.FullName -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+    if (-not $children -or $children.Count -eq 0) { continue }
+
+    $hasArchChild = $false
+    foreach ($child in $children) {
+      if ($archDirNames -contains $child) {
+        $hasArchChild = $true
+        break
+      }
+    }
+    if (-not $hasArchChild) { continue }
+
+    $rel = Get-RelativePathFromRoot -Root $InputRoot -Path $dir.FullName
+    $key = $rel.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+
+    [void]$results.Add([pscustomobject]@{
+      RelativePath = $rel
+      FullName = $dir.FullName
+      DisplayName = $rel.Replace([System.IO.Path]::DirectorySeparatorChar, '/').Replace([System.IO.Path]::AltDirectorySeparatorChar, '/')
+    })
+  }
+
+  return ($results | Sort-Object -Property RelativePath)
+}
+
+function Get-TruthyEnvFlag {
+  param([Parameter(Mandatory = $true)][string] $Name)
+
+  $raw = [Environment]::GetEnvironmentVariable($Name)
+  if (-not $raw) {
+    return $null
+  }
+
+  switch ($raw.Trim().ToLowerInvariant()) {
+    '0' { return $false }
+    'false' { return $false }
+    'no' { return $false }
+    'off' { return $false }
+    default { return $true }
+  }
+}
+
+function Invoke-PackageSanitation {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)]
+    [string] $PackageDir
+  )
+
+  if (-not (Test-Path -LiteralPath $PackageDir -PathType Container)) {
+    throw "PackageDir not found for sanitation: $PackageDir"
+  }
+
+  # NOTE: This runs on the staged package directory under out/packages/** (not on the build outputs).
+  # It is intended to prevent accidentally shipping debug/intermediate artifacts or secret material.
+  $debugAndIntermediateExtensions = @(
+    '.pdb', '.dbg', '.ipdb', '.iobj', '.obj', '.lib', '.exp', '.ilk', '.idb', '.map',
+    '.tlog', '.log', '.wrn', '.err', '.lastbuildstate', '.tmp', '.cache',
+    '.pch', '.sdf', '.opensdf', '.ncb', '.binlog', '.etl', '.dmp'
+  )
+  $sourceAndProjectExtensions = @(
+    '.c', '.cc', '.cpp', '.cxx', '.h', '.hpp', '.idl', '.inl', '.rc', '.asm', '.s',
+    '.vcxproj', '.sln', '.props', '.targets', '.filters', '.user'
+  )
+  $forbiddenSecretExtensions = @(
+    '.pfx', '.p12', '.pvk', '.snk', '.key', '.pem', '.p8', '.pk8', '.ppk', '.jks', '.keystore', '.kdbx', '.gpg', '.pgp', '.der', '.csr'
+  )
+  $metadataFileNames = @('Thumbs.db', 'desktop.ini', '.DS_Store')
+
+  $deleteExtSet = @{}
+  foreach ($ext in @($debugAndIntermediateExtensions + $sourceAndProjectExtensions)) {
+    $deleteExtSet[$ext.ToLowerInvariant()] = $true
+  }
+
+  $forbiddenExtSet = @{}
+  foreach ($ext in $forbiddenSecretExtensions) {
+    $forbiddenExtSet[$ext.ToLowerInvariant()] = $true
+  }
+
+  $metadataNameSet = @{}
+  foreach ($name in $metadataFileNames) {
+    $metadataNameSet[$name.ToLowerInvariant()] = $true
+  }
+
+  $deletedCount = 0
+  $forbiddenPaths = New-Object System.Collections.Generic.List[string]
+
+  $files = @(Get-ChildItem -LiteralPath $PackageDir -Recurse -Force -File -ErrorAction Stop)
+  foreach ($file in $files) {
+    $ext = $file.Extension.ToLowerInvariant()
+    $name = $file.Name.ToLowerInvariant()
+
+    if ($forbiddenExtSet.ContainsKey($ext)) {
+      [void]$forbiddenPaths.Add($file.FullName)
+      continue
+    }
+
+    if ($metadataNameSet.ContainsKey($name) -or $deleteExtSet.ContainsKey($ext)) {
+      Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+      $deletedCount++
+    }
+  }
+
+  return [pscustomobject]@{
+    DeletedCount   = $deletedCount
+    ForbiddenCount = $forbiddenPaths.Count
+    ForbiddenPaths = $forbiddenPaths.ToArray()
+  }
+}
+
+$allowWdfCoInstaller = $IncludeWdfCoInstaller -or ($IncludeWdkRedist -contains 'WdfCoInstaller')
+if ($allowWdfCoInstaller) {
+  Write-Host "WDK redistributables enabled: WdfCoInstaller"
+} else {
+  Write-Host "WDK redistributables disabled (default)."
+}
+
+function Read-DriverPackageManifest {
+  param(
+    [Parameter(Mandatory)]
+    [string] $DriverSourceDir
+  )
+
+  $manifestPath = Join-Path -Path $DriverSourceDir -ChildPath 'ci-package.json'
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    return @{
+      ManifestPath = $manifestPath
+      InfFiles = $null
+      Wow64Files = @()
+      RequiredBuildOutputFiles = @()
+      AdditionalFiles = @()
+      ToolFiles = @()
+      WdfCoInstaller = $null
+    }
+  }
+
+  $data = Validate-DriverPackageManifest -ManifestPath $manifestPath -DriverRoot $DriverSourceDir
+
+  $infFiles = $null
+  if ($null -ne $data.infFiles) {
+    $infFiles = @()
+    $seen = @{}
+    foreach ($entry in @($data.infFiles)) {
+      if ($null -eq $entry) { continue }
+      $s = ([string]$entry).Trim()
+      if ($s.Length -eq 0) { continue }
+
+      $srcInf = Resolve-ChildPathUnderRoot -Root $DriverSourceDir -ChildPath $s
+      if (-not (Test-Path -LiteralPath $srcInf -PathType Leaf)) {
+        throw "Invalid manifest '$manifestPath': infFiles entry not found: $s"
+      }
+      if ([IO.Path]::GetExtension($srcInf) -ne '.inf') {
+        throw "Invalid manifest '$manifestPath': infFiles entry '$s' must have a .inf extension."
+      }
+
+      $key = $srcInf.ToLowerInvariant()
+      if ($seen.ContainsKey($key)) { continue }
+      $seen[$key] = $true
+
+      $infFiles += (Get-Item -LiteralPath $srcInf)
+    }
+
+    if ($infFiles.Count -eq 0) {
+      throw "Invalid manifest '$manifestPath': infFiles is present but empty."
+    }
+
+    $infFiles = $infFiles | Sort-Object -Property FullName
+  }
+
+  $wow64Files = @()
+  if ($null -ne $data.wow64Files) {
+    $seen = @{}
+    foreach ($entry in @($data.wow64Files)) {
+      if ($null -eq $entry) { continue }
+      $s = ([string]$entry).Trim()
+      if ($s.Length -eq 0) { continue }
+
+      if ([System.IO.Path]::IsPathRooted($s)) {
+        throw "Invalid manifest '$manifestPath': wow64Files entry '$s' must be a file name, not a path."
+      }
+      [char[]]$sepChars = @([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+      if ($s.IndexOfAny($sepChars) -ge 0) {
+        throw "Invalid manifest '$manifestPath': wow64Files entry '$s' must be a file name, not a path."
+      }
+
+      $ext = [IO.Path]::GetExtension($s)
+      if ($ext -ne '.dll') {
+        throw "Invalid manifest '$manifestPath': wow64Files entry '$s' must have a .dll extension."
+      }
+
+      $key = $s.ToLowerInvariant()
+      if ($seen.ContainsKey($key)) { continue }
+      $seen[$key] = $true
+
+      $wow64Files += $s
+    }
+  }
+
+  $requiredBuildOutFiles = @()
+  if ($null -ne $data.requiredBuildOutputFiles) {
+    $seen = @{}
+    foreach ($entry in @($data.requiredBuildOutputFiles)) {
+      if ($null -eq $entry) { continue }
+      $s = ([string]$entry).Trim()
+      if ($s.Length -eq 0) { continue }
+
+      if ([System.IO.Path]::IsPathRooted($s)) {
+        throw "Invalid manifest '$manifestPath': requiredBuildOutputFiles entry '$s' must be a relative path."
+      }
+
+      $key = $s.ToLowerInvariant()
+      if ($seen.ContainsKey($key)) { continue }
+      $seen[$key] = $true
+
+      $requiredBuildOutFiles += $s
+    }
+  }
+
+  $additional = @()
+  if ($null -ne $data.additionalFiles) {
+    foreach ($entry in @($data.additionalFiles)) {
+      if ($null -eq $entry) { continue }
+      $s = ([string]$entry).Trim()
+      if ($s.Length -gt 0) {
+        $additional += $s
+      }
+    }
+  }
+
+  $toolFiles = @()
+  if ($null -ne $data.toolFiles) {
+    foreach ($entry in @($data.toolFiles)) {
+      if ($null -eq $entry) { continue }
+      $s = ([string]$entry).Trim()
+      if ($s.Length -gt 0) {
+        $toolFiles += $s
+      }
+    }
+  }
+
+  $wdf = $null
+  if ($null -ne $data.wdfCoInstaller) {
+    $kmdfVersion = [string]$data.wdfCoInstaller.kmdfVersion
+    if ([string]::IsNullOrWhiteSpace($kmdfVersion)) {
+      throw "Invalid manifest '$manifestPath': wdfCoInstaller.kmdfVersion is required."
+    }
+    $dllName = [string]$data.wdfCoInstaller.dllName
+    if ([string]::IsNullOrWhiteSpace($dllName)) {
+      $dllName = $null
+    } else {
+      $dllName = $dllName.Trim()
+      [char[]]$sepChars = @([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+      if ($dllName.IndexOfAny($sepChars) -ge 0) {
+        throw "Invalid manifest '$manifestPath': wdfCoInstaller.dllName must be a file name, not a path."
+      }
+      if ($dllName -notmatch '^WdfCoInstaller\d{5}\.dll$') {
+        throw "Invalid manifest '$manifestPath': wdfCoInstaller.dllName must match 'WdfCoInstallerNNNNN.dll' (example: WdfCoInstaller01011.dll)."
+      }
+    }
+    $wdf = @{
+      KmdfVersion = $kmdfVersion.Trim()
+      DllName = $dllName
+    }
+  }
+
+  return @{
+    ManifestPath = $manifestPath
+    InfFiles = $infFiles
+    Wow64Files = $wow64Files
+    RequiredBuildOutputFiles = $requiredBuildOutFiles
+    AdditionalFiles = $additional
+    ToolFiles = $toolFiles
+    WdfCoInstaller = $wdf
+  }
+}
+
+function Get-WdfCoInstallerDllNameFromKmdfVersion {
+  param(
+    [Parameter(Mandatory)]
+    [string] $KmdfVersion
+  )
+
+  $parts = $KmdfVersion.Split('.')
+  if ($parts.Count -ne 2) {
+    throw "Invalid KMDF version '$KmdfVersion' (expected format 'major.minor', e.g. '1.11')."
+  }
+  $major = [int]$parts[0]
+  $minor = [int]$parts[1]
+  $digits = "{0:D2}{1:D3}" -f $major, $minor
+  return "WdfCoInstaller$digits.dll"
+}
+
+function Get-WdkKitRoots {
+  $roots = New-Object System.Collections.Generic.List[string]
+
+  foreach ($envVar in @('WindowsSdkDir', 'WindowsSdkDir_10', 'WindowsSdkDir_81')) {
+    $value = [Environment]::GetEnvironmentVariable($envVar)
+    if ($null -ne $value -and $value.Trim() -ne '') {
+      $roots.Add($value.TrimEnd('\'))
+    }
+  }
+
+  $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+  if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
+    $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles')
+  }
+
+  foreach ($kitVersion in @('10', '8.1', '8.0')) {
+    $kitRoot = Join-Path -Path $programFilesX86 -ChildPath ("Windows Kits\{0}" -f $kitVersion)
+    if (Test-Path -LiteralPath $kitRoot) {
+      $roots.Add($kitRoot)
+    }
+  }
+
+  $winDdkRoot = 'C:\WinDDK'
+  if (Test-Path -LiteralPath $winDdkRoot) {
+    foreach ($ddk in (Get-ChildItem -LiteralPath $winDdkRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)) {
+      $roots.Add($ddk.FullName)
+    }
+  }
+
+  return $roots | Select-Object -Unique
+}
+
+function Resolve-WdfCoInstallerPath {
+  param(
+    [Parameter(Mandatory)]
+    [string] $DllName,
+    [Parameter(Mandatory)]
+    [ValidateSet('x86', 'x64')]
+    [string] $Arch
+  )
+
+  # Redist layout varies a bit across Windows Kits versions, but typically includes an
+  # arch directory segment like "\x86\" or "\amd64\". Match by path segment.
+  $archRegex = if ($Arch -eq 'x86') {
+    '(?i)(^|[\\/])x86([\\/]|$)'
+  } else {
+    '(?i)(^|[\\/])(amd64|x64)([\\/]|$)'
+  }
+
+  foreach ($kitRoot in (Get-WdkKitRoots)) {
+    foreach ($wdfRoot in @(
+      (Join-Path -Path $kitRoot -ChildPath 'Redist\wdf'),
+      (Join-Path -Path $kitRoot -ChildPath 'redist\wdf'),
+      (Join-Path -Path $kitRoot -ChildPath 'Redist\WDF'),
+      (Join-Path -Path $kitRoot -ChildPath 'redist\WDF')
+    )) {
+      if (-not (Test-Path -LiteralPath $wdfRoot -PathType Container)) {
+        continue
+      }
+
+      $candidates = Get-ChildItem -LiteralPath $wdfRoot -Recurse -File -Filter $DllName -ErrorAction SilentlyContinue
+      $match = $candidates | Where-Object { $_.FullName -match $archRegex } | Select-Object -First 1
+      if ($match) {
+        return $match.FullName
+      }
+    }
+  }
+
+  return $null
+}
+
+$stampInfs = $true
+if ($NoStampInfs) {
+  $stampInfs = $false
+} else {
+  $envStamp = Get-TruthyEnvFlag -Name 'AERO_STAMP_INFS'
+  if ($envStamp -eq $false) {
+    $stampInfs = $false
+  }
+}
+
+$envInf2CatOs = [Environment]::GetEnvironmentVariable('AERO_INF2CAT_OS')
+if (-not [string]::IsNullOrWhiteSpace($envInf2CatOs)) {
+  if ($PSBoundParameters.ContainsKey('OsList')) {
+    Write-Host "AERO_INF2CAT_OS is set; overriding -OsList with: $envInf2CatOs"
+  } else {
+    Write-Host "Using AERO_INF2CAT_OS: $envInf2CatOs"
+  }
+  $OsList = @($envInf2CatOs)
+}
+
+$inputRootAbs = Resolve-RepoPath -Path $InputRoot
+$outputRootAbs = Resolve-RepoPath -Path $OutputRoot
+$toolchainJsonAbs = if ($ToolchainJson) { Resolve-RepoPath -Path $ToolchainJson } else { $null }
+
+if (-not (Test-Path -LiteralPath $inputRootAbs)) {
+  throw "InputRoot not found: $inputRootAbs"
+}
+
+New-Item -ItemType Directory -Path $outputRootAbs -Force | Out-Null
+
+$osByArch = Split-OsListByArchitecture -OsList $OsList
+
+$inf2catPath = Resolve-Inf2CatPath -ToolchainJson $toolchainJsonAbs
+Write-Host "Using Inf2Cat: $inf2catPath"
+
+$driversRoot = Join-Path -Path $repoRoot -ChildPath 'drivers'
+
+# Best-effort cleanup: remove any stale packages under OutputRoot that do not correspond to a
+# CI-packaged driver (no drivers/<driver>/ci-package.json). This avoids accidentally shipping
+# old package folders after a driver is converted to dev/test-only or removed from CI packaging.
+if (Test-Path -LiteralPath $outputRootAbs -PathType Container) {
+  $existingPackages = @(Find-DriverBuildDirs -InputRoot $outputRootAbs)
+  foreach ($pkg in $existingPackages) {
+    $rel = [string]$pkg.RelativePath
+    if ([string]::IsNullOrWhiteSpace($rel)) { continue }
+    $src = Join-Path -Path $driversRoot -ChildPath $rel
+    $manifest = Join-Path -Path $src -ChildPath 'ci-package.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+      Write-Host "Removing stale non-CI package directory: $($pkg.DisplayName)"
+      Remove-Item -LiteralPath $pkg.FullName -Recurse -Force -ErrorAction Stop
+    }
+  }
+}
+
+$driverBuildDirs = @(Find-DriverBuildDirs -InputRoot $inputRootAbs)
+if (-not $driverBuildDirs) {
+  throw "No driver build directories found under $inputRootAbs"
+}
+
+$stampScript = Join-Path -Path $PSScriptRoot -ChildPath 'stamp-infs.ps1'
+
+$processedDriverCount = 0
+$skippedMissingManifestCount = 0
+
+foreach ($driverBuildDir in $driverBuildDirs) {
+  $driverRel = [string]$driverBuildDir.RelativePath
+  $driverNameForLog = [string]$driverBuildDir.DisplayName
+
+  Write-Host "==> Driver: $driverNameForLog"
+
+  $driverSourceDir = Join-Path -Path $driversRoot -ChildPath $driverRel
+  if (-not (Test-Path -LiteralPath $driverSourceDir)) {
+    throw "Driver source directory not found for '$driverNameForLog'. Expected: $driverSourceDir"
+  }
+
+  $manifestPath = Join-Path -Path $driverSourceDir -ChildPath 'ci-package.json'
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    Write-Host "  -> Skipping: missing ci-package.json (treating as dev/test driver; not CI-packaged)."
+    # Avoid accidentally shipping stale packages from prior runs if a previously-packaged
+    # driver is no longer opted into CI packaging.
+    if (-not [string]::IsNullOrWhiteSpace($driverRel)) {
+      $stalePackageRoot = Resolve-ChildPathUnderRoot -Root $outputRootAbs -ChildPath $driverRel
+      if (Test-Path -LiteralPath $stalePackageRoot -PathType Container) {
+        Write-Host "     Removing stale package output: $stalePackageRoot"
+        Remove-Item -LiteralPath $stalePackageRoot -Recurse -Force -ErrorAction Stop
+      }
+    }
+    $skippedMissingManifestCount++
+    continue
+  }
+
+  $processedDriverCount++
+
+  $manifest = Read-DriverPackageManifest -DriverSourceDir $driverSourceDir
+  $needsWdfCoInstaller = ($null -ne $manifest.WdfCoInstaller)
+  $wdfCoInstallerDllName = $null
+  if ($needsWdfCoInstaller) {
+    if (-not $allowWdfCoInstaller) {
+      throw "Driver '$driverNameForLog' declares a WDF coinstaller requirement in '$($manifest.ManifestPath)', but WDK redistributables are disabled. Re-run with -IncludeWdfCoInstaller."
+    }
+    $wdfCoInstallerDllName = $manifest.WdfCoInstaller.DllName
+    if ([string]::IsNullOrWhiteSpace($wdfCoInstallerDllName)) {
+      $wdfCoInstallerDllName = Get-WdfCoInstallerDllNameFromKmdfVersion -KmdfVersion $manifest.WdfCoInstaller.KmdfVersion
+    }
+  }
+
+  $wdfInSource = Get-ChildItem -LiteralPath $driverSourceDir -Recurse -File -Filter 'WdfCoInstaller*.dll' -ErrorAction SilentlyContinue
+  if ($wdfInSource) {
+    throw "Driver '$driverNameForLog' contains WdfCoInstaller*.dll under '$driverSourceDir'. Do not commit Microsoft WDK redistributables into the repo; use -IncludeWdfCoInstaller and '$($manifest.ManifestPath)' instead."
+  }
+
+  $infFiles = if ($null -ne $manifest.InfFiles) {
+    $manifest.InfFiles
+  } else {
+    Get-ChildItem -LiteralPath $driverSourceDir -Recurse -File -Filter '*.inf' |
+      Where-Object { $_.FullName -notmatch '[\\\\/](obj|out|build|target)[\\\\/]' } |
+      Sort-Object -Property FullName
+  }
+
+  if (-not $infFiles) {
+    throw "No INF files found under $driverSourceDir"
+  }
+
+  foreach ($arch in @('x86', 'x64')) {
+    $osListForArch = $osByArch[$arch]
+    if (-not $osListForArch -or $osListForArch.Count -eq 0) { continue }
+
+    $packageDir = Join-Path -Path $outputRootAbs -ChildPath (Join-Path -Path $driverRel -ChildPath $arch)
+    Write-Host "  -> Staging package: $packageDir"
+
+    if (Test-Path -LiteralPath $packageDir) {
+      Remove-Item -LiteralPath $packageDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+
+    $buildOutDir = Resolve-DriverBuildOutputDir -DriverBuildDir $driverBuildDir.FullName -Arch $arch -OsListForArch $osListForArch
+    Write-Host "     Using build outputs: $buildOutDir"
+
+    foreach ($relPath in $manifest.RequiredBuildOutputFiles) {
+      $src = Resolve-ChildPathUnderRoot -Root $buildOutDir -ChildPath $relPath
+      if (-not (Test-Path -LiteralPath $src -PathType Leaf)) {
+        throw "Driver '$driverNameForLog' declares requiredBuildOutputFiles '$relPath' via '$($manifest.ManifestPath)', but it was not found in build output directory: $src"
+      }
+    }
+
+    Copy-Item -Path (Join-Path -Path $buildOutDir -ChildPath '*') -Destination $packageDir -Recurse -Force -ErrorAction Stop
+
+    # Some driver build systems emit/stage INF files into the build output directory. CI packaging
+    # must ignore those and only stage INF(s) selected from the source tree (via ci-package.json
+    # infFiles or auto-discovery) plus any explicitly-staged additional INF(s). Leaving build-output
+    # INFs in the package defeats infFiles disambiguation and can cause Inf2Cat to catalog (and
+    # later Guest Tools to stage) unintended INFs.
+    $buildOutputInfFiles = @(
+      Get-ChildItem -LiteralPath $packageDir -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { [string]::Equals([IO.Path]::GetExtension($_.Name), '.inf', [System.StringComparison]::OrdinalIgnoreCase) }
+    )
+    if ($buildOutputInfFiles.Count -gt 0) {
+      $buildOutputInfFiles | Remove-Item -Force -ErrorAction Stop
+    }
+    Write-Host "     Removed $($buildOutputInfFiles.Count) build-output INF file(s) from staged package."
+
+    if ($arch -eq 'x64' -and $manifest.Wow64Files -and $manifest.Wow64Files.Count -gt 0) {
+      $x86OsListForArch = $osByArch['x86']
+      if (-not $x86OsListForArch -or $x86OsListForArch.Count -eq 0) {
+        # Resolve-DriverBuildOutputDir prefers OS-id directory names when present (e.g. 7_X86).
+        # Even when catalog generation is x64-only, WOW64 payloads still require x86 build outputs.
+        $x86OsListForArch = @('7_X86')
+      }
+
+      $x86BuildOutDir = Resolve-DriverBuildOutputDir -DriverBuildDir $driverBuildDir.FullName -Arch x86 -OsListForArch $x86OsListForArch
+      Write-Host "     Including WOW64 file(s) from x86 build outputs: $x86BuildOutDir"
+      foreach ($fileName in $manifest.Wow64Files) {
+        $src = Join-Path -Path $x86BuildOutDir -ChildPath $fileName
+        if (-not (Test-Path -LiteralPath $src -PathType Leaf)) {
+          throw "Driver '$driverNameForLog' requests WOW64 file '$fileName' via '$($manifest.ManifestPath)', but it was not found in x86 build output directory: $src"
+        }
+
+        $dest = Join-Path -Path $packageDir -ChildPath $fileName
+        if (Test-Path -LiteralPath $dest -PathType Leaf) {
+          throw "Driver '$driverNameForLog' requests WOW64 file '$fileName' via '$($manifest.ManifestPath)', but '$dest' already exists in the x64 staged package. WOW64 payloads are copied into the package root; ensure the 64-bit build output uses a different file name (example: use a '_x64' suffix) so the 32-bit DLL does not overwrite the 64-bit one."
+        }
+
+        Copy-Item -LiteralPath $src -Destination $dest -Force
+      }
+    }
+
+    $infNameMap = @{}
+    $stagedInfPaths = @()
+    foreach ($inf in $infFiles) {
+      $support = Get-InfArchitectureSupport -InfPath $inf.FullName
+      if ($support -ne 'both' -and $support -ne $arch) { continue }
+
+      if ($infNameMap.ContainsKey($inf.Name)) {
+        throw "Duplicate INF file name '$($inf.Name)' for driver '$driverNameForLog'. Ensure INF names are unique within the driver directory."
+      }
+      $infNameMap[$inf.Name] = $true
+
+      $destInf = Join-Path -Path $packageDir -ChildPath $inf.Name
+      Copy-Item -LiteralPath $inf.FullName -Destination $destInf -Force
+      $stagedInfPaths += $destInf
+    }
+
+    if ($infNameMap.Count -eq 0) {
+      throw "No INF files applicable to $arch were found for driver '$driverNameForLog'."
+    }
+
+    foreach ($coName in @('coinstallers', 'coinstaller')) {
+      $coDir = Join-Path -Path $driverSourceDir -ChildPath $coName
+      if (-not (Test-Path -LiteralPath $coDir)) { continue }
+
+      Copy-Item -LiteralPath $coDir -Destination (Join-Path -Path $packageDir -ChildPath $coName) -Recurse -Force
+      Get-ChildItem -LiteralPath $coDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path -Path $packageDir -ChildPath $_.Name) -Force
+      }
+    }
+
+    foreach ($relPath in $manifest.AdditionalFiles) {
+      $ext = [IO.Path]::GetExtension($relPath)
+      if ($ext -in @('.sys', '.dll', '.exe', '.cat', '.msi', '.cab')) {
+        $hint = if ($ext -eq '.exe') { " Use toolFiles to include helper .exe binaries." } else { "" }
+        throw "Driver '$driverNameForLog' additionalFiles must be non-binary; refusing to include '$relPath'.$hint"
+      }
+      if ($ext -in @('.pfx', '.p12', '.pvk', '.snk', '.key', '.pem', '.p8', '.ppk', '.jks', '.keystore', '.kdbx', '.gpg', '.pgp')) {
+        throw "Driver '$driverNameForLog' additionalFiles must not include sensitive/secret material; refusing to include '$relPath'."
+      }
+
+      $src = Resolve-ChildPathUnderRoot -Root $driverSourceDir -ChildPath $relPath
+      if (-not (Test-Path -LiteralPath $src -PathType Leaf)) {
+        throw "Driver '$driverNameForLog' additional file not found: $src"
+      }
+
+      $dest = Resolve-ChildPathUnderRoot -Root $packageDir -ChildPath $relPath
+      $destDir = Split-Path -Parent $dest
+      if ($destDir -and -not (Test-Path -LiteralPath $destDir)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+      }
+      Copy-Item -LiteralPath $src -Destination $dest -Force
+
+      # Some drivers stage additional INF(s) under subdirectories (for example: a legacy binding
+      # INF under `legacy/`). Include those in INF stamping so DriverVer stays in sync with the
+      # packaged build and catalog generation hashes the stamped contents.
+      if ($ext -eq '.inf') {
+        $stagedInfPaths += $dest
+      }
+    }
+
+    foreach ($relPath in $manifest.ToolFiles) {
+      $ext = [IO.Path]::GetExtension($relPath)
+      if ($ext -ne '.exe') {
+        throw "Driver '$driverNameForLog' toolFiles entries must be .exe files; refusing to include '$relPath'."
+      }
+
+      $srcFromBuildOut = Resolve-ChildPathUnderRoot -Root $buildOutDir -ChildPath $relPath
+      $srcFromSourceDir = Resolve-ChildPathUnderRoot -Root $driverSourceDir -ChildPath $relPath
+
+      $src = $null
+      $srcKind = $null
+      # Prefer the driver source tree (toolFiles is a driver-relative path list), but keep a fallback
+      # to build outputs so CI can still stage tools that were produced and staged into out/drivers/**.
+      if (Test-Path -LiteralPath $srcFromSourceDir -PathType Leaf) {
+        $src = $srcFromSourceDir
+        $srcKind = "driver source tree"
+      } elseif (Test-Path -LiteralPath $srcFromBuildOut -PathType Leaf) {
+        $src = $srcFromBuildOut
+        $srcKind = "build outputs"
+      } else {
+        throw "Driver '$driverNameForLog' requests tool file '$relPath' via '$($manifest.ManifestPath)', but it was not found in either build outputs ('$srcFromBuildOut') or driver source tree ('$srcFromSourceDir')."
+      }
+
+      $dest = Resolve-ChildPathUnderRoot -Root $packageDir -ChildPath $relPath
+      $destDir = Split-Path -Parent $dest
+      if ($destDir -and -not (Test-Path -LiteralPath $destDir)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+      }
+      Write-Host "     Including tool file: $relPath ($srcKind)"
+      Copy-Item -LiteralPath $src -Destination $dest -Force
+    }
+
+    $existingWdf = @(Get-ChildItem -LiteralPath $packageDir -Recurse -File -Filter 'WdfCoInstaller*.dll' -ErrorAction SilentlyContinue)
+    if ($existingWdf.Count -gt 0) {
+      if (-not $allowWdfCoInstaller) {
+        throw "WDK redistributables are disabled, but staged package '$packageDir' already contains: $($existingWdf.Name -join ', ')"
+      }
+      if (-not $needsWdfCoInstaller) {
+        throw "Staged package '$packageDir' contains WdfCoInstaller*.dll, but driver '$driverNameForLog' does not declare wdfCoInstaller in '$($manifest.ManifestPath)'."
+      }
+      $existingWdf | Remove-Item -Force -ErrorAction Stop
+    }
+
+    if ($needsWdfCoInstaller) {
+      $wdfSource = Resolve-WdfCoInstallerPath -DllName $wdfCoInstallerDllName -Arch $arch
+      if (-not $wdfSource) {
+        throw "Unable to locate '$wdfCoInstallerDllName' in installed WDK redistributables for $arch. Ensure the Windows Driver Kit is installed (Windows Kits\\<ver>\\Redist\\wdf)."
+      }
+
+      Write-Host "     Including $wdfCoInstallerDllName ($arch) from: $wdfSource"
+      Copy-Item -LiteralPath $wdfSource -Destination (Join-Path -Path $packageDir -ChildPath $wdfCoInstallerDllName) -Force
+      foreach ($coName in @('coinstallers', 'coinstaller')) {
+        $destCoDir = Join-Path -Path $packageDir -ChildPath $coName
+        if (-not (Test-Path -LiteralPath $destCoDir -PathType Container)) { continue }
+        Copy-Item -LiteralPath $wdfSource -Destination (Join-Path -Path $destCoDir -ChildPath $wdfCoInstallerDllName) -Force
+      }
+    }
+
+    $preSanitation = Invoke-PackageSanitation -PackageDir $packageDir
+    if ($preSanitation.ForbiddenCount -gt 0) {
+      Write-Host "     Sanitation: deleted $($preSanitation.DeletedCount) file(s); forbidden file(s) found: $($preSanitation.ForbiddenCount)"
+      $list = ($preSanitation.ForbiddenPaths | Sort-Object -Unique | ForEach-Object { "       - $_" }) -join "`n"
+      throw @"
+Staged driver package contains forbidden secret/private key material.
+
+Package:  $packageDir
+Driver:   $driverNameForLog
+Arch:     $arch
+
+Offending file(s):
+$list
+
+Remediation:
+- Remove private key / certificate material from the driver build outputs so it is not copied into out/packages/**.
+- If you need CI signing keys, provide them to the signing step via CI secrets (see drivers/build/sign-drivers.ps1: AERO_DRIVER_PFX_BASE64/AERO_DRIVER_PFX_PASSWORD), not via driver package contents.
+"@
+    }
+
+    # Guardrail: after all staging/copying, ensure there are no unexpected INF files in the staged
+    # package. Inf2Cat catalogs every INF it sees under the package directory; extra INFs can cause
+    # incorrect catalog contents and nondeterministic PnP binding if Guest Tools stages all INFs.
+    $allStagedInfFiles = @(
+      Get-ChildItem -LiteralPath $packageDir -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { [string]::Equals([IO.Path]::GetExtension($_.Name), '.inf', [System.StringComparison]::OrdinalIgnoreCase) } |
+        Sort-Object -Property FullName
+    )
+
+    $stagedInfSet = @{}
+    foreach ($infPath in $stagedInfPaths) {
+      if ([string]::IsNullOrWhiteSpace($infPath)) { continue }
+      $full = [System.IO.Path]::GetFullPath($infPath)
+      $stagedInfSet[$full.ToLowerInvariant()] = $true
+    }
+
+    $extraInfPaths = @()
+    foreach ($infFile in $allStagedInfFiles) {
+      $full = [System.IO.Path]::GetFullPath($infFile.FullName)
+      if (-not $stagedInfSet.ContainsKey($full.ToLowerInvariant())) {
+        $extraInfPaths += $infFile.FullName
+      }
+    }
+
+    if ($extraInfPaths.Count -gt 0) {
+      $extraInfFormatted = ($extraInfPaths | Sort-Object | ForEach-Object { "  - $_" }) -join "`n"
+      throw @"
+Staged package '$packageDir' contains extra INF file(s) that were not selected for packaging:
+$extraInfFormatted
+
+Only INFs selected via ci-package.json 'infFiles' (or auto-discovered from the driver source tree) and INFs explicitly staged via ci-package.json 'additionalFiles' are allowed.
+"@
+    }
+
+    Write-Host "     Final staged INF file(s): $($allStagedInfFiles.Count)"
+    foreach ($infFile in $allStagedInfFiles) {
+      Write-Host "       - $($infFile.FullName)"
+    }
+
+    if ($stampInfs) {
+      Write-Host "     Stamping staged INF(s) prior to catalog generation..."
+      $stampArgs = @{
+        StagingDir = $packageDir
+        InfPaths   = $stagedInfPaths
+        RepoRoot   = $repoRoot
+      }
+      if ($toolchainJsonAbs) {
+        $stampArgs.ToolchainJson = $toolchainJsonAbs
+      }
+      & $stampScript @stampArgs | Out-Null
+    } else {
+      Write-Host "     INF stamping disabled; using existing DriverVer values."
+    }
+
+    Invoke-Inf2Cat -Inf2CatPath $inf2catPath -PackageDir $packageDir -OsList $osListForArch
+
+    $postSanitation = Invoke-PackageSanitation -PackageDir $packageDir
+    if ($postSanitation.ForbiddenCount -gt 0) {
+      Write-Host "     Sanitation: deleted $($preSanitation.DeletedCount + $postSanitation.DeletedCount) file(s); forbidden file(s) found: $($postSanitation.ForbiddenCount)"
+      $list = ($postSanitation.ForbiddenPaths | Sort-Object -Unique | ForEach-Object { "       - $_" }) -join "`n"
+      throw @"
+Staged driver package contains forbidden secret/private key material after catalog generation.
+
+Package:  $packageDir
+Driver:   $driverNameForLog
+Arch:     $arch
+
+Offending file(s):
+$list
+
+Remediation:
+- Remove private key / certificate material from the driver build outputs so it is not copied into out/packages/**.
+- If you need CI signing keys, provide them to the signing step via CI secrets (see drivers/build/sign-drivers.ps1: AERO_DRIVER_PFX_BASE64/AERO_DRIVER_PFX_PASSWORD), not via driver package contents.
+"@
+    }
+
+    $totalDeleted = $preSanitation.DeletedCount + $postSanitation.DeletedCount
+    Write-Host "     Sanitation: deleted $totalDeleted file(s); forbidden file(s) found: 0"
+
+    $cats = Get-ChildItem -LiteralPath $packageDir -Filter '*.cat' -File -Recurse -ErrorAction SilentlyContinue
+    if (-not $cats) {
+      throw "Inf2Cat did not produce a .cat file for $driverNameForLog ($arch)."
+    }
+    Write-Host "     Generated catalog(s):"
+    foreach ($cat in $cats) {
+      Write-Host "       - $($cat.FullName)"
+    }
+  }
+}
+
+if ($processedDriverCount -eq 0 -and $skippedMissingManifestCount -gt 0) {
+  throw "No CI-packaged drivers were staged from '$inputRootAbs' ($skippedMissingManifestCount driver build dir(s) were skipped because their source directories are missing ci-package.json)."
+}
+

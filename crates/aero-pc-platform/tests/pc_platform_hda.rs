@@ -200,7 +200,10 @@ fn pc_platform_gates_hda_dma_on_pci_bus_master_enable() {
     let bdf = HDA_ICH6.bdf;
     let bar0_base = read_hda_bar0_base(&mut pc);
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 HDA GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {
@@ -299,7 +302,10 @@ fn pc_platform_respects_pci_interrupt_disable_bit_for_intx() {
     let bdf = HDA_ICH6.bdf;
     let bar0_base = read_hda_bar0_base(&mut pc);
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 HDA GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {

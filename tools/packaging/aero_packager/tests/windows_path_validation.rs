@@ -35,10 +35,7 @@ fn packaging_rejects_windows_reserved_device_names_in_paths() -> anyhow::Result<
 
     let err = aero_packager::package_guest_tools(&config).unwrap_err();
     let msg = format!("{err:#}");
-    assert!(
-        msg.contains("con.txt"),
-        "unexpected error: {msg}"
-    );
+    assert!(msg.contains("con.txt"), "unexpected error: {msg}");
     Ok(())
 }
 
@@ -76,10 +73,7 @@ fn packaging_rejects_windows_invalid_characters_in_paths() -> anyhow::Result<()>
 
     let err = aero_packager::package_guest_tools(&config).unwrap_err();
     let msg = format!("{err:#}");
-    assert!(
-        msg.contains("foo?.txt"),
-        "unexpected error: {msg}"
-    );
+    assert!(msg.contains("foo?.txt"), "unexpected error: {msg}");
     Ok(())
 }
 
@@ -103,6 +97,6 @@ fn device_contract_path() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }

@@ -733,7 +733,7 @@ impl Tier0DecodeCache {
     #[inline]
     fn decode(
         &mut self,
-        bytes: &[u8; 15],
+        bytes: &[u8],
         rip: u64,
         bitness: u32,
     ) -> Result<aero_x86::DecodedInst, aero_x86::DecodeError> {
@@ -744,6 +744,7 @@ impl Tier0DecodeCache {
                 && hit.rip == rip
                 && len > 0
                 && len <= 15
+                && len <= bytes.len()
                 // Self-modifying code safety: verify the instruction bytes still match.
                 && hit.bytes[..len] == bytes[..len]
             {
@@ -761,10 +762,13 @@ impl Tier0DecodeCache {
         }
 
         let decoded = aero_x86::decode(bytes, rip, bitness)?;
+        let mut byte_key = [0u8; 15];
+        let key_len = bytes.len().min(byte_key.len());
+        byte_key[..key_len].copy_from_slice(&bytes[..key_len]);
         self.entries[idx] = Some(Tier0DecodeCacheEntry {
             bitness,
             rip,
-            bytes: *bytes,
+            bytes: byte_key,
             decoded: decoded.clone(),
         });
         Ok(decoded)

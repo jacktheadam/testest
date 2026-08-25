@@ -75,7 +75,9 @@ fn build_vbe_mode_118_with_stride_and_display_start_boot_sector(
 fn aerogpu_scanout_disable_publishes_wddm_disabled_even_with_legacy_vbe_panning_and_stride() {
     // Use a scanline length that differs from the mode's default pitch (1024*4) so we can observe
     // that the BIOS publishes a legacy scanout descriptor that reflects `INT 10h AX=4F06`.
-    let bytes_per_scan_line = 4101u16;
+    // Bochs VBE_DISPI exposes stride through a pixel-count register, so the native ROM follows
+    // SeaBIOS and represents byte-granular 4F06 requests at whole-pixel granularity.
+    let bytes_per_scan_line = 4100u16;
     let x_off = 1u16;
     let y_off = 4u16;
     let boot = build_vbe_mode_118_with_stride_and_display_start_boot_sector(
@@ -105,8 +107,8 @@ fn aerogpu_scanout_disable_publishes_wddm_disabled_even_with_legacy_vbe_panning_
     // start offsets and the scanline length requested via AX=4F06 (clamped to at least the mode's
     // natural pitch).
     let bytes_per_pixel = 4u64;
-    // INT 10h AX=4F06 BL=2 sets the logical scan line length in bytes. The BIOS preserves
-    // byte-granular pitches but clamps them to at least the mode's natural pitch (1024*4).
+    // INT 10h AX=4F06 BL=2 sets the logical scan line length in bytes. This request is exactly
+    // representable by the Bochs virtual-width register and exceeds the natural 1024*4 pitch.
     let expected_pitch = u64::from(bytes_per_scan_line).max(1024u64 * bytes_per_pixel);
     let expected_legacy_base =
         m.vbe_lfb_base() + u64::from(y_off) * expected_pitch + u64::from(x_off) * bytes_per_pixel;

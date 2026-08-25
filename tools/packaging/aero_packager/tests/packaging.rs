@@ -1607,7 +1607,10 @@ fn catalogfile_directives_are_validated() -> anyhow::Result<()> {
         let mut out_lines = Vec::new();
         for line in original.lines() {
             out_lines.push(line.to_string());
-            if line.trim().eq_ignore_ascii_case("Signature=\"$Windows NT$\"") {
+            if line
+                .trim()
+                .eq_ignore_ascii_case("Signature=\"$Windows NT$\"")
+            {
                 out_lines.push(format!("CatalogFile.{suffix}=missing.cat"));
             }
         }
@@ -1652,17 +1655,15 @@ fn servicebinary_directives_are_validated() -> anyhow::Result<()> {
     for arch in ["x86", "amd64"] {
         let inf_path = drivers_tmp.path().join(format!("{arch}/testdrv/test.inf"));
         let mut original = fs::read_to_string(&inf_path)?;
-        original.push_str(
-            concat!(
-                "\n",
-                "[Install.Services]\n",
-                // Add an inline comment to ensure comment stripping works.
-                "AddService=TestSvc,0x00000002,TestSvc_Inst ; test comment\n",
-                "\n",
-                "[TestSvc_Inst]\n",
-                "ServiceBinary=\\SystemRoot\\system32\\drivers\\missing.sys\n",
-            ),
-        );
+        original.push_str(concat!(
+            "\n",
+            "[Install.Services]\n",
+            // Add an inline comment to ensure comment stripping works.
+            "AddService=TestSvc,0x00000002,TestSvc_Inst ; test comment\n",
+            "\n",
+            "[TestSvc_Inst]\n",
+            "ServiceBinary=\\SystemRoot\\system32\\drivers\\missing.sys\n",
+        ));
         fs::write(inf_path, original)?;
     }
 
@@ -2268,7 +2269,9 @@ fn allowlisted_default_excluded_driver_extensions_are_included() -> anyhow::Resu
     for arch in ["x86", "amd64"] {
         for ext in excluded_exts {
             fs::write(
-                drivers_tmp.path().join(format!("{arch}/testdrv/keep.{ext}")),
+                drivers_tmp
+                    .path()
+                    .join(format!("{arch}/testdrv/keep.{ext}")),
                 format!("dummy {ext}\n"),
             )?;
         }
@@ -2309,7 +2312,10 @@ fn allowlisted_default_excluded_driver_extensions_are_included() -> anyhow::Resu
     for arch in ["x86", "amd64"] {
         for ext in excluded_exts {
             let required = format!("drivers/{arch}/testdrv/keep.{ext}");
-            assert!(tree.contains(&required), "expected file missing: {required}");
+            assert!(
+                tree.contains(&required),
+                "expected file missing: {required}"
+            );
         }
     }
 
@@ -2560,7 +2566,8 @@ fn duplicate_driver_names_in_spec_are_rejected() -> anyhow::Result<()> {
 }
 
 #[test]
-fn optional_drivers_must_be_present_on_all_arches_when_strict_flag_is_enabled() -> anyhow::Result<()> {
+fn optional_drivers_must_be_present_on_all_arches_when_strict_flag_is_enabled() -> anyhow::Result<()>
+{
     let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let testdata = repo_root.join("testdata");
     let guest_tools_dir = testdata.join("guest-tools");
@@ -2855,7 +2862,7 @@ fn manifest_input_hashes_are_formatting_insensitive() -> anyhow::Result<()> {
         guest_tools_dir: guest_tools_dir.clone(),
         windows_device_contract_path: contract_path,
         out_dir: out1.path().to_path_buf(),
-        spec_path: spec_path,
+        spec_path,
         version: "1.2.3".to_string(),
         build_id: "test".to_string(),
         volume_id: "AERO_GUEST_TOOLS".to_string(),
@@ -2906,7 +2913,10 @@ fn manifest_input_hashes_are_formatting_insensitive() -> anyhow::Result<()> {
             .sha256
     );
 
-    assert_eq!(fs::read(&outputs1.manifest_path)?, fs::read(&outputs2.manifest_path)?);
+    assert_eq!(
+        fs::read(&outputs1.manifest_path)?,
+        fs::read(&outputs2.manifest_path)?
+    );
     assert_eq!(fs::read(&outputs1.iso_path)?, fs::read(&outputs2.iso_path)?);
     assert_eq!(fs::read(&outputs1.zip_path)?, fs::read(&outputs2.zip_path)?);
 
@@ -2991,6 +3001,6 @@ fn device_contract_path() -> std::path::PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }

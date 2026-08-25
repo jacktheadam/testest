@@ -6,9 +6,9 @@ import test from "node:test";
 import { collectJsTsSourceFiles, findLineNumber, stripStringsAndComments } from "./_helpers/js_source_scan_helpers.js";
 
 const ALLOWED_DGRAM_CREATE_SOCKET = new Set([
-  "backend/aero-gateway/bench/run.mjs",
-  "backend/aero-gateway/src/dns/upstream.ts",
-  "net-proxy/src/udpRelay.ts",
+  "services/gateway/bench/run.mjs",
+  "services/gateway/src/dns/upstream.ts",
+  "services/net-proxy/src/udpRelay.ts",
 ]);
 
 function findFirstDgramCreateSocketCallIndex(maskedSource) {

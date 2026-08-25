@@ -94,9 +94,13 @@ web/dist/
 web/src/wasm/pkg-*/
 bench/output/
 
-# Source-controlled build tooling (not build outputs)
+# Source-controlled build tooling (not build outputs). The bare `build/` rule
+# above matches at any depth, so each of these needs the directory re-included
+# before its contents can be.
 !drivers/aerogpu/build/
 !drivers/aerogpu/build/**
+!drivers/build/
+!drivers/build/**
 
 # Build outputs produced by the AeroGPU build scripts
 drivers/aerogpu/build/out/
@@ -151,13 +155,23 @@ bench-results/
 
 # Allow checked-in BIOS and tiny deterministic in-repo fixtures.
 !assets/bios.bin
-!web/public/assets/security_headers_test.wasm
+!apps/web/public/assets/security_headers_test.wasm
+# `mega-module.wat` is the source the generator reads, not an artifact —
+# ignoring it would leave the .wasm both missing and unregenerable.
+!apps/web/public/wasm-jit-csp/mega-module.wat
+!apps/web/public/wasm-jit-csp/mega-module.wasm
 !tests/fixtures/bootsector.bin
 !tests/fixtures/realmode_vbe_test.bin
 !tests/fixtures/boot/*.img
 !tests/fixtures/boot/*.bin
 !tools/qemu_diff/boot/boot.bin
 !crates/aero-d3d11/tests/fixtures/*.bin
+# Two ~3 KB compiled functions used as guest-code differential fixtures. Named
+# exactly, not by glob: this directory is where extracted Microsoft binaries
+# live, and a glob here would silently admit the next one — including the
+# 92 KB mapped DLL image, which must stay out. See that directory's README.
+!crates/aero-cpu-core/tests/data/bcryptprimitives_sha512_compress.bin
+!crates/aero-cpu-core/tests/data/cryptsp_sha256_compress.bin
 
 # qemu_diff boot sector build byproducts (boot.bin is committed)
 tools/qemu_diff/boot/boot.o
@@ -264,3 +278,13 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Testing/
+
+# Attic: material removed from the tree but deliberately kept on disk for
+# reference (absorbed doc originals, purged subtrees, profiling captures).
+# Nothing here is part of the project; nothing here is authoritative.
+.attic/
+
+# Profiler captures from local runs.
+perf.data
+perf.data.old
+

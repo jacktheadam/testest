@@ -41,11 +41,7 @@ fn patch_and_verify_roundtrip() {
         .success();
 
     cargo_bin_cmd!("aero-win7-slipstream")
-        .args([
-            "verify-iso",
-            "--input",
-            out_iso.to_string_lossy().as_ref(),
-        ])
+        .args(["verify-iso", "--input", out_iso.to_string_lossy().as_ref()])
         .assert()
         .success();
 }

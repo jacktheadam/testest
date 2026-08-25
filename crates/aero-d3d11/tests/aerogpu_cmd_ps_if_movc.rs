@@ -82,7 +82,14 @@ fn aerogpu_cmd_renders_branchy_pixel_shader() {
         const PS: u32 = 11;
         const IL: u32 = 20;
 
-        // Fullscreen triangle, with texcoord.x spanning 0..2 across the screen.
+        // Fullscreen triangle. The shader branches on `texcoord.x < 1.0`, so the texcoord has
+        // to cross 1.0 *within the visible area* for both branches to be reachable.
+        //
+        // The triangle spans clip x in [-1, 3] while the render target shows only [-1, 1], so a
+        // texcoord that reaches 2.0 at the far vertex only reaches 1.0 at the right edge of the
+        // target — and the rightmost pixel *centre* sits at clip x = 0.75, where it is 0.875.
+        // With `uv.x = 4.0` at the far vertex the interpolant is exactly `clip.x + 1`, which is
+        // 0.25 at the leftmost pixel centre and 1.75 at the rightmost: one pixel per branch.
         let vertices = [
             Vertex {
                 pos: [-1.0, -1.0, 0.0],
@@ -90,11 +97,11 @@ fn aerogpu_cmd_renders_branchy_pixel_shader() {
             },
             Vertex {
                 pos: [-1.0, 3.0, 0.0],
-                uv: [0.0, 2.0],
+                uv: [0.0, 4.0],
             },
             Vertex {
                 pos: [3.0, -1.0, 0.0],
-                uv: [2.0, 0.0],
+                uv: [4.0, 0.0],
             },
         ];
         let vb_bytes = bytemuck::bytes_of(&vertices);

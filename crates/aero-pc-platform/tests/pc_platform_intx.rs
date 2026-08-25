@@ -50,7 +50,10 @@ fn pc_platform_polls_all_pci_intx_sources_even_when_hda_is_disabled() {
         move |_pc| level.get()
     });
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {

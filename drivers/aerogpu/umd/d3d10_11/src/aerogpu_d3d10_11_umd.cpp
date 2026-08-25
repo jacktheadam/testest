@@ -2107,7 +2107,7 @@ void SetLockFlagsFromMap(TLockFlags* flags, uint32_t map_type, uint32_t map_flag
   }
 
   // Translate D3D11/D3D10 MapType to the runtime's LockCb flags.
-  // See docs/graphics/win7-d3d11-map-unmap.md (§3).
+  // See wiki/areas/graphics.md.
   const bool read_only = (map_type == AEROGPU_DDI_MAP_READ);
   const bool write_only = (map_type == AEROGPU_DDI_MAP_WRITE ||
                            map_type == AEROGPU_DDI_MAP_WRITE_DISCARD ||
@@ -2222,7 +2222,7 @@ HRESULT map_resource_locked(AeroGpuDevice* dev,
 
   // Enforce D3D11 usage rules (mirrors the Win7 runtime validation). This keeps
   // the portable UMD's behavior aligned with the WDK build and the documented
-  // contract in docs/graphics/win7-d3d11-map-unmap.md.
+  // contract in wiki/areas/graphics.md.
   switch (res->usage) {
     case kD3D11UsageDynamic:
       if (map_type != AEROGPU_DDI_MAP_WRITE_DISCARD && map_type != AEROGPU_DDI_MAP_WRITE_NO_OVERWRITE) {

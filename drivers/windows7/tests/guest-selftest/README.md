@@ -5,7 +5,7 @@ virtio driver health via **COM1 serial** (host-captured), stdout, and a log file
 
 For the consolidated virtio-input end-to-end validation plan (device model + driver + web runtime), see:
 
-- [`docs/virtio-input-test-plan.md`](../../../../docs/virtio-input-test-plan.md)
+- [`wiki/areas/usb-input.md`](wiki/areas/usb-input.md#94-validation-ladder)
 
 ## What it tests
 

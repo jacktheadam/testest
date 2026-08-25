@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isDataCloneError, isTier1AbiMismatchError } from '../src/workers/jit_error_utils.ts';
+import { isDataCloneError, isTier1AbiMismatchError } from '../apps/web/src/workers/jit_error_utils.ts';
 
 test('jit_error_utils: isDataCloneError detects DataCloneError (DOMException + name)', () => {
   const original = globalThis.DOMException;

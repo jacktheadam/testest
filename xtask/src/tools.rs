@@ -1,13 +1,19 @@
 use std::path::Path;
 use std::process::Command;
 
-pub fn npm() -> Command {
-    // On Windows, npm is typically installed as `npm.cmd` (a cmd shim), and spawning `npm`
-    // directly via `CreateProcess` does not resolve `.cmd` via PATHEXT.
+/// The repo's package manager.
+///
+/// pnpm is the single package manager (see the Node monorepo tooling decision);
+/// `pnpm-lock.yaml` is the only lockfile and `pnpm-workspace.yaml` the only
+/// workspace declaration.
+///
+/// On Windows pnpm installs as `pnpm.cmd`, a cmd shim that `CreateProcess` will
+/// not resolve through `PATHEXT` when spawned as a bare name.
+pub fn package_manager() -> Command {
     if cfg!(windows) {
-        Command::new("npm.cmd")
+        Command::new("pnpm.cmd")
     } else {
-        Command::new("npm")
+        Command::new("pnpm")
     }
 }
 

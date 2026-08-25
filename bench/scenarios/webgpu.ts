@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import type { WebGpuBenchOptions, WebGpuBenchResult } from '../../web/src/bench/webgpu_bench';
+import type { WebGpuBenchOptions, WebGpuBenchResult } from '../../apps/web/src/bench/webgpu_bench';
 
 export type WebGpuScenarioRunOptions = {
   /**

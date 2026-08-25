@@ -120,13 +120,13 @@ The Win7 AeroGPU KMD supports two AeroGPU PCI/MMIO ABIs:
     * `drivers/aerogpu/protocol/aerogpu_ring.h` (ring + submit descriptors + 64-bit fences + optional allocation table)
     * `drivers/aerogpu/protocol/aerogpu_cmd.h` (command stream packets)
   * PCI IDs: `VID=0xA3A0`, `DID=0x0001`
-  * Emulator device model: `crates/emulator/src/devices/pci/aerogpu.rs`
+  * Device model: `crates/aero-devices-gpu/src/pci.rs`
 * **Legacy bring-up ABI (compatibility, "ARGP")**
   * Historical reference: `drivers/aerogpu/protocol/legacy/aerogpu_protocol_legacy.h`
   * The KMD does **not** include `aerogpu_protocol_legacy.h` directly; it uses a minimal internal shim:
     `include/aerogpu_legacy_abi.h`
-  * PCI identity: legacy bring-up device model (see `docs/abi/aerogpu-pci-identity.md`)
-  * Emulator device model: `crates/emulator/src/devices/pci/aerogpu_legacy.rs` (feature `emulator/aerogpu-legacy`)
+  * PCI identity: legacy bring-up device model (see `wiki/areas/graphics.md`)
+  * The bring-up device model has been retired along with the legacy vendor ID
 * This ABI is deprecated and retained only for optional compatibility/regression testing.
 
 The Win7 packaging INFs (`drivers/aerogpu/packaging/win7/*.inf`) bind to the canonical, versioned device:
@@ -153,7 +153,7 @@ interrupts and query scanline state even on the legacy `"ARGP"` device model.
 
 See:
 * `drivers/aerogpu/protocol/README.md` for ABI details.
-* `docs/abi/aerogpu-pci-identity.md` for the canonical PCI IDs and the matching emulator device models.
+* `wiki/areas/graphics.md` for the canonical PCI IDs and the matching emulator device models.
 
 ## Fence ID width mismatch (Win7 `u32` vs AeroGPU `u64`)
 
@@ -419,7 +419,7 @@ The preserved private-data layout is defined in:
 
 For the end-to-end Win7 shared-surface `share_token` strategy (including the rationale for not using user-mode shared `HANDLE` numeric values as protocol keys) and guest validation tests, see:
 
-- `docs/graphics/win7-shared-surfaces-share-token.md`
+- `wiki/areas/graphics.md`
 
 ### Submission-time `READONLY` (`aerogpu_alloc_entry.flags`)
 
@@ -457,8 +457,8 @@ The MSBuild entrypoint for the KMD is `drivers/aerogpu/aerogpu_kmd.vcxproj` (it 
 Recommended (CI-like, builds and stages packages under `out/`):
 
 ```powershell
-pwsh ci/install-wdk.ps1
-pwsh ci/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
+pwsh drivers/build/install-wdk.ps1
+pwsh drivers/build/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
 ```
 
 Manual (single configuration via MSBuild):
@@ -481,11 +481,11 @@ Typical dev install flows:
 - **Recommended (host build + sign via CI scripts):**
   1. On the build host:
       ```powershell
-      pwsh ci/install-wdk.ps1
-      pwsh ci/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
-      pwsh ci/build-aerogpu-dbgctl.ps1 -ToolchainJson out/toolchain.json
-      pwsh ci/make-catalogs.ps1 -ToolchainJson out/toolchain.json
-      pwsh ci/sign-drivers.ps1 -ToolchainJson out/toolchain.json
+      pwsh drivers/build/install-wdk.ps1
+      pwsh drivers/build/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
+      pwsh drivers/build/build-aerogpu-dbgctl.ps1 -ToolchainJson out/toolchain.json
+      pwsh drivers/build/make-catalogs.ps1 -ToolchainJson out/toolchain.json
+      pwsh drivers/build/sign-drivers.ps1 -ToolchainJson out/toolchain.json
       ```
   2. Copy `out/packages/aerogpu/<x86|x64>/` and `out/certs/aero-test.cer` into the Win7 VM.
   3. In the Win7 VM (Admin), trust the certificate and enable test signing:
@@ -619,5 +619,5 @@ These are intended for a small user-mode tool to validate KMD↔emulator communi
 
 Note: `AEROGPU_ESCAPE_OP_QUERY_VBLANK` is feature-gated; it returns `STATUS_NOT_SUPPORTED`
 unless `AEROGPU_FEATURE_VBLANK` is present in `FEATURES_LO/HI` (works for both legacy
-bring-up devices (see `docs/abi/aerogpu-pci-identity.md`) and versioned `PCI\VEN_A3A0&DEV_0001`
+bring-up devices (see `wiki/areas/graphics.md`) and versioned `PCI\VEN_A3A0&DEV_0001`
 devices that expose those registers).

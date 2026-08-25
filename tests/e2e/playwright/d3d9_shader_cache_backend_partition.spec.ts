@@ -43,7 +43,7 @@ test("D3D9 shader cache partitions across WebGPU vs WebGL2 backends @webgpu", as
       // Probe for WebGPU availability up front so we can skip gracefully in environments where
       // `chromium-webgpu` still cannot create an adapter (e.g. GPU-blocklisted runners).
       const probe = await context.newPage();
-      await probe.goto(`${baseUrl}/`, { waitUntil: "load" });
+      await probe.goto(`${baseUrl}/apps/web/`, { waitUntil: "load" });
       const hasWebGpuAdapter = await probe.evaluate(async () => {
         const gpu = (navigator as any).gpu as any;
         if (!gpu) return false;
@@ -70,7 +70,7 @@ test("D3D9 shader cache partitions across WebGPU vs WebGL2 backends @webgpu", as
       const page = await context!.newPage();
       page.on("console", (msg) => logs.push(msg.text()));
       try {
-        await page.goto(`${baseUrl}/web/gpu-worker-d3d9-shader-cache.html?backend=${forceBackend}`);
+        await page.goto(`${baseUrl}/apps/web/gpu-worker-d3d9-shader-cache.html?backend=${forceBackend}`);
         await page.waitForFunction(() => (window as any).__d3d9ShaderCacheDemo !== undefined);
 
         const result = await page.evaluate(() => (window as any).__d3d9ShaderCacheDemo);

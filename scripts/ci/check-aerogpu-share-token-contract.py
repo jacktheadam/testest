@@ -67,11 +67,7 @@ REQUIRED_SUBSTRINGS = {
         "aerogpu_wddm_alloc_priv.share_token",
         "aerogpu_wddm_alloc.h",
     ],
-    ROOT / "docs" / "16-d3d9ex-dwm-compatibility.md": [
-        "aerogpu_wddm_alloc_priv.share_token",
-        "aerogpu_wddm_alloc.h",
-    ],
-    ROOT / "docs" / "graphics" / "win7-shared-surfaces-share-token.md": [
+    ROOT / "wiki" / "areas" / "graphics.md": [
         "aerogpu_wddm_alloc_priv.share_token",
         "aerogpu_wddm_alloc.h",
     ],

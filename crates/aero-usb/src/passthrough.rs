@@ -1,9 +1,9 @@
 //! USB passthrough bridge state machine.
 //!
 //! This module implements the Rust-side half of the WebUSB passthrough contract described in
-//! `docs/webusb-passthrough.md`.
+//! the USB and input area page.
 //! For canonical stack selection and deprecation of parallel USB stacks, see
-//! `docs/adr/0015-canonical-usb-stack.md`.
+//! `wiki/decisions/0015-canonical-usb-stack.md`.
 //!
 //! The device model queues host actions (`UsbHostAction`) when the guest attempts a USB
 //! transfer, and consumes host completions (`UsbHostCompletion`) to finish those transfers.
@@ -1140,7 +1140,7 @@ mod tests {
 
     const WIRE_FIXTURE_STR: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../docs/fixtures/webusb_passthrough_wire.json"
+        "/../../protocol-vectors/webusb_passthrough_wire.json"
     ));
 
     #[test]

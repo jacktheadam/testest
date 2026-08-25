@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { DROPPED_SAMPLES_INDEX, HEADER_U32_LEN, READ_POS_INDEX, WRITE_POS_INDEX } from "../../web/src/audio/mic_ring.js";
+import { DROPPED_SAMPLES_INDEX, HEADER_U32_LEN, READ_POS_INDEX, WRITE_POS_INDEX } from "../../apps/web/src/audio/mic_ring.js";
 import { getAudioOutputMaxAbsSample, waitForAudioOutputNonSilent } from "./util/audio";
 
 const PREVIEW_ORIGIN = process.env.AERO_PLAYWRIGHT_PREVIEW_ORIGIN ?? "http://127.0.0.1:4173";
@@ -8,7 +8,7 @@ const PREVIEW_ORIGIN = process.env.AERO_PLAYWRIGHT_PREVIEW_ORIGIN ?? "http://127
 test("AudioWorklet loopback runs with synthetic microphone source (no underruns)", async ({ page }) => {
   test.skip(test.info().project.name !== "chromium", "AudioWorklet loopback test only runs on Chromium.");
 
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: "load" });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: "load" });
 
   await page.click("#init-audio-loopback-synthetic");
 

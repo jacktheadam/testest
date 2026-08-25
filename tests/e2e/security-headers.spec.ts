@@ -41,7 +41,7 @@ function assertHeaderSubset(
 test('preview server sets canonical security headers on HTML/JS/worker/WASM and CSP gates eval()', async ({
   page,
 }) => {
-  const mainResponse = await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: 'load' });
+  const mainResponse = await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: 'load' });
   expect(mainResponse, 'navigation should return a response').toBeTruthy();
 
   await expect(page.evaluate(() => globalThis.crossOriginIsolated)).resolves.toBe(true);

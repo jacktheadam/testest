@@ -37,12 +37,19 @@ export default defineConfig({
         maxForks: vitestMaxForks,
       },
     },
-    include: ["web/src/**/*.test.ts", "web/test/**/*.vitest.ts", "services/**/test/**/*.test.ts"],
+    // `services/**` is deliberately absent. Every test under `services/` is written against
+    // `node:test` and is run by that service's own `test` script (`node --test` over its build
+    // output). Vitest collects such a file happily and then reports "No test suite found",
+    // because the `node:test` registrations are invisible to it — 83 files' worth of failures
+    // that say nothing about the code.
+    include: ["apps/web/src/**/*.test.ts", "apps/web/test/**/*.vitest.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
       reportsDirectory: "coverage",
-      include: ["web/src/**/*.ts", "services/**/src/**/*.ts"],
+      // Matches `include` above: measuring `services/` here would report it as uncovered when
+      // its tests simply run elsewhere.
+      include: ["apps/web/src/**/*.ts"],
       exclude: ["**/*.d.ts"],
     },
   },

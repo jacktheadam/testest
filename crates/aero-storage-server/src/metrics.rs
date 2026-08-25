@@ -166,11 +166,11 @@ impl Metrics {
         this.http_requests_total
             .with_label_values(&["/metrics", "GET", "200"]);
         this.http_requests_total
-            .with_label_values(&["/v1/images/:image_id", "GET", "200"]);
+            .with_label_values(&["/v1/images/{image_id}", "GET", "200"]);
         this.http_request_duration_seconds
             .with_label_values(&["/metrics", "GET"]);
         this.http_request_duration_seconds
-            .with_label_values(&["/v1/images/:image_id", "GET"]);
+            .with_label_values(&["/v1/images/{image_id}", "GET"]);
         this.image_bytes_served_total
             .with_label_values(&["__other__"]);
         this.range_requests_total.with_label_values(&["valid"]);

@@ -756,7 +756,8 @@ fn pc_platform_routes_uhci_intx_via_pic_in_legacy_mode() {
     let gsi = pc
         .pci_intx
         .gsi_for_intx(USB_UHCI_PIIX3.bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe the UHCI interrupt through the
     // legacy PIC.
@@ -815,7 +816,8 @@ fn pc_platform_respects_pci_interrupt_disable_bit_for_uhci_intx() {
     let bdf = USB_UHCI_PIIX3.bdf;
     let bar4_base = read_uhci_bar4_base(&mut pc);
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe the UHCI interrupt through the
     // legacy PIC.
@@ -882,7 +884,8 @@ fn pc_platform_resyncs_uhci_pci_command_before_polling_intx_level() {
     let bdf = USB_UHCI_PIIX3.bdf;
     let bar4_base = read_uhci_bar4_base(&mut pc);
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe the UHCI interrupt through the
     // legacy PIC.
@@ -1181,7 +1184,8 @@ fn pc_platform_uhci_ioc_completion_asserts_intx_via_pic() {
     let bdf = USB_UHCI_PIIX3.bdf;
     let bar4_base = read_uhci_bar4_base(&mut pc);
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe UHCI interrupts through the PIC.
     {
@@ -1326,7 +1330,8 @@ fn pc_platform_uhci_short_packet_sets_usbint_and_asserts_intx_when_spd_enabled()
     let bdf = USB_UHCI_PIIX3.bdf;
     let bar4_base = read_uhci_bar4_base(&mut pc);
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe UHCI interrupts through the PIC.
     {
@@ -1441,7 +1446,8 @@ fn pc_platform_uhci_usb_err_int_asserts_intx_on_crc_timeout() {
     let bdf = USB_UHCI_PIIX3.bdf;
     let bar4_base = read_uhci_bar4_base(&mut pc);
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe UHCI interrupts through the PIC.
     {
@@ -1536,7 +1542,8 @@ fn pc_platform_uhci_force_global_resume_sets_resume_detect_and_asserts_intx() {
     let bdf = USB_UHCI_PIIX3.bdf;
     let bar4_base = read_uhci_bar4_base(&mut pc);
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe UHCI interrupts through the PIC.
     {
@@ -2080,7 +2087,8 @@ fn pc_platform_uhci_remote_wakeup_sets_resume_detect_and_triggers_intx() {
     let bdf = USB_UHCI_PIIX3.bdf;
     let bar4_base = read_uhci_bar4_base(&mut pc);
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe UHCI interrupts through the PIC.
     {
@@ -2193,7 +2201,8 @@ fn pc_platform_uhci_external_hub_remote_wakeup_triggers_resume_detect_and_intx()
     let bdf = USB_UHCI_PIIX3.bdf;
     let bar4_base = read_uhci_bar4_base(&mut pc);
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("UHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 UHCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe UHCI interrupts through the PIC.
     {

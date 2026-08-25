@@ -357,8 +357,8 @@ fn wasm_simd_bitwise_and_or_xor() {
     let xmm1 = XmmReg::new(1).unwrap();
 
     let mut state = SseState::default();
-    state.xmm[xmm0.index()] = rng.gen::<u128>();
-    state.xmm[xmm1.index()] = rng.gen::<u128>();
+    state.xmm[xmm0.index()] = rng.random::<u128>();
+    state.xmm[xmm1.index()] = rng.random::<u128>();
 
     let program = Program {
         insts: vec![
@@ -393,8 +393,8 @@ fn wasm_simd_pshufb_swizzle() {
     let xmm1 = XmmReg::new(1).unwrap();
 
     let mut state = SseState::default();
-    state.xmm[xmm0.index()] = rng.gen::<u128>();
-    state.xmm[xmm1.index()] = rng.gen::<u128>();
+    state.xmm[xmm0.index()] = rng.random::<u128>();
+    state.xmm[xmm1.index()] = rng.random::<u128>();
 
     let program = Program {
         insts: vec![Inst::Pshufb {
@@ -416,7 +416,7 @@ fn wasm_simd_pslld_psrld_imm() {
     let xmm0 = XmmReg::new(0).unwrap();
 
     let mut state = SseState::default();
-    state.xmm[xmm0.index()] = rng.gen::<u128>();
+    state.xmm[xmm0.index()] = rng.random::<u128>();
 
     let program = Program {
         insts: vec![
@@ -439,7 +439,7 @@ fn wasm_simd_more_shift_immediates() {
     let xmm0 = XmmReg::new(0).unwrap();
 
     let mut state = SseState::default();
-    state.xmm[xmm0.index()] = rng.gen::<u128>();
+    state.xmm[xmm0.index()] = rng.random::<u128>();
 
     let program = Program {
         insts: vec![
@@ -470,7 +470,7 @@ fn wasm_simd_variable_shift_counts() {
     let xmm1 = XmmReg::new(1).unwrap();
 
     let mut state = SseState::default();
-    state.xmm[xmm0.index()] = rng.gen::<u128>();
+    state.xmm[xmm0.index()] = rng.random::<u128>();
     // Shift count lives in the low 64 bits of the src operand for PSLL*/PSRL*.
     state.xmm[xmm1.index()] = 33u64 as u128; // >31 => zero for dword shifts
 

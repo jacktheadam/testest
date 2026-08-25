@@ -3,14 +3,14 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { startStaticServer } from "./utils/static_server";
 
 test("large shader payload spills to OPFS when available", async ({}, testInfo) => {
   // Avoid redundant coverage in other projects.
   if (testInfo.project.name !== "chromium") test.skip();
-
-  const rootDir = path.resolve(process.cwd(), "web");
-  const server = await startStaticServer(rootDir);
+  // Served by the suite's Vite server: the demo page loads a TypeScript module, which a
+  // plain file server cannot transpile. The persistent browser profile below is what this
+  // test actually needs, and it does not depend on where the page is served from.
+  const baseUrl = testInfo.project.use.baseURL ?? "http://127.0.0.1:5173";
 
   let userDataDir: string | null = null;
   try {
@@ -48,7 +48,7 @@ test("large shader payload spills to OPFS when available", async ({}, testInfo) 
         const page = await context.newPage();
         page.on("console", (msg) => logs.push(msg.text()));
 
-        await page.goto(`${server.baseUrl}/shader_cache_demo.html?large=1`);
+        await page.goto(`${baseUrl}/apps/web/shader_cache_demo.html?large=1`);
         await page.waitForFunction(() => (window as any).__shaderCacheDemo !== undefined);
 
         const result = await page.evaluate(() => (window as any).__shaderCacheDemo);
@@ -243,7 +243,6 @@ test("large shader payload spills to OPFS when available", async ({}, testInfo) 
     expect(second.idbPipelineRecord?.hasDesc).toBe(false);
     expect(second.pipelineCacheHit).toBe(true);
   } finally {
-    await server.close();
     if (userDataDir) {
       try {
         fs.rmSync(userDataDir, { recursive: true, force: true });

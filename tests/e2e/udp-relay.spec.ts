@@ -9,7 +9,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-import { unrefBestEffort } from '../../src/unref_safe.js';
+import { unrefBestEffort } from '../../packages/transport-safety/src/unref_safe.js';
 
 type UdpEchoServer = {
   port: number;
@@ -183,6 +183,19 @@ function makeJWT(secret: string): string {
   return `${unsigned}.${sig}`;
 }
 
+/**
+ * Whether a Go toolchain is available to build the relay.
+ *
+ * The relay under test is a Go binary these specs compile on the fly. Where Go is absent the
+ * suite cannot exercise it at all, and failing would report a missing toolchain as a broken relay.
+ * Skipping says which it is — and says it out loud, because a suite that quietly skips its
+ * hardest cases reports the same green as one that passed them.
+ */
+function goToolchainAvailable(): boolean {
+  const probe = spawnSync('go', ['version'], { stdio: 'ignore' });
+  return probe.status === 0;
+}
+
 async function buildRelayBinary(): Promise<{ tmpDir: string; binPath: string }> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aero-webrtc-udp-relay-e2e-'));
   const binPath = path.join(tmpDir, 'aero-webrtc-udp-relay');
@@ -205,6 +218,11 @@ test.describe.serial('udp relay (webrtc)', () => {
   let echo: UdpEchoServer;
   let relayBinPath: string;
   let relayTmpDir: string;
+
+  test.skip(
+    !goToolchainAvailable(),
+    'no Go toolchain: aero-webrtc-udp-relay is a Go binary these specs build on demand',
+  );
 
   test.beforeAll(async () => {
     echo = await startUdpEchoServer();
@@ -265,7 +283,7 @@ test.describe.serial('udp relay (webrtc)', () => {
   ) {
     return await page.evaluate(
       async ({ relayOrigin, echoPort, authToken, dstIp, mode }) => {
-        const { connectUdpRelay } = await import('/web/src/net/udpRelaySignalingClient.ts');
+        const { connectUdpRelay } = await import('/apps/web/src/net/udpRelaySignalingClient.ts');
 
         const payload = new Uint8Array([1, 2, 3, 4, 5]);
         const guestPort = 45_000;
@@ -313,7 +331,7 @@ test.describe.serial('udp relay (webrtc)', () => {
   ) {
     return await page.evaluate(
       async ({ relayOrigin, echoPort, authToken, dstIp }) => {
-        const { WebSocketUdpProxyClient } = await import('/web/src/net/udpProxy.ts');
+        const { WebSocketUdpProxyClient } = await import('/apps/web/src/net/udpProxy.ts');
 
         const payload = new Uint8Array([1, 2, 3, 4, 5]);
         const guestPort = 45_000;
@@ -358,12 +376,12 @@ test.describe.serial('udp relay (webrtc)', () => {
     const apiKey = 'secret';
     const relay = await startRelay({ authMode: 'api_key', apiKey });
     try {
-      await page.goto('/', { waitUntil: 'load' });
+      await page.goto('/apps/web/', { waitUntil: 'load' });
       expectEcho(await runRoundTrip(page, relay.origin, echo.port, apiKey), '127.0.0.1', echo.port);
       expectEcho(await runRoundTrip(page, relay.origin, echo.port, apiKey, '127.0.0.1', 'http-offer'), '127.0.0.1', echo.port);
       expectEcho(await runRoundTripWebSocket(page, relay.origin, echo.port, apiKey), '127.0.0.1', echo.port);
     } finally {
-      await relay.close();
+      await relay?.close();
     }
   });
 
@@ -372,18 +390,18 @@ test.describe.serial('udp relay (webrtc)', () => {
     const token = makeJWT(jwtSecret);
     const relay = await startRelay({ authMode: 'jwt', jwtSecret, token });
     try {
-      await page.goto('/', { waitUntil: 'load' });
+      await page.goto('/apps/web/', { waitUntil: 'load' });
       expectEcho(await runRoundTrip(page, relay.origin, echo.port, token), '127.0.0.1', echo.port);
       expectEcho(await runRoundTrip(page, relay.origin, echo.port, token, '127.0.0.1', 'http-offer'), '127.0.0.1', echo.port);
       expectEcho(await runRoundTripWebSocket(page, relay.origin, echo.port, token), '127.0.0.1', echo.port);
     } finally {
-      await relay.close();
+      await relay?.close();
     }
   });
 
   test('connectUdpRelay establishes DataChannel and relays UDP', async ({ page }) => {
     const relay = await startRelay({ authMode: 'none' });
-    await page.goto('/', { waitUntil: 'load' });
+    await page.goto('/apps/web/', { waitUntil: 'load' });
 
     try {
       expectEcho(await runRoundTrip(page, relay.origin, echo.port), '127.0.0.1', echo.port);
@@ -391,7 +409,7 @@ test.describe.serial('udp relay (webrtc)', () => {
       expectEcho(await runRoundTrip(page, relay.origin, echo.port, undefined, '127.0.0.1', 'legacy-offer'), '127.0.0.1', echo.port);
       expectEcho(await runRoundTripWebSocket(page, relay.origin, echo.port), '127.0.0.1', echo.port);
     } finally {
-      await relay.close();
+      await relay?.close();
     }
   });
 
@@ -404,13 +422,13 @@ test.describe.serial('udp relay (webrtc)', () => {
 
     const relay = await startRelay({ authMode: 'none' });
     try {
-      await page.goto('/', { waitUntil: 'load' });
+      await page.goto('/apps/web/', { waitUntil: 'load' });
       const expectedIp = '0000:0000:0000:0000:0000:0000:0000:0001';
       expectEcho(await runRoundTrip(page, relay.origin, echo6.port, undefined, '::1'), expectedIp, echo6.port);
       expectEcho(await runRoundTrip(page, relay.origin, echo6.port, undefined, '::1', 'legacy-offer'), expectedIp, echo6.port);
       expectEcho(await runRoundTripWebSocket(page, relay.origin, echo6.port, undefined, '::1'), expectedIp, echo6.port);
     } finally {
-      await relay.close();
+      await relay?.close();
       await echo6.close();
     }
   });

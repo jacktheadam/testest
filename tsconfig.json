@@ -12,12 +12,11 @@
     "types": ["vite/client", "node", "@webgpu/types"]
   },
   "include": [
-    "src",
     "tests",
-    "emulator/protocol/aerogpu/**/*.ts",
-    "web/src/global.d.ts",
-    "web/src/hid",
-    "web/src/**/*.d.ts",
+    "crates/aero-protocol/aerogpu/**/*.ts",
+    "apps/web/src/global.d.ts",
+    "apps/web/src/hid",
+    "apps/web/src/**/*.d.ts",
     "vite.config.ts",
     "vite.harness.config.ts",
     "playwright.config.ts",

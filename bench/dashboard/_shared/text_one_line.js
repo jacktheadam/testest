@@ -1,2 +1,2 @@
-export { formatOneLineError, formatOneLineUtf8 } from "../../../web/public/_shared/text_one_line.js";
+export { formatOneLineError, formatOneLineUtf8 } from "../../../packages/transport-safety/src/text.js";
 

@@ -5,7 +5,7 @@ async function waitForReady(page: Page) {
 }
 
 test("vga presenter smoke: Canvas2D blit shows correct quadrants", async ({ page }) => {
-  await page.goto("/web/vga-presenter-smoke.html", { waitUntil: "load" });
+  await page.goto("/apps/web/vga-presenter-smoke.html", { waitUntil: "load" });
   await waitForReady(page);
 
   const result = await page.evaluate(async () => {

@@ -212,7 +212,7 @@ fn dsdt_iasl_roundtrip_handles_ecam_disabled_and_enabled_variants() {
 }
 
 #[test]
-fn dsdt_iasl_disassembly_shows_pci0_mmio_as_cacheable_readwrite_resource_producer() {
+fn dsdt_iasl_disassembly_shows_q35_pci0_memory_resource_attributes() {
     if !iasl_available() {
         eprintln!("skipping: `iasl` not found in PATH");
         return;
@@ -247,11 +247,17 @@ fn dsdt_iasl_disassembly_shows_pci0_mmio_as_cacheable_readwrite_resource_produce
             "expected PCI0 MMIO window to disassemble as ResourceProducer ({label})"
         );
 
-        // The MMIO window must be ReadWrite (not ReadOnly) for Windows 7 PCI resource allocation
-        // correctness.
+        // Relocatable PCI MMIO must be non-cacheable. The only cacheable root
+        // memory window is the fixed legacy VGA aperture.
         assert!(
-            pci0_block.contains("Cacheable, ReadWrite"),
-            "expected PCI0 MMIO window to disassemble as Cacheable, ReadWrite ({label})"
+            pci0_block.contains("NonCacheable, ReadWrite"),
+            "expected PCI0 MMIO window to disassemble as NonCacheable, ReadWrite ({label})"
+        );
+        assert!(
+            pci0_block.contains("0x000A0000")
+                && pci0_block.contains("0x000BFFFF")
+                && pci0_block.contains("Cacheable, ReadWrite"),
+            "expected PCI0 to expose the cacheable legacy VGA aperture ({label})"
         );
     }
 }

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { socketWritableLengthExceedsCap, socketWritableLengthOrOverflow } from "../src/socket_writable_length.js";
-import socketWritableLengthCjs from "../src/socket_writable_length.cjs";
+import { socketWritableLengthExceedsCap, socketWritableLengthOrOverflow } from "../packages/transport-safety/src/socket_writable_length.js";
+import socketWritableLengthCjs from "../packages/transport-safety/src/socket_writable_length.cjs";
 
 test("socket_writable_length: CJS parity", () => {
   assert.equal(typeof socketWritableLengthCjs.socketWritableLengthOrOverflow, "function");

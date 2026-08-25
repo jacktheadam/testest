@@ -1,8 +1,8 @@
 [package]
 name = "aero-machine-cli"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
 publish = false
 
 [[bin]]
@@ -10,6 +10,7 @@ name = "aero-machine"
 path = "src/main.rs"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+aero-cpu-core = { path = "../aero-cpu-core" }
 aero-machine = { path = "../aero-machine" }
 aero-storage = { path = "../aero-storage" }
 anyhow = "1"
@@ -18,3 +19,6 @@ image = { version = "0.25.5", default-features = false, features = ["png"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tempfile = "3"
+
+[dependencies]
+workspace-hack = { version = "0.1", path = "../workspace-hack" }

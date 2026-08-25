@@ -63,6 +63,13 @@ struct UdpFlowHandle {
     socket: std::sync::Arc<UdpSocket>,
     activity_tx: Option<mpsc::Sender<()>>,
     task: JoinHandle<()>,
+    /// Set by the receive task when the peer answers with an ICMP unreachable.
+    ///
+    /// The kernel hands a connected socket's queued error to whichever operation runs next, and the
+    /// receive task is parked waiting, so it wins that race essentially every time. Recording the
+    /// condition here lets the send path report it, which is where an undeliverable datagram
+    /// belongs and what `l2_udp_send_fail_total` counts.
+    peer_unreachable: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -953,17 +960,29 @@ async fn process_actions(
                     socket.connect(remote_addr).await?;
                     let socket = std::sync::Arc::new(socket);
                     let socket_task = socket.clone();
+                    let peer_unreachable =
+                        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let peer_unreachable_task = peer_unreachable.clone();
                     let event_tx = event_tx.clone();
                     let idle_timeout = state.cfg.udp_flow_idle_timeout;
                     let (activity_tx, activity_rx) = mpsc::channel::<()>(1);
                     let activity_tx = (idle_timeout.is_some()).then_some(activity_tx);
                     let task = tokio::spawn(async move {
-                        udp_task(key, socket_task, event_tx, activity_rx, idle_timeout).await;
+                        udp_task(
+                            key,
+                            socket_task,
+                            event_tx,
+                            activity_rx,
+                            idle_timeout,
+                            peer_unreachable_task,
+                        )
+                        .await;
                     });
                     entry.insert(UdpFlowHandle {
                         socket,
                         activity_tx,
                         task,
+                        peer_unreachable,
                     });
                     state.metrics.udp_flow_opened();
                 }
@@ -975,7 +994,12 @@ async fn process_actions(
                     let _ = activity_tx.try_send(());
                 }
                 let socket = flow.socket.clone();
-                let send_failed = socket.send(&data).await.is_err();
+                // A peer that answered the previous datagram with ICMP unreachable has already
+                // failed this one; there is no point putting it on the wire to find out again.
+                let already_unreachable = flow
+                    .peer_unreachable
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let send_failed = already_unreachable || socket.send(&data).await.is_err();
                 if send_failed {
                     state.metrics.udp_send_failed();
                     if let Some(flow) = udp_flows.remove(&key) {
@@ -1144,13 +1168,27 @@ async fn udp_task(
     event_tx: mpsc::Sender<SessionEvent>,
     mut activity_rx: mpsc::Receiver<()>,
     idle_timeout: Option<Duration>,
+    peer_unreachable: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let mut buf = vec![0u8; 2048];
+    let mut transient_errors = 0u32;
 
     let Some(idle_timeout) = idle_timeout else {
         loop {
             let n = match socket.recv(&mut buf).await {
-                Ok(n) => n,
+                Ok(n) => {
+                    transient_errors = 0;
+                    peer_unreachable.store(false, std::sync::atomic::Ordering::Relaxed);
+                    n
+                }
+                Err(err) if is_transient_udp_error(&err) => {
+                    peer_unreachable.store(true, std::sync::atomic::Ordering::Relaxed);
+                    transient_errors += 1;
+                    if transient_errors >= MAX_CONSECUTIVE_TRANSIENT_UDP_ERRORS {
+                        break;
+                    }
+                    continue;
+                }
                 Err(_) => break,
             };
             if n == 0 {
@@ -1181,7 +1219,20 @@ async fn udp_task(
             }
             recv_res = socket.recv(&mut buf) => {
                 let n = match recv_res {
-                    Ok(n) => n,
+                    Ok(n) => {
+                        transient_errors = 0;
+                        peer_unreachable.store(false, std::sync::atomic::Ordering::Relaxed);
+                        n
+                    }
+                    Err(err) if is_transient_udp_error(&err) => {
+                        peer_unreachable.store(true, std::sync::atomic::Ordering::Relaxed);
+                        transient_errors += 1;
+                        if transient_errors >= MAX_CONSECUTIVE_TRANSIENT_UDP_ERRORS {
+                            let _ = event_tx.send(SessionEvent::UdpFlowClosed(key)).await;
+                            break;
+                        }
+                        continue;
+                    }
                     Err(_) => {
                         let _ = event_tx.send(SessionEvent::UdpFlowClosed(key)).await;
                         break;
@@ -1208,6 +1259,37 @@ async fn udp_task(
             }
         }
     }
+}
+
+/// How many consecutive transient receive errors a flow tolerates before it is closed anyway.
+///
+/// A connected UDP socket delivers a queued ICMP error once and then clears it, so in practice the
+/// count never climbs past one. The bound exists so that a platform which latches the error instead
+/// cannot turn the receive loop into a spin.
+const MAX_CONSECUTIVE_TRANSIENT_UDP_ERRORS: u32 = 16;
+
+/// Whether a receive error describes a peer that is momentarily unreachable rather than a socket
+/// that has stopped working.
+///
+/// These arrive as ICMP responses — destination unreachable, port unreachable, TTL exceeded — which
+/// the kernel reports against the connected socket. They say something about the far end at one
+/// instant, not about the flow: a name server or game server that restarts produces exactly this
+/// and then resumes.
+///
+/// Tearing the flow down here would be wrong twice over. The guest would get a fresh source port on
+/// its next datagram, breaking any peer that keyed on the old one, and the error would never reach
+/// the send path — which is the only place the proxy can report it, and the reason
+/// `l2_udp_send_fail_total` exists. Holding the flow open lets the next send surface the condition
+/// and close the flow deliberately.
+fn is_transient_udp_error(err: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        err.kind(),
+        ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::HostUnreachable
+            | ErrorKind::NetworkUnreachable
+    )
 }
 
 async fn resolve_host_port(
@@ -1258,10 +1340,7 @@ mod tests {
         let (ws_out_tx, _ws_out_rx) = mpsc::channel::<Message>(1);
         // Fill the channel so `ws_out_tx.send(...)` would block without the timeout in
         // `close_with_error`.
-        ws_out_tx
-            .send(Message::Text("block".into()))
-            .await
-            .unwrap();
+        ws_out_tx.send(Message::Text("block".into())).await.unwrap();
 
         let (close_tx, close_rx) = watch::channel::<Option<WsCloseSignal>>(None);
         request_close_with_error(
@@ -1285,10 +1364,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn close_shutting_down_does_not_hang_when_ws_channel_full() {
         let (ws_out_tx, _ws_out_rx) = mpsc::channel::<Message>(1);
-        ws_out_tx
-            .send(Message::Text("block".into()))
-            .await
-            .unwrap();
+        ws_out_tx.send(Message::Text("block".into())).await.unwrap();
 
         let (close_tx, close_rx) = watch::channel::<Option<WsCloseSignal>>(None);
         request_close_shutting_down(&close_tx);
@@ -1301,10 +1377,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn close_policy_violation_does_not_hang_when_ws_channel_full() {
         let (ws_out_tx, _ws_out_rx) = mpsc::channel::<Message>(1);
-        ws_out_tx
-            .send(Message::Text("block".into()))
-            .await
-            .unwrap();
+        ws_out_tx.send(Message::Text("block".into())).await.unwrap();
 
         let (close_tx, close_rx) = watch::channel::<Option<WsCloseSignal>>(None);
         request_close_policy_violation(&close_tx, "idle timeout");
@@ -1317,10 +1390,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_ws_message_returns_backpressure_when_ws_channel_full() {
         let (ws_out_tx, _ws_out_rx) = mpsc::channel::<Message>(1);
-        ws_out_tx
-            .send(Message::Text("block".into()))
-            .await
-            .unwrap();
+        ws_out_tx.send(Message::Text("block".into())).await.unwrap();
 
         let mut quotas = SessionQuotas::new(0, 0);
         let err = tokio::time::timeout(

@@ -69,21 +69,11 @@ impl VirtioBlkConfig {
         // geometry is zeroed.
         cfg[20..24].copy_from_slice(&self.blk_size.to_le_bytes());
         // topology + writeback are left as zero.
-
-        // Discard / write zeroes limits. These are safe upper bounds for our current best-effort
-        // implementation; they mainly exist so in-guest drivers can enable the operations when the
-        // corresponding feature bits are negotiated.
-        let max_sectors = u32::try_from(VIRTIO_BLK_MAX_REQUEST_SECTORS).unwrap_or(u32::MAX);
-        cfg[36..40].copy_from_slice(&max_sectors.to_le_bytes()); // max_discard_sectors
-        cfg[40..44].copy_from_slice(&self.seg_max.to_le_bytes()); // max_discard_seg
-        let align_sectors = (u64::from(self.blk_size) / VIRTIO_BLK_SECTOR_SIZE).max(1);
-        let align_sectors_u32 = u32::try_from(align_sectors).unwrap_or(1);
-        cfg[44..48].copy_from_slice(&align_sectors_u32.to_le_bytes()); // discard_sector_alignment
-        cfg[48..52].copy_from_slice(&max_sectors.to_le_bytes()); // max_write_zeroes_sectors
-        cfg[52..56].copy_from_slice(&self.seg_max.to_le_bytes()); // max_write_zeroes_seg
-                                                                  // write_zeroes_may_unmap: allow `WRITE_ZEROES` to deallocate underlying storage ("unmap")
-                                                                  // while preserving guest-visible read-after-write semantics (reads must return zero).
-        cfg[56] = 1;
+        // Discard / write-zeroes config fields (offsets 0x24-0x38) are left
+        // as zero per the Win7 driver contract §3.1.4: "Remaining standard
+        // fields are not required; MUST read as 0." These fields are only
+        // meaningful when VIRTIO_BLK_F_DISCARD/WRITE_ZEROES are negotiated,
+        // which the device no longer offers.
 
         // Avoid truncating on 32-bit targets: guest MMIO offsets are `u64` but config space is a
         // small fixed-size array.
@@ -295,13 +285,15 @@ impl VirtioDevice for VirtioBlk {
     }
 
     fn device_features(&self) -> u64 {
+        // Per the Win7 virtio driver contract §3.1.3, the device MUST NOT offer
+        // Discard / Write-Zeroes / Multi-Queue features. The Win7 driver does
+        // not implement them; offering them risks the driver taking unexpected
+        // code paths or misidentifying the device as non-contract.
         VIRTIO_F_VERSION_1
             | VIRTIO_F_RING_INDIRECT_DESC
             | VIRTIO_BLK_F_SEG_MAX
             | VIRTIO_BLK_F_BLK_SIZE
             | VIRTIO_BLK_F_FLUSH
-            | VIRTIO_BLK_F_DISCARD
-            | VIRTIO_BLK_F_WRITE_ZEROES
     }
 
     fn set_features(&mut self, features: u64) {

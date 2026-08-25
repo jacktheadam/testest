@@ -1,8 +1,13 @@
-use aero_cpu_core::interp::tier0::exec::step;
+use aero_cpu_core::assist::AssistContext;
+use aero_cpu_core::interp::tier0::exec::{
+    run_batch_cpu_core_with_assists, step, BatchExit, StepExit,
+};
+use aero_cpu_core::interp::tier0::Tier0Config;
 use aero_cpu_core::mem::CpuBus as _;
 use aero_cpu_core::state::{CpuMode, CpuState, CR0_PE, CR0_PG, CR4_PAE, EFER_LME};
-use aero_cpu_core::{Exception, PagingBus};
+use aero_cpu_core::{CpuCore, Exception, PagingBus};
 use aero_mmu::MemoryBus;
+use aero_x86::Register;
 use core::convert::TryInto;
 
 const EFER_NXE: u64 = 1 << 11;
@@ -515,10 +520,10 @@ fn fetch_crossing_page_boundary_faults_on_first_missing_byte_and_sets_cr2() {
         0,
     );
 
-    // Populate the last 14 bytes of the page so the fetch can read them before faulting.
+    // Fourteen prefixes without an opcode require byte 15 from the next page.
     let start = 0xff2u64;
     for i in 0..14u64 {
-        phys.write_u8_raw(code_page0 + start + i, (i as u8).wrapping_add(1));
+        phys.write_u8_raw(code_page0 + start + i, 0x66);
     }
 
     let mut bus = PagingBus::new(phys);
@@ -535,6 +540,76 @@ fn fetch_crossing_page_boundary_faults_on_first_missing_byte_and_sets_cr2() {
         }
     );
     assert_eq!(state.control.cr2, 0x1000);
+}
+
+#[test]
+fn short_instruction_before_unmapped_page_does_not_speculatively_fault() {
+    let mut phys = TestMemory::new(0x20000);
+
+    let pml4_base = 0x1000u64;
+    let pdpt_base = 0x2000u64;
+    let pd_base = 0x3000u64;
+    let pt_base = 0x4000u64;
+    let code_page0 = 0x5000u64;
+
+    // The two-byte JMP RAX is wholly present at the end of the mapped page.
+    // Fetching unused decoder lookahead from the next page is not architectural.
+    setup_long4_4k(
+        &mut phys,
+        pml4_base,
+        pdpt_base,
+        pd_base,
+        pt_base,
+        code_page0 | PTE_P | PTE_RW | PTE_US,
+        0,
+    );
+    phys.load(code_page0 + 0xffe, &[0xff, 0xe0]);
+
+    let mut bus = PagingBus::new(phys);
+    let mut state = long_state(pml4_base, 0, 0);
+    state.set_rip(0xffe);
+    state.write_reg(Register::RAX, 0x800);
+
+    assert_eq!(step(&mut state, &mut bus), Ok(StepExit::Branch));
+    assert_eq!(state.rip(), 0x800);
+    assert_eq!(state.control.cr2, 0);
+}
+
+#[test]
+fn batched_short_instruction_before_unmapped_page_does_not_speculatively_fault() {
+    let mut phys = TestMemory::new(0x20000);
+
+    let pml4_base = 0x1000u64;
+    let pdpt_base = 0x2000u64;
+    let pd_base = 0x3000u64;
+    let pt_base = 0x4000u64;
+    let code_page0 = 0x5000u64;
+
+    setup_long4_4k(
+        &mut phys,
+        pml4_base,
+        pdpt_base,
+        pd_base,
+        pt_base,
+        code_page0 | PTE_P | PTE_RW | PTE_US,
+        0,
+    );
+    phys.load(code_page0 + 0xffe, &[0xff, 0xe0]);
+
+    let mut bus = PagingBus::new(phys);
+    let mut cpu = CpuCore::new(CpuMode::Long);
+    cpu.state = long_state(pml4_base, 0, 0);
+    cpu.state.set_rip(0xffe);
+    cpu.state.write_reg(Register::RAX, 0x800);
+
+    let mut ctx = AssistContext::default();
+    let cfg = Tier0Config::from_cpuid(&ctx.features);
+    let result = run_batch_cpu_core_with_assists(&cfg, &mut ctx, &mut cpu, &mut bus, 1);
+
+    assert_eq!(result.executed, 1);
+    assert_eq!(result.exit, BatchExit::Branch);
+    assert_eq!(cpu.state.rip(), 0x800);
+    assert_eq!(cpu.state.control.cr2, 0);
 }
 
 #[test]

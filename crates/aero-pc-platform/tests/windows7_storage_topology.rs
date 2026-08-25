@@ -6,7 +6,7 @@ use aero_devices::pci::profile::{
 use aero_devices::pci::{PCI_CFG_ADDR_PORT, PCI_CFG_DATA_PORT};
 use aero_devices_storage::ata::AtaDrive;
 use aero_devices_storage::atapi::{AtapiCdrom, IsoBackend};
-use aero_devices_storage::pci_ide::{PRIMARY_PORTS, SECONDARY_PORTS};
+use aero_devices_storage::pci_ide::SECONDARY_PORTS;
 use aero_pc_platform::{PcPlatform, Windows7StorageTopologyConfig};
 use aero_storage::{MemBackend, RawDisk, VirtualDisk as _, SECTOR_SIZE};
 use memory::MemoryBus as _;
@@ -119,26 +119,41 @@ fn win7_storage_topology_is_canonical_and_reads_hdd_and_cdrom() {
         let class = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x08);
         assert_eq!((class >> 24) as u8, 0x01);
         assert_eq!((class >> 16) as u8, 0x01);
-        assert_eq!((class >> 8) as u8, 0x8a);
+        assert_eq!((class >> 8) as u8, 0x80);
 
         let intx = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x3c);
         let int_line = (intx & 0xff) as u8;
         let int_pin = ((intx >> 8) & 0xff) as u8;
         assert_eq!(int_pin, 1, "IDE should expose INTA# in PCI config space");
         assert_eq!(
-            int_line, 11,
-            "default PIRQ swizzle routes 00:01.1 INTA# to GSI11"
+            int_line, 21,
+            "default PIRQ swizzle routes 00:01.1 INTA# to GSI21"
         );
 
-        // Legacy-compatible BARs.
+        // QEMU PIIX3 layout: only BAR4 (BMIDE) is a PCI BAR. Command blocks are
+        // hardwired ISA ports and must not appear as native BARs.
         let bar0 = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x10);
         let bar1 = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x14);
         let bar2 = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x18);
         let bar3 = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x1c);
-        assert_eq!(bar0 & 0xffff_fffc, u32::from(PRIMARY_PORTS.cmd_base));
-        assert_eq!(bar1 & 0xffff_fffc, u32::from(PRIMARY_PORTS.ctrl_base - 2));
-        assert_eq!(bar2 & 0xffff_fffc, u32::from(SECONDARY_PORTS.cmd_base));
-        assert_eq!(bar3 & 0xffff_fffc, u32::from(SECONDARY_PORTS.ctrl_base - 2));
+        let bar4 = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x20);
+        assert_eq!(bar0, 0);
+        assert_eq!(bar1, 0);
+        assert_eq!(bar2, 0);
+        assert_eq!(bar3, 0);
+        assert_eq!(bar4 & 0x1, 1, "BAR4 must be an I/O BAR");
+        let idetim_pri = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x40);
+        let idetim_sec = read_cfg_u32(&mut pc, bdf.bus, bdf.device, bdf.function, 0x42);
+        assert_eq!(
+            idetim_pri as u16 & 0x8000,
+            0x8000,
+            "primary IDETIM decode-enable must be set (intelide channel enable)"
+        );
+        assert_eq!(
+            idetim_sec as u16 & 0x8000,
+            0x8000,
+            "secondary IDETIM decode-enable must be set (intelide channel enable)"
+        );
     }
 
     {
@@ -158,8 +173,8 @@ fn win7_storage_topology_is_canonical_and_reads_hdd_and_cdrom() {
         let int_pin = ((intx >> 8) & 0xff) as u8;
         assert_eq!(int_pin, 1, "AHCI should expose INTA# in PCI config space");
         assert_eq!(
-            int_line, 12,
-            "default PIRQ swizzle routes 00:02.0 INTA# to GSI12"
+            int_line, 22,
+            "default PIRQ swizzle routes 00:02.0 INTA# to GSI22"
         );
 
         let bar5 = ahci_bar5_base(&mut pc);

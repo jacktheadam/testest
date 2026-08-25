@@ -3,12 +3,14 @@
 //! Guards the canonical Windows 7 storage PCI topology for `aero_machine::Machine` against drift.
 //!
 //! If you update any of these values, also update:
-//! - `docs/05-storage-topology-win7.md`
+//! - `wiki/areas/storage.md`
 //! - `crates/devices/tests/win7_storage_topology.rs`
 //! - `crates/aero-pc-platform/tests/pc_platform_win7_storage.rs`
 
 use aero_devices::pci::profile::{IDE_PIIX3, ISA_PIIX3, NVME_CONTROLLER, SATA_AHCI_ICH9};
-use aero_devices::pci::{PCI_CFG_ADDR_PORT, PCI_CFG_DATA_PORT};
+use aero_devices::pci::{
+    PciInterruptPin, PciIntxRouter, PciIntxRouterConfig, PCI_CFG_ADDR_PORT, PCI_CFG_DATA_PORT,
+};
 use aero_machine::{Machine, MachineConfig};
 use pretty_assertions::assert_eq;
 
@@ -41,6 +43,7 @@ fn machine_win7_storage_has_ahci_and_ide_on_canonical_bdfs() {
     cfg.enable_vga = false;
 
     let mut m = Machine::new(cfg).unwrap();
+    let intx = PciIntxRouter::new(PciIntxRouterConfig::default());
 
     // AHCI at 00:02.0
     {
@@ -52,7 +55,7 @@ fn machine_win7_storage_has_ahci_and_ide_on_canonical_bdfs() {
         let intr = read_cfg_u32(&mut m, bdf.bus, bdf.device, bdf.function, 0x3C);
         let int_line = intr & 0xFF;
         let int_pin = (intr >> 8) & 0xFF;
-        assert_eq!(int_line, 12);
+        assert_eq!(int_line, intx.gsi_for_intx(bdf, PciInterruptPin::IntA));
         // INTA#
         assert_eq!(int_pin, 1);
     }
@@ -67,7 +70,7 @@ fn machine_win7_storage_has_ahci_and_ide_on_canonical_bdfs() {
         let intr = read_cfg_u32(&mut m, bdf.bus, bdf.device, bdf.function, 0x3C);
         let int_line = intr & 0xFF;
         let int_pin = (intr >> 8) & 0xFF;
-        assert_eq!(int_line, 11);
+        assert_eq!(int_line, intx.gsi_for_intx(bdf, PciInterruptPin::IntA));
         // INTA#
         assert_eq!(int_pin, 1);
     }

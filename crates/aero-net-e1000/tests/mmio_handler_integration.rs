@@ -78,7 +78,7 @@ impl MmioHandler for SharedE1000Mmio {
 #[test]
 fn physical_memory_bus_mmio_defers_dma_until_poll() {
     let ram = DenseMemory::new(0x40_000).unwrap();
-    let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+    let mut bus = PhysicalMemoryBus::new(ram);
 
     let mmio_base = 0x100_000u64;
     let dev = Rc::new(RefCell::new(E1000Device::new([

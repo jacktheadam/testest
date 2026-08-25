@@ -71,6 +71,35 @@ pub trait CpuBus {
     #[inline]
     fn invlpg(&mut self, _vaddr: u64) {}
 
+    /// Observe a successful architectural write to CR3.
+    ///
+    /// This is an event, not just a state update: writing the same value still
+    /// invalidates translations according to CR4.PGE/PCID semantics.
+    #[inline]
+    fn write_cr3(&mut self, _value: u64) {}
+
+    /// Additional architectural TSC cycles to elapse after an I/O-port read.
+    ///
+    /// The default is zero. Machine integrations may use this as an opt-in,
+    /// coherent polling scheduler: any returned cycles advance the CPU TSC,
+    /// and the outer machine loop advances all platform timers from that same
+    /// TSC delta before execution resumes.
+    #[inline]
+    fn io_read_time_advance_cycles(&mut self, _port: u16, _size: u32) -> u64 {
+        0
+    }
+
+    /// Consume a request to yield the current execution batch.
+    ///
+    /// A bus that returns extra cycles from
+    /// [`CpuBus::io_read_time_advance_cycles`] can request a yield so the
+    /// machine synchronizes platform timers before the guest performs its next
+    /// polling read.
+    #[inline]
+    fn take_execution_yield_request(&mut self) -> bool {
+        false
+    }
+
     fn read_u8(&mut self, vaddr: u64) -> Result<u8, Exception>;
     fn read_u16(&mut self, vaddr: u64) -> Result<u16, Exception>;
     fn read_u32(&mut self, vaddr: u64) -> Result<u32, Exception>;

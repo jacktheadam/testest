@@ -86,7 +86,7 @@ extern "C" {
  * BIOS reports:
  *   PhysBasePtr = BAR1_BASE + AEROGPU_PCI_BAR1_VBE_LFB_OFFSET_BYTES
  *
- * See: `docs/16-aerogpu-vga-vesa-compat.md`.
+ * See: `wiki/areas/graphics.md`.
  */
 #define AEROGPU_PCI_BAR1_VBE_LFB_OFFSET_BYTES 0x40000u
 

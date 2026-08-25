@@ -23,7 +23,7 @@ fn hid_gamepad_report_vectors_match_fixture() {
     const MAX_FIXTURE_BYTES: usize = 64 * 1024;
 
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/fixtures/hid_gamepad_report_vectors.json");
+        .join("../../protocol-vectors/hid_gamepad_report_vectors.json");
 
     let raw = fs::read_to_string(&fixture_path)
         .unwrap_or_else(|e| panic!("failed to read fixture {fixture_path:?}: {e}"));

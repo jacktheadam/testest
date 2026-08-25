@@ -9,14 +9,14 @@ const BOOT_IMAGE_BYTES = readFileSync(
 );
 
 const THREADED_WASM_BINARY_RELEASE = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
 );
-const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
+const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
 const THREADED_WASM_BINARY_DEV = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
 );
 const THREADED_WASM_JS_DEV = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url),
 );
 const HAS_THREADED_WASM_BUNDLE =
   (existsSync(THREADED_WASM_BINARY_RELEASE) && existsSync(THREADED_WASM_JS_RELEASE)) ||
@@ -49,7 +49,7 @@ test("vm boot: boots deterministic boot sector end-to-end (WASM VM + IO worker +
   const server: DiskImageServer = await startDiskImageServer({ data: BOOT_IMAGE_BYTES, enableCors: true });
   try {
     const baseUrl = testInfo.project.use.baseURL ?? "http://127.0.0.1:5173";
-    const url = new URL("/web/vm-boot-vga-serial-smoke.html", baseUrl);
+    const url = new URL("/apps/web/vm-boot-vga-serial-smoke.html", baseUrl);
     url.searchParams.set("diskUrl", server.url("/disk.img"));
     await page.goto(url.toString(), { waitUntil: "load" });
 

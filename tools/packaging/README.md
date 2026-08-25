@@ -43,7 +43,7 @@ cd tools/packaging/aero_packager
 #     x86/<driver>/**   (PnP driver package; at minimum: .inf/.sys/.cat; may also include UMD/coinstaller .dll files)
 #     amd64/<driver>/** (or x64/ on input; the packaged output uses amd64/)
 #       Note: the packager includes driver directories recursively and applies a small
-#       exclusion policy for build outputs (e.g. .pdb/.obj); see docs/16-guest-tools-packaging.md.
+#       exclusion policy for build outputs (e.g. .pdb/.obj); see wiki/areas/drivers-windows.md.
 #   guest-tools/ contains:
 #     setup.cmd
 #     uninstall.cmd
@@ -84,8 +84,8 @@ packager will fail if it finds `*.cer/*.crt/*.p7b` under `guest-tools/certs/` wh
 
 This repo maintains two variants:
 
-- `docs/windows-device-contract.json` (canonical, in-tree Aero driver service names like `aero_virtio_blk` / `aero_virtio_net`)
-- `docs/windows-device-contract-virtio-win.json` (upstream virtio-win service names like `viostor` / `netkvm`)
+- `protocol-vectors/windows-device-contract.json` (canonical, in-tree Aero driver service names like `aero_virtio_blk` / `aero_virtio_net`)
+- `protocol-vectors/windows-device-contract-virtio-win.json` (upstream virtio-win service names like `viostor` / `netkvm`)
 
 Virtio-win Guest Tools builds **must** use the virtio-win contract so `guest-tools/setup.cmd` can
 validate the boot-critical storage INF (`AddService = viostor, ...`) and pre-seed registry state
@@ -109,7 +109,7 @@ powershell -ExecutionPolicy Bypass -File .\drivers\scripts\make-guest-tools-from
 By default this wrapper uses `-Profile full` (includes optional Win7 audio/input drivers when present for **both** x86 and amd64; best-effort).
 To build storage+network-only Guest Tools media, use `-Profile minimal`.
 
-This wrapper uses `docs/windows-device-contract-virtio-win.json` by default so the packaged
+This wrapper uses `protocol-vectors/windows-device-contract-virtio-win.json` by default so the packaged
 `config/devices.cmd` matches the upstream virtio-win INF service names (required for storage
 pre-seeding).
 
@@ -150,15 +150,15 @@ propagate upstream license/notice files into the packaged outputs under:
 When the Win7 driver CI pipeline stages signed driver packages under `out/packages/**`, you can
 produce the Guest Tools ISO/zip from those artifacts using:
 
-- `ci/package-guest-tools.ps1`
+- `drivers/build/package-guest-tools.ps1`
   - Local default (when `-SpecPath` is omitted): `tools/packaging/specs/win7-aero-guest-tools.json` (stricter HWID validation)
   - CI/release workflows: `tools/packaging/specs/win7-signed.json` (derives HWID patterns from `devices.cmd`; no hardcoded regex list)
-  - Device contract (for generated `config/devices.cmd`): `-WindowsDeviceContractPath` (default: `docs/windows-device-contract.json`)
+  - Device contract (for generated `config/devices.cmd`): `-WindowsDeviceContractPath` (default: `protocol-vectors/windows-device-contract.json`)
 
 To reproduce CI packaging locally (assuming you already have `out/packages/` + `out/certs/`):
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File ci/package-guest-tools.ps1 -SpecPath tools/packaging/specs/win7-signed.json
+pwsh -NoProfile -ExecutionPolicy Bypass -File drivers/build/package-guest-tools.ps1 -SpecPath tools/packaging/specs/win7-signed.json
 ```
 
 ## AeroGPU-only Guest Tools (dev)
@@ -167,7 +167,7 @@ For development/debug flows where you want to package **only the AeroGPU driver*
 storage/network/input/audio), use the GPU-only spec:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File ci/package-guest-tools.ps1 `
+pwsh -NoProfile -ExecutionPolicy Bypass -File drivers/build/package-guest-tools.ps1 `
   -SpecPath tools/packaging/specs/win7-aerogpu-only.json
 ```
 
@@ -226,7 +226,7 @@ SOURCE_DATE_EPOCH=0 cargo run --release --locked -- ...
 
 ### Deterministic ISO builder for already-staged folders (`aero_iso`)
 
-CI driver bundle packaging (`ci/package-drivers.ps1`) needs to turn an already-staged directory tree
+CI driver bundle packaging (`drivers/build/package-drivers.ps1`) needs to turn an already-staged directory tree
 into an ISO image *deterministically* (bit-identical across runs/hosts). For this use case, the
 packager workspace also provides a small standalone ISO builder:
 

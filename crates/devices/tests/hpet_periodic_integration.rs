@@ -71,3 +71,60 @@ fn synthetic_guest_programs_hpet_and_receives_periodic_interrupts() {
         interrupts.eoi(0x40);
     }
 }
+
+/// Edge-triggered periodic timers must keep delivering edges even when the guest
+/// has not yet cleared the sticky General Interrupt Status bit. Real HPET does
+/// not suppress edges while the status bit is set; only level mode holds the
+/// line high. Without this, a single missed delivery (or a restored snapshot
+/// with status already set) permanently silences the clock and parks Windows
+/// in interruptible HLT.
+#[test]
+fn edge_periodic_keeps_pulsing_while_status_sticky() {
+    let clock = ManualClock::new();
+    let mut interrupts = PlatformInterrupts::new();
+    interrupts.set_mode(PlatformInterruptMode::Apic);
+
+    program_ioapic_entry(&mut interrupts, 5, 0x40, 0);
+
+    let mut hpet = Hpet::new_default(clock.clone());
+
+    hpet.mmio_write(REG_GENERAL_CONFIG, 8, GEN_CONF_ENABLE, &mut interrupts);
+
+    let mut timer0_cfg = hpet.mmio_read(REG_TIMER0_BASE + REG_TIMER_CONFIG, 8, &mut interrupts);
+    timer0_cfg |= TIMER_CFG_INT_ENABLE | TIMER_CFG_PERIODIC;
+    timer0_cfg &= !TIMER_CFG_INT_LEVEL;
+    timer0_cfg = (timer0_cfg & !TIMER_CFG_INT_ROUTE_MASK) | (5u64 << TIMER_CFG_INT_ROUTE_SHIFT);
+    hpet.mmio_write(
+        REG_TIMER0_BASE + REG_TIMER_CONFIG,
+        8,
+        timer0_cfg,
+        &mut interrupts,
+    );
+
+    hpet.mmio_write(
+        REG_TIMER0_BASE + REG_TIMER_COMPARATOR,
+        8,
+        1,
+        &mut interrupts,
+    );
+
+    for period in 0..3 {
+        clock.advance_ns(100);
+        hpet.poll(&mut interrupts);
+
+        let vector = interrupts.get_pending();
+        assert_eq!(
+            vector,
+            Some(0x40),
+            "period {period}: edge must re-fire with sticky status uncleared"
+        );
+
+        // Acknowledge at the interrupt controller only — leave HPET status set.
+        interrupts.acknowledge(0x40);
+        interrupts.eoi(0x40);
+    }
+
+    // Status bit still sticky.
+    let status = hpet.mmio_read(REG_GENERAL_INT_STATUS, 8, &mut interrupts);
+    assert_ne!(status & 1, 0);
+}

@@ -296,7 +296,7 @@ impl StreamingTelemetry {
 /// For synchronous disk image formats and controller/device integration, prefer the canonical
 /// `aero_storage::{StorageBackend, VirtualDisk}` traits instead.
 ///
-/// See `docs/20-storage-trait-consolidation.md`.
+/// See `wiki/areas/storage.md`.
 pub trait ChunkStore: Send + Sync {
     fn total_size(&self) -> u64;
     fn chunk_size(&self) -> u64;

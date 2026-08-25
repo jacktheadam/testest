@@ -287,7 +287,10 @@ fn pc_platform_xhci_intx_asserts_and_clears() {
         xhci_interrupter0_runtime_addrs(&mut pc, bar0_base);
     assert_ne!(rt_base, bar0_base, "RTSOFF should be non-zero");
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe xHCI interrupts through the PIC.
     {
@@ -367,7 +370,10 @@ fn pc_platform_respects_pci_interrupt_disable_bit_for_xhci_intx() {
     let (_rt_base, rt_iman, rt_erstsz, rt_erstba, rt_erdp) =
         xhci_interrupter0_runtime_addrs(&mut pc, bar0_base);
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask IRQ2 (cascade) + the routed IRQ so we can observe xHCI interrupts through the PIC.
     {
@@ -472,7 +478,10 @@ fn pc_platform_xhci_run_stop_sets_usbsts_eint_and_triggers_intx() {
     assert_ne!(bar0_base, 0, "BAR0 should be assigned by BIOS POST");
 
     // Ensure we can observe the routed IRQ via the legacy PIC.
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
     {
         let mut interrupts = pc.interrupts.borrow_mut();
         interrupts.pic_mut().set_offsets(0x20, 0x28);
@@ -586,6 +595,11 @@ fn pc_platform_routes_xhci_intx_via_ioapic_in_apic_mode() {
     let command = read_cfg_u16(&mut pc, bdf, 0x04);
     write_cfg_u16(&mut pc, bdf, 0x04, command | 0x0004);
 
+    // Program CRCR to point at RAM so the DMA-on-RUN probe has a valid guest address to read.
+    const CRCR_BASE: u64 = 0x10_000;
+    pc.memory.write_u32(CRCR_BASE, 0x1234_5678);
+    pc.memory.write_u64(usbcmd_addr + 0x18, CRCR_BASE);
+
     // Start the controller. The PC platform tick loop runs xHCI at a 1ms cadence.
     pc.memory.write_u32(usbcmd_addr, 1);
     pc.tick(1_000_000);
@@ -663,6 +677,11 @@ fn pc_platform_xhci_msi_triggers_lapic_vector_and_suppresses_intx() {
     // event interrupt used by these integration tests.
     let command = read_cfg_u16(&mut pc, bdf, 0x04);
     write_cfg_u16(&mut pc, bdf, 0x04, command | 0x0004);
+
+    // Program CRCR to point at RAM so the DMA-on-RUN probe has a valid guest address to read.
+    const CRCR_BASE: u64 = 0x10_000;
+    pc.memory.write_u32(CRCR_BASE, 0x1234_5678);
+    pc.memory.write_u64(usbcmd_addr + 0x18, CRCR_BASE);
 
     // Start the controller; the device will assert an interrupt on the first RUN edge.
     pc.memory.write_u32(usbcmd_addr, 1);
@@ -758,6 +777,11 @@ fn pc_platform_xhci_msix_triggers_lapic_vector_and_suppresses_intx() {
 
     let usbcmd_addr = bar0_base + caplength;
     let usbsts_addr = usbcmd_addr + 4;
+
+    // Program CRCR to point at RAM so the DMA-on-RUN probe has a valid guest address to read.
+    const CRCR_BASE: u64 = 0x10_000;
+    pc.memory.write_u32(CRCR_BASE, 0x1234_5678);
+    pc.memory.write_u64(usbcmd_addr + 0x18, CRCR_BASE);
 
     // Start the controller; the device will assert an interrupt on the first RUN edge.
     pc.memory.write_u32(usbcmd_addr, 1);

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
-import { formatOneLineError } from "../src/text.js";
+import { formatOneLineError } from "../packages/transport-safety/src/text.js";
 import { SCHEMA_VERSION } from "./schema.js";
 import { startStaticServer } from "./server.js";
 import { SCENARIOS, getScenario } from "./scenarios/index.js";

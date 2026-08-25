@@ -116,6 +116,11 @@ mod e1000_bridge;
 pub use e1000_bridge::E1000Bridge;
 
 #[cfg(target_arch = "wasm32")]
+mod virtio_snd_playback_demo;
+#[cfg(target_arch = "wasm32")]
+pub use virtio_snd_playback_demo::VirtioSndPlaybackDemo;
+
+#[cfg(target_arch = "wasm32")]
 mod aerogpu_bridge;
 #[cfg(target_arch = "wasm32")]
 pub use aerogpu_bridge::AerogpuBridge;
@@ -226,6 +231,12 @@ thread_local! {
 
 #[wasm_bindgen(start)]
 pub fn wasm_start() {
+    // Deliberately no panic hook here.
+    //
+    // A hook is a `Box<dyn Fn>` living in the shared heap, but each worker instantiates the module
+    // with its own function table, so the code pointer one instance stores is a meaningless index
+    // in another's — calling it traps with "table index is out of bounds", replacing the panic
+    // message with a worse one. See `wiki/areas/platform-and-firmware.md`.
     #[cfg(all(target_arch = "wasm32", feature = "wasm-threaded"))]
     {
         // Ensure the TLS dummy is not optimized away.
@@ -1257,7 +1268,7 @@ impl UsbHidBridge {
     ///
     /// The canonical gamepad report layout is defined by `aero_usb::hid::GamepadReport`
     /// (`crates/aero-usb/src/hid/gamepad.rs`) and kept in sync with TypeScript via
-    /// `docs/fixtures/hid_gamepad_report_vectors.json`.
+    /// `protocol-vectors/hid_gamepad_report_vectors.json`.
     pub fn gamepad_report(&mut self, packed_lo: u32, packed_hi: u32) {
         let b0 = (packed_lo & 0xff) as u8;
         let b1 = ((packed_lo >> 8) & 0xff) as u8;
@@ -1887,7 +1898,7 @@ pub fn attach_mic_bridge(sab: SharedArrayBuffer) -> Result<MicBridge, JsValue> {
 /// TypeScript WebUSB executor, and accepts completions back from the host.
 ///
 /// The canonical host action/completion wire contract is defined by `aero_usb::passthrough`
-/// and documented in `docs/adr/0015-canonical-usb-stack.md` + `docs/webusb-passthrough.md`.
+/// and documented in `wiki/decisions/0015-canonical-usb-stack.md` + the USB and input area page.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub struct UsbPassthroughBridge {
@@ -2680,8 +2691,10 @@ impl HdaPlaybackDemo {
             sd.cbl = pcm_len_bytes as u32;
             sd.lvi = 0;
             sd.fmt = fmt_raw;
-            // SRST | RUN | IOCE | stream number 1.
-            sd.ctl = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 20);
+            // RUN | IOCE | stream number 1. SRST stays clear: the engine holds a stream
+            // in reset for as long as SRST reads 1, so setting it here would stop the
+            // demo's DMA from ever running.
+            sd.ctl = (1 << 1) | (1 << 2) | (1 << 20);
         }
 
         // Enable stream interrupts (best-effort; not currently surfaced to JS).
@@ -2835,8 +2848,10 @@ mod hda_dma_oob_tests {
             sd.cbl = pcm_len_bytes;
             sd.lvi = 0;
             sd.fmt = fmt_raw;
-            // SRST | RUN | IOCE | stream number 1.
-            sd.ctl = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 20);
+            // RUN | IOCE | stream number 1. SRST stays clear: the engine holds a stream
+            // in reset for as long as SRST reads 1, so setting it here would stop the
+            // demo's DMA from ever running.
+            sd.ctl = (1 << 1) | (1 << 2) | (1 << 20);
         }
 
         // The call should complete without panicking even though the DMA address is invalid.
@@ -3557,7 +3572,7 @@ pub enum MachineBootDevice {
 ///
 /// - Canonical PC platform topology (PIC/APIC/PIT/RTC/PCI/ACPI/HPET)
 /// - Canonical Win7 storage topology (ICH9 AHCI + PIIX3 IDE) as defined in
-///   `docs/05-storage-topology-win7.md`
+///   `wiki/areas/storage.md`
 /// - E1000 NIC + UHCI (USB 1.1) + AeroGPU (default; VGA disabled; legacy VGA ranges are aliased
 ///   through VRAM)
 ///
@@ -3812,7 +3827,7 @@ impl Machine {
     /// Note: SMP is still **bring-up only** (not a robust multi-vCPU environment yet). For real
     /// guest boots, prefer `cpu_count=1`.
     ///
-    /// See `docs/21-smp.md#status-today` and `docs/09-bios-firmware.md#smp-boot-bsp--aps`.
+    /// See `the CPU and JIT area page#smp-status` and the platform and firmware area page.
     #[wasm_bindgen(constructor)]
     pub fn new(ram_size_bytes: u32) -> Result<Self, JsValue> {
         let mut cfg = aero_machine::MachineConfig::browser_defaults(ram_size_bytes as u64);
@@ -3844,7 +3859,7 @@ impl Machine {
     /// LAPIC ICR + bounded cooperative AP execution), but SMP is still **bring-up only** (not a
     /// robust multi-vCPU environment yet). For real guest boots, prefer `cpu_count=1`.
     ///
-    /// See `docs/21-smp.md#status-today` and `docs/09-bios-firmware.md#smp-boot-bsp--aps`.
+    /// See `the CPU and JIT area page#smp-status` and the platform and firmware area page.
     #[wasm_bindgen]
     pub fn new_with_cpu_count(ram_size_bytes: u32, cpu_count: u32) -> Result<Self, JsValue> {
         let mut cfg = aero_machine::MachineConfig::browser_defaults(ram_size_bytes as u64);
@@ -4196,7 +4211,7 @@ impl Machine {
     /// Construct a canonical Windows 7 storage topology machine (AHCI + IDE at the normative BDFs).
     ///
     /// This uses [`aero_machine::MachineConfig::win7_storage_defaults`], which matches
-    /// `docs/05-storage-topology-win7.md` and keeps non-storage devices conservative by default:
+    /// `wiki/areas/storage.md` and keeps non-storage devices conservative by default:
     ///
     /// - AHCI (ICH9) enabled at `00:02.0`
     /// - IDE (PIIX3) enabled at `00:01.1` (with the multi-function ISA bridge at `00:01.0`)
@@ -5451,7 +5466,7 @@ impl Machine {
 
     #[cfg(all(target_arch = "wasm32", feature = "wasm-threaded"))]
     fn maybe_publish_legacy_scanout_from_vga(&mut self) {
-        // Do not override WDDM ownership (see `docs/16-aerogpu-vga-vesa-compat.md`).
+        // Do not override WDDM ownership (see `wiki/areas/graphics.md`).
         match self.scanout_state.try_snapshot() {
             Some(snap) if snap.source == SCANOUT_SOURCE_WDDM => return,
             None => return,

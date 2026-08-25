@@ -8,7 +8,7 @@ import { performance } from "node:perf_hooks";
 import { createRequire } from "node:module";
 import { chromium } from "playwright-core";
 import { summarize } from "./lib/stats.mjs";
-import { formatOneLineError, formatOneLineUtf8 } from "../../src/text.js";
+import { formatOneLineError, formatOneLineUtf8 } from "../../packages/transport-safety/src/text.js";
 
 const execFile = promisify(execFileCb);
 const require = createRequire(import.meta.url);

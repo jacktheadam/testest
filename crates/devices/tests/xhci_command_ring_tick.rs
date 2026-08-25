@@ -104,9 +104,8 @@ fn new_xhci_with_shared_memory(ram_size: usize) -> (XhciPciDevice, MemoryBus, Co
     // MMIO-triggered DMA uses an independent physical bus backed by the same RAM. The xHCI wrapper's
     // MMIO path uses this bus, while the tick path receives `mem` directly.
     let dma_ram = ram_handle.clone();
-    let dma_bus: Rc<RefCell<dyn memory::MemoryBus>> = Rc::new(RefCell::new(
-        memory::PhysicalMemoryBus::new(Box::new(dma_ram)),
-    ));
+    let dma_bus: Rc<RefCell<dyn memory::MemoryBus>> =
+        Rc::new(RefCell::new(memory::PhysicalMemoryBus::new(dma_ram)));
 
     let mut dev = XhciPciDevice::default();
     dev.set_dma_memory_bus(Some(dma_bus));

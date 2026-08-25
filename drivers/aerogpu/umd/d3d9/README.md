@@ -214,7 +214,7 @@ For allocations that may be referenced together in a single submission (notably 
 - `alloc_id` values (for both shared and non-shared allocations) are derived from a cross-process monotonic counter (`allocate_shared_alloc_id_token()` in `src/aerogpu_d3d9_driver.cpp`, backed by a named file mapping + `InterlockedIncrement64`, masked to 31 bits with 0 skipped).
 - `share_token` is returned by the KMD via `aerogpu_wddm_alloc_priv.share_token` (filled during `DxgkDdiCreateAllocation` and preserved across cross-process opens).
 
-See `docs/graphics/win7-shared-surfaces-share-token.md` for the end-to-end contract and the full Win7 cross-process
+See `wiki/areas/graphics.md` for the end-to-end contract and the full Win7 cross-process
 shared-surface validation test list (under `drivers/aerogpu/tests/win7/`).
 
 #### Cross-API note: D3D9Ex consuming DXGI shared handles (DWM scenario)
@@ -252,7 +252,7 @@ msbuild drivers\aerogpu\aerogpu.sln /m /p:Configuration=Release /p:Platform=Win3
 msbuild drivers\aerogpu\aerogpu.sln /m /p:Configuration=Release /p:Platform=x64 /p:AeroGpuUseWdkHeaders=1
 ```
 
-CI builds the same solution (and stages outputs under `out/drivers/aerogpu/`) via `ci/build-drivers.ps1`.
+CI builds the same solution (and stages outputs under `out/drivers/aerogpu/`) via `drivers/build/build-drivers.ps1`.
 
 Optional: `drivers\aerogpu\build\build_all.cmd` is a convenience wrapper around MSBuild/WDK10 that stages outputs under `drivers\aerogpu\build\out\win7\...`.
 
@@ -494,7 +494,7 @@ Implementation notes (bring-up):
       registers.
       - Some runtimes expect the WVP refresh to happen immediately when the user VS is unbound (`SetShader(VS, NULL)`), so the
         UMD may upload WVP constants at shader-unbind time (not just lazily at the next draw).
-  - See also: `docs/graphics/win7-d3d9-fixedfunc-wvp.md` (WVP draw-time paths + `ProcessVertices` notes).
+  - See also: `wiki/areas/graphics.md` (WVP draw-time paths + `ProcessVertices` notes).
 - Shader-stage interop is supported: when exactly one stage is bound (VS-only or PS-only), the draw paths bind a
   fixed-function fallback shader for the missing stage at draw time (see `ensure_shader_bindings_locked()`).
   - VS-only interop (PS is NULL) uses a fixed-function PS generated from texture stage state (stages 0..3; validated by `d3d9_shader_stage_interop`).
@@ -515,7 +515,7 @@ Limitations (bring-up):
   constant range (`c240..c243`) uploaded by `ensure_fixedfunc_wvp_constants_locked()`.
   - For `D3DFVF_XYZ | D3DFVF_NORMAL{,DIFFUSE}{,TEX1}`, the bring-up path also applies the minimal fixed-function lighting
     subset below when `D3DRS_LIGHTING` is enabled.
-  (Implementation notes: [`docs/graphics/win7-d3d9-fixedfunc-wvp.md`](../../../../docs/graphics/win7-d3d9-fixedfunc-wvp.md).)
+  (Implementation notes: [`wiki/areas/graphics.md`](wiki/areas/graphics.md).)
 - Fixed-function lighting/material is implemented only for a **minimal subset**:
   - gated by `D3DRS_LIGHTING` (off = unlit behavior),
   - uses `D3DRS_AMBIENT` as a global ambient term,
@@ -608,7 +608,7 @@ The D3D9 UMD contains a lightweight **in-process call trace** facility that can 
 
 See:
 
-- `docs/graphics/win7-d3d9-umd-tracing.md`
+- `wiki/areas/graphics.md`
 
 Notes:
 

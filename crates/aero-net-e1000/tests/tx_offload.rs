@@ -169,8 +169,9 @@ fn write_tx_ctx_desc(
     dma.write(addr + 10, &[0x20]); // DTYP=2 (context)
     dma.write(addr + 11, &[TXD_CMD_DEXT]);
 
-    dma.write(addr + 12, &mss.to_le_bytes());
-    dma.write(addr + 14, &[hdr_len, 0]);
+    // Per 82540EM spec: dword 3 = {status:8 @12, hdr_len:8 @13, mss:16 @14..16}.
+    dma.write(addr + 13, &[hdr_len]);
+    dma.write(addr + 14, &mss.to_le_bytes());
 }
 
 fn write_tx_data_desc(dma: &mut TestDma, addr: u64, buf_addr: u64, len: u16, cmd: u8, popts: u8) {

@@ -28,7 +28,7 @@ pub enum Usb2PortOwner {
 /// - UHCI: 16-bit `PORTSC` registers (Intel UHCI style).
 /// - EHCI: 32-bit `PORTSC` registers + global `CONFIGFLAG` routing.
 ///
-/// Design notes: see `docs/usb-ehci.md` (companion controller discussion).
+/// Design notes: see the USB and input area page (companion controller discussion).
 pub struct Usb2PortMux {
     configflag: bool,
     ports: Vec<Usb2MuxPort>,

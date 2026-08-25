@@ -11,7 +11,7 @@ This addendum is intended to extend the existing BAR0 layout in:
 
 * `drivers/aerogpu/protocol/aerogpu_pci.h`
 
-See also: `docs/graphics/win7-vblank-present-requirements.md`.
+See also: `wiki/areas/graphics.md`.
 
 ---
 

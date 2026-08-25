@@ -3,7 +3,7 @@
 Parse AeroGPU Win7 D3D10/10.1/11 `trace_resources:` logs and extract swapchain backbuffer descriptors.
 
 This is a convenience tool for the workflow documented in:
-  docs/graphics/win7-dxgi-swapchain-backbuffer.md
+  wiki/areas/graphics.md
 
 It scans for:
   - `CreateResource` descriptor lines

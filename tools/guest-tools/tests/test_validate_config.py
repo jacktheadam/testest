@@ -28,7 +28,7 @@ validate_config = _load_validator_module()
 
 
 def _contract_device(device_name: str):
-    contract_path = validate_config.REPO_ROOT / "docs/windows-device-contract.json"
+    contract_path = validate_config.REPO_ROOT / "protocol-vectors/windows-device-contract.json"
     contract = validate_config.load_windows_device_contract(contract_path)
     try:
         return contract.devices[device_name]
@@ -57,7 +57,7 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertEqual(validate_config._parse_quoted_list(""), ())
 
     def test_load_windows_device_contract_accepts_utf8_bom(self) -> None:
-        contract_path = validate_config.REPO_ROOT / "docs/windows-device-contract.json"
+        contract_path = validate_config.REPO_ROOT / "protocol-vectors/windows-device-contract.json"
         with tempfile.TemporaryDirectory(prefix="aero-guest-tools-validate-config-") as tmp:
             tmp_path = Path(tmp)
             bom_contract = tmp_path / "windows-device-contract.json"
@@ -412,7 +412,7 @@ class ValidateConfigTests(unittest.TestCase):
         # The in-repo Guest Tools config uses Aero in-tree service names (aero_virtio_blk, etc), but
         # virtio-win Guest Tools packaging needs to validate against upstream service names
         # (viostor/netkvm). The validator should support selecting the contract variant.
-        virtio_contract_path = validate_config.REPO_ROOT / "docs/windows-device-contract-virtio-win.json"
+        virtio_contract_path = validate_config.REPO_ROOT / "protocol-vectors/windows-device-contract-virtio-win.json"
         virtio_contract = validate_config.load_windows_device_contract(virtio_contract_path)
         virtio_blk = virtio_contract.devices["virtio-blk"]
         virtio_net = virtio_contract.devices["virtio-net"]

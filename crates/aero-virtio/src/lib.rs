@@ -8,7 +8,7 @@
 //! The repo-wide canonical synchronous disk trait is [`aero_storage::VirtualDisk`]. The virtio-blk
 //! device model in this crate (`devices::blk`) consumes a boxed `VirtualDisk` directly.
 //!
-//! See `docs/20-storage-trait-consolidation.md` for the repo-wide trait consolidation plan and
+//! See `wiki/areas/storage.md` for the repo-wide trait consolidation plan and
 //! adapter layering guidance.
 
 pub mod devices;

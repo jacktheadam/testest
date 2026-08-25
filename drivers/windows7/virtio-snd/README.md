@@ -13,7 +13,7 @@ The intended developer workflow is:
 
 ## Interrupts: INTx baseline, optional MSI/MSI-X
 
-Per the [`AERO-W7-VIRTIO` v1 contract](../../../docs/windows7-virtio-driver-contract.md) (§1.8), **INTx is required** and MSI/MSI-X is an optional enhancement.
+Per the [`AERO-W7-VIRTIO` v1 contract](wiki/areas/drivers-windows.md) (§1.8), **INTx is required** and MSI/MSI-X is an optional enhancement.
 MSI/MSI-X must not be required for functionality: if Windows does not allocate MSI/MSI-X, the driver is expected to fall back to INTx.
 
 ### Enabling MSI/MSI-X (INF)
@@ -44,7 +44,7 @@ Notes:
 - If MSI/MSI-X allocation fails (or the device has no MSI/MSI-X capability), Windows will provide an **INTx** interrupt resource.
 - If you modify the INF, regenerate the catalog and re-sign the package (required on Win7 x64 unless test-signing is enabled).
 
-For background, see [`docs/windows/virtio-pci-modern-interrupts.md`](../../../docs/windows/virtio-pci-modern-interrupts.md) (§5).
+For background, see [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md) (§5).
 
 ### Expected vector mapping
 
@@ -103,7 +103,7 @@ against non-contract virtio-snd implementations (for example, stock QEMU).
 ### `eventq` handling (virtio-snd asynchronous notifications)
 
 Contract v1 reserves `eventq` for future use and forbids drivers from depending on it
-(`docs/windows7-virtio-driver-contract.md` §3.4.2.1).
+(`wiki/areas/drivers-windows.md` §3.4.2.1).
 
 Driver behavior:
 
@@ -185,8 +185,8 @@ From a Windows host with the WDK installed:
 
 ```powershell
 # From the repo root:
-.\ci\install-wdk.ps1
-.\ci\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers windows7/virtio-snd
+.\drivers\build\install-wdk.ps1
+.\drivers\build\build-drivers.ps1 -ToolchainJson .\out\toolchain.json -Drivers windows7/virtio-snd
 ```
 
 Build outputs are staged under:
@@ -203,7 +203,7 @@ This uses the **DebugLogs** configuration in `aero_virtio_snd.vcxproj` (not buil
 
 ```powershell
 # From the repo root:
-.\ci\build-drivers.ps1 -Configuration DebugLogs -Drivers windows7/virtio-snd
+.\drivers\build\build-drivers.ps1 -Configuration DebugLogs -Drivers windows7/virtio-snd
 ```
 
 You can also build it directly with MSBuild (or from Visual Studio by selecting the

@@ -218,6 +218,62 @@ fn handle_assist_syncs_bus_after_cr3_write() {
 }
 
 #[test]
+fn same_value_mov_cr3_flushes_non_global_pagingbus_translation() {
+    // Windows uses a same-value MOV to CR3 as a TLB shootdown. The write is an
+    // architectural event even when the register's bits do not change.
+    let pd_base = 0x1000u64;
+    let pt_base = 0x2000u64;
+    let code_page = 0x3000u64;
+    let page_a = 0x4000u64;
+    let page_b = 0x5000u64;
+
+    let mut phys = TestMemory::new(0x10000);
+    let flags = PTE_P | PTE_RW;
+
+    phys.write_u32_raw(pd_base, (pt_base as u32) | flags);
+    phys.write_u32_raw(pt_base, (code_page as u32) | flags);
+    phys.write_u32_raw(pt_base + 4, (page_a as u32) | flags);
+    phys.write_u32_raw(page_a, 0x1111_1111);
+    phys.write_u32_raw(page_b, 0x2222_2222);
+
+    // mov eax, dword ptr [0x00001000]
+    // mov cr3, ebx
+    // mov eax, dword ptr [0x00001000]
+    let code = [
+        0xA1, 0x00, 0x10, 0x00, 0x00, // mov eax, [0x1000]
+        0x0F, 0x22, 0xDB, // mov cr3, ebx
+        0xA1, 0x00, 0x10, 0x00, 0x00, // mov eax, [0x1000]
+    ];
+    for (i, b) in code.iter().copied().enumerate() {
+        phys.write_u8_raw(code_page + i as u64, b);
+    }
+
+    let mut bus = PagingBus::new(phys);
+    let mut cpu = CpuCore::new(CpuMode::Protected);
+    cpu.state.control.cr3 = pd_base;
+    cpu.state.control.cr0 = CR0_PE | CR0_PG;
+    cpu.state.control.cr4 = 1 << 7; // CR4.PGE
+    cpu.state.update_mode();
+    cpu.state.set_rip(0);
+    cpu.state.write_reg(Register::EBX, pd_base);
+
+    let mut ctx = AssistContext::default();
+
+    let res = run_batch_with_assists(&mut ctx, &mut cpu, &mut bus, 1);
+    assert_eq!(res.exit, BatchExit::Completed);
+    assert_eq!(cpu.state.read_reg(Register::EAX) as u32, 0x1111_1111);
+
+    // Rewrite the non-global PTE while its old translation remains cached.
+    bus.inner_mut()
+        .write_u32_raw(pt_base + 4, (page_b as u32) | flags);
+
+    let res = run_batch_with_assists(&mut ctx, &mut cpu, &mut bus, 2);
+    assert_eq!(res.exit, BatchExit::Completed);
+    assert_eq!(cpu.state.control.cr3, pd_base);
+    assert_eq!(cpu.state.read_reg(Register::EAX) as u32, 0x2222_2222);
+}
+
+#[test]
 fn invlpg_flushes_pagingbus_translation() {
     // Page tables:
     //  - PDE[0] -> PT

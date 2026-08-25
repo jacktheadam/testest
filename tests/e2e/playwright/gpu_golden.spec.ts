@@ -420,7 +420,7 @@ test('WebGPU microtest (scissored quad) matches golden @webgpu', async ({ page }
 
 test('GPU backend smoke: WebGL2 presents expected frame (golden)', async ({ page }, testInfo) => {
   await skipIfWebGl2Unavailable(page, testInfo.project.name);
-  await page.goto('/web/gpu-smoke.html?backend=webgl2&filter=nearest&aspect=stretch', {
+  await page.goto('/apps/web/gpu-smoke.html?backend=webgl2&filter=nearest&aspect=stretch', {
     waitUntil: 'load',
   });
   const actual = await captureGpuSmokeFrameRGBA(page);
@@ -431,7 +431,7 @@ test('GPU backend smoke: WebGPU presents expected frame (golden) @webgpu', async
   test.skip(testInfo.project.name !== 'chromium-webgpu', 'WebGPU smoke only runs on Chromium WebGPU project.');
 
   try {
-    await page.goto('/web/gpu-smoke.html?backend=webgpu&filter=nearest&aspect=stretch', {
+    await page.goto('/apps/web/gpu-smoke.html?backend=webgpu&filter=nearest&aspect=stretch', {
       waitUntil: 'load',
     });
     const hasNavigatorGpu = await page.evaluate(() => !!(navigator as any).gpu);
@@ -503,7 +503,7 @@ async function captureGpuTraceReplayFrameRGBA(
 }
 
 const TRACE_FIXTURE_DIR = path.resolve(TEST_DIR, '../../fixtures');
-const TRACE_TOOL_PATH = path.resolve(TEST_DIR, '../../../web/tools/gpu_trace_replay.ts');
+const TRACE_TOOL_PATH = path.resolve(TEST_DIR, '../../../apps/web/tools/gpu_trace_replay.ts');
 
 // Map fixture filename -> golden override.
 //

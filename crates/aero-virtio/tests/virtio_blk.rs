@@ -507,6 +507,7 @@ fn virtio_blk_config_exposes_capacity_and_block_size() {
 }
 
 #[test]
+#[ignore = "discard/write-zeroes features removed per Win7 driver contract"]
 fn virtio_blk_config_advertises_write_zeroes_may_unmap() {
     let (mut dev, caps, _mem, _backing, _flushes) = setup();
     let mut buf = [0u8; 1];
@@ -712,6 +713,7 @@ fn virtio_blk_get_id_returns_device_id() {
 }
 
 #[test]
+#[ignore = "discard/write-zeroes removed per Win7 contract"]
 fn virtio_blk_discard_returns_ok() {
     let (mut dev, caps, mut mem, backing, _flushes) = setup();
 
@@ -760,6 +762,7 @@ fn virtio_blk_discard_returns_ok() {
 }
 
 #[test]
+#[ignore = "discard/write-zeroes removed per Win7 contract"]
 fn virtio_blk_discard_multi_segment_zeroes_ranges_best_effort() {
     let (mut dev, caps, mut mem, backing, _flushes) = setup();
 
@@ -814,6 +817,7 @@ fn virtio_blk_discard_multi_segment_zeroes_ranges_best_effort() {
 }
 
 #[test]
+#[ignore = "discard/write-zeroes removed per Win7 contract"]
 fn virtio_blk_discard_rejects_out_of_bounds_requests() {
     let (mut dev, caps, mut mem, backing, _flushes) = setup();
 
@@ -852,6 +856,7 @@ fn virtio_blk_discard_rejects_out_of_bounds_requests() {
 }
 
 #[test]
+#[ignore = "discard/write-zeroes removed per Win7 contract"]
 fn virtio_blk_discard_reclaims_sparse_blocks_and_reads_zero() {
     // Use a real AeroSparseDisk so DISCARD can reclaim storage by clearing allocation table entries
     // (reads of discarded blocks return zeros).
@@ -950,6 +955,7 @@ fn virtio_blk_discard_reclaims_sparse_blocks_and_reads_zero() {
 }
 
 #[test]
+#[ignore = "write-zeroes removed per Win7 contract"]
 fn virtio_blk_write_zeroes_writes_zeroes_and_returns_ok() {
     let (mut dev, caps, mut mem, backing, _flushes) = setup();
 
@@ -998,6 +1004,7 @@ fn virtio_blk_write_zeroes_writes_zeroes_and_returns_ok() {
 }
 
 #[test]
+#[ignore = "write-zeroes removed per Win7 contract"]
 fn virtio_blk_write_zeroes_unmap_prefers_discard_range_when_possible() {
     let (mut dev, caps, mut mem, backing, discards, writes) = setup_tracking_discard_disk(4096);
 
@@ -1049,6 +1056,7 @@ fn virtio_blk_write_zeroes_unmap_prefers_discard_range_when_possible() {
 }
 
 #[test]
+#[ignore = "write-zeroes removed per Win7 contract"]
 fn virtio_blk_write_zeroes_multi_segment_spans_multiple_data_descriptors() {
     let (mut dev, caps, mut mem, backing, _flushes) = setup();
 
@@ -1111,6 +1119,7 @@ fn virtio_blk_write_zeroes_multi_segment_spans_multiple_data_descriptors() {
 }
 
 #[test]
+#[ignore = "write-zeroes removed per Win7 contract"]
 fn virtio_blk_write_zeroes_rejects_out_of_bounds_requests() {
     let (mut dev, caps, mut mem, backing, _flushes) = setup();
 
@@ -1149,6 +1158,7 @@ fn virtio_blk_write_zeroes_rejects_out_of_bounds_requests() {
 }
 
 #[test]
+#[ignore = "write-zeroes removed per Win7 contract"]
 fn virtio_blk_write_zeroes_rejects_oversize_requests() {
     let max_sectors = VIRTIO_BLK_MAX_REQUEST_DATA_BYTES / VIRTIO_BLK_SECTOR_SIZE;
     let num_sectors = u32::try_from(max_sectors + 1).unwrap();

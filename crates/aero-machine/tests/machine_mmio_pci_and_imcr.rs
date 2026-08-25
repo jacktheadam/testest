@@ -169,7 +169,7 @@ fn imcr_port_switch_to_apic_mode_delivers_ioapic_interrupt_programmed_via_mmio()
     let vector = 0x60u8;
     let flag_addr = 0x0504u16;
     let flag_value = 0xA5u8;
-    let gsi = 10u32;
+    let gsi = 20u32;
 
     let boot = build_real_mode_imcr_interrupt_wait_boot_sector(vector, flag_addr, flag_value);
 
@@ -178,9 +178,16 @@ fn imcr_port_switch_to_apic_mode_delivers_ioapic_interrupt_programmed_via_mmio()
     m.reset();
     enable_a20(&mut m);
 
-    // Route GSI10 -> vector 0x60, edge-triggered, active-low (typical PCI INTx wiring).
+    // Route Q35 PCI GSI20 -> vector 0x60, edge-triggered, active-low.
     let low = u32::from(vector) | (1 << 13);
     program_ioapic_entry(&mut m, gsi, low, 0);
+    // Unmasking an IOAPIC entry normally enters no-IMCR symmetric-I/O mode.
+    // Force the legacy state here so this test isolates the IMCR compatibility
+    // transition performed by the guest boot sector.
+    m.platform_interrupts()
+        .unwrap()
+        .borrow_mut()
+        .set_mode(PlatformInterruptMode::LegacyPic);
 
     // Assert the line while still in legacy PIC mode; the guest switches to APIC mode via IMCR.
     m.platform_interrupts()
@@ -224,6 +231,10 @@ fn imcr_port_switch_to_apic_mode_delivers_ide_irq14_programmed_via_mmio() {
 
     // Route ISA IRQ14 (GSI14) -> vector 0x60, edge-triggered, active-high (ISA wiring).
     program_ioapic_entry(&mut m, 14, u32::from(vector), 0);
+    m.platform_interrupts()
+        .unwrap()
+        .borrow_mut()
+        .set_mode(PlatformInterruptMode::LegacyPic);
 
     // Ensure PCI command enables I/O decode for the IDE function.
     cfg_write(&mut m, profile::IDE_PIIX3.bdf, 0x04, 2, 0x0001);
@@ -271,6 +282,10 @@ fn imcr_port_switch_to_apic_mode_delivers_ide_irq15_programmed_via_mmio() {
 
     // Route ISA IRQ15 (GSI15) -> vector 0x61, edge-triggered, active-high (ISA wiring).
     program_ioapic_entry(&mut m, 15, u32::from(vector), 0);
+    m.platform_interrupts()
+        .unwrap()
+        .borrow_mut()
+        .set_mode(PlatformInterruptMode::LegacyPic);
 
     // Ensure PCI command enables I/O decode for the IDE function.
     cfg_write(&mut m, profile::IDE_PIIX3.bdf, 0x04, 2, 0x0001);
@@ -281,7 +296,8 @@ fn imcr_port_switch_to_apic_mode_delivers_ide_irq15_programmed_via_mmio() {
 
     // Verify that IDENTIFY data is reachable via the data port (0x170).
     let word0 = m.io_read(SECONDARY_PORTS.cmd_base, 2) as u16;
-    assert_eq!(word0, 0x8581);
+    // Word 0: ATAPI device (0x8580), 12-byte packet size (bit0=0, per ATA/ATAPI-7).
+    assert_eq!(word0, 0x8580);
 
     for _ in 0..50 {
         let _ = m.run_slice(10_000);
@@ -299,7 +315,7 @@ fn imcr_port_switch_to_apic_mode_delivers_ide_irq15_programmed_via_mmio() {
 #[test]
 fn ioapic_mmio_supports_partial_and_unaligned_accesses() {
     let vector = 0x63u8;
-    let gsi = 10u32;
+    let gsi = 20u32;
 
     let mut m = Machine::new(mmio_machine_config()).unwrap();
     enable_a20(&mut m);
@@ -310,7 +326,7 @@ fn ioapic_mmio_supports_partial_and_unaligned_accesses() {
         .borrow_mut()
         .set_mode(PlatformInterruptMode::Apic);
 
-    // Route GSI10 -> vector with typical active-low polarity. Keep it edge-triggered.
+    // Route Q35 PCI GSI20 with active-low polarity. Keep it edge-triggered.
     let low = u32::from(vector) | (1 << 13);
     let high = 0u32;
 

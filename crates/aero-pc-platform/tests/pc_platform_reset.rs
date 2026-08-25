@@ -324,7 +324,7 @@ fn pc_platform_reset_restores_pci_intx_interrupt_line_and_pin_registers() {
     let pirq_to_gsi = PciIntxRouterConfig::default().pirq_to_gsi;
     assert_eq!(
         pirq_to_gsi,
-        [10, 11, 12, 13],
+        [20, 21, 22, 23],
         "default PIRQ->GSI mapping should remain stable for reset determinism tests"
     );
     let ahci_bdf = SATA_AHCI_ICH9.bdf;
@@ -500,7 +500,7 @@ fn pc_platform_reset_pci_restores_pci_intx_interrupt_line_and_pin_registers() {
     let pirq_to_gsi = PciIntxRouterConfig::default().pirq_to_gsi;
     assert_eq!(
         pirq_to_gsi,
-        [10, 11, 12, 13],
+        [20, 21, 22, 23],
         "default PIRQ->GSI mapping should remain stable for reset determinism tests"
     );
 

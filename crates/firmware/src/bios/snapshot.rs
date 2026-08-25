@@ -309,6 +309,10 @@ impl BiosSnapshot {
             None => w.write_all(&[0])?,
         }
 
+        // v8 extension block: guest-visible legacy input topology.
+        w.write_all(&[7])?;
+        w.write_all(&[self.config.enable_i8042 as u8])?;
+
         Ok(())
     }
 
@@ -555,6 +559,11 @@ impl BiosSnapshot {
                             load_segment: (mask & (1 << 2) != 0).then_some(load_segment_raw),
                             sector_count: (mask & (1 << 3) != 0).then_some(sector_count_raw),
                         });
+                    }
+                    7 => {
+                        let mut enabled = [0u8; 1];
+                        r.read_exact(&mut enabled)?;
+                        config.enable_i8042 = enabled[0] != 0;
                     }
                     _ => {
                         // Unknown extension; ignore trailing bytes.
@@ -892,6 +901,20 @@ mod tests {
         );
         assert_eq!(bios2.config().cd_boot_drive, 0xE1);
         assert!(bios2.config().boot_from_cd_if_present);
+    }
+
+    #[test]
+    fn bios_snapshot_encode_decode_preserves_i8042_topology() {
+        let cfg = BiosConfig {
+            enable_i8042: false,
+            ..BiosConfig::default()
+        };
+        let bios = Bios::new(cfg);
+        let mut buf = Vec::new();
+        bios.snapshot().encode(&mut buf).unwrap();
+
+        let decoded = BiosSnapshot::decode(&mut Cursor::new(&buf)).unwrap();
+        assert!(!decoded.config.enable_i8042);
     }
 
     #[test]

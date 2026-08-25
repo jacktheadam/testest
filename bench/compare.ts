@@ -10,7 +10,7 @@ import {
   loadThresholdPolicy,
   pickThresholdProfile,
 } from "../tools/perf/lib/thresholds.mjs";
-import { formatOneLineError, truncateUtf8 } from "../src/text.js";
+import { formatOneLineError, truncateUtf8 } from "../packages/transport-safety/src/text.js";
 
 export type StorageContextStatus = "ok" | "warn" | "fail";
 

@@ -51,8 +51,22 @@ export async function removeOpfsEntryBestEffort(page: Page, path: string): Promi
  */
 export async function probeOpfsSyncAccessHandle(page: Page): Promise<OpfsSyncAccessHandleProbeResult> {
   return await page.evaluate(async () => {
-    const { formatOneLineUtf8 } = await import("/web/src/text.ts");
+    // Formatted inline rather than imported from the source tree.
+    //
+    // These specs run against the *preview* server, which serves the built bundle — a path like
+    // `/packages/.../text.js` exists only under the dev server, so importing it here fails the
+    // whole probe on the very environments it is supposed to detect. The need is one bounded,
+    // single-line string, which is small enough to keep local.
     const MAX_ERROR_BYTES = 512;
+    const formatOneLineUtf8 = (input: string, maxBytes: number): string => {
+      const oneLine = String(input ?? "")
+        .replace(/[\u0000-\u001F\u007F\u0085\u2028\u2029]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const encoded = new TextEncoder().encode(oneLine);
+      if (encoded.length <= maxBytes) return oneLine;
+      return new TextDecoder().decode(encoded.subarray(0, maxBytes)).replace(/\uFFFD+$/, "");
+    };
     try {
       const storage = navigator.storage as StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> };
       if (typeof storage?.getDirectory !== "function") {

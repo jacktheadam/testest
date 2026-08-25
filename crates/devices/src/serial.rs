@@ -33,7 +33,10 @@ impl Serial16550 {
             mcr: 0,
             // THR empty + transmitter empty.
             lsr: 0x60,
-            msr: 0,
+            // Default MSR: DCD, DSR, CTS active (bits 5,4,3 set). Most
+            // virtual UARTs report these asserted so modem-aware drivers
+            // (that wait for DSR/CTS before TX) don't stall indefinitely.
+            msr: 0xB0,
             scr: 0,
             dll: 1,
             dlm: 0,
@@ -68,17 +71,24 @@ impl Serial16550 {
     }
 
     fn interrupt_pending(&self) -> bool {
-        // Receive Data Available.
-        (self.ier & 0x01) != 0 && !self.rx.is_empty()
+        // Receive Data Available (IER bit 0 + data in RX buffer).
+        let rda = (self.ier & 0x01) != 0 && !self.rx.is_empty();
+        // THRE interrupt (IER bit 1 + LSR.THRE set).
+        let thre = (self.ier & 0x02) != 0 && (self.lsr & 0x20) != 0;
+        rda || thre
     }
 
     fn read_iir(&self) -> u8 {
         // Bit 0: 1 = no interrupt pending.
-        // Bits 3:1: interrupt ID.
+        // Bits 3:1: interrupt ID. Priority: RDA (0x04) > THRE (0x02).
         // Bits 7:6: FIFO enabled status (16550).
         let fifo_bits = if self.fifo_enabled() { 0xC0 } else { 0x00 };
-        if self.interrupt_pending() {
+        let rda = (self.ier & 0x01) != 0 && !self.rx.is_empty();
+        let thre = (self.ier & 0x02) != 0 && (self.lsr & 0x20) != 0;
+        if rda {
             fifo_bits | 0x04
+        } else if thre {
+            fifo_bits | 0x02
         } else {
             fifo_bits | 0x01
         }

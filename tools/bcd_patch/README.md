@@ -39,7 +39,7 @@ Flags default to **on** unless explicitly set to **off**:
 - `nointegritychecks` → BCD element type `0x16000048` (BcdLibraryBoolean_DisableIntegrityChecks)
 
 For background on why we patch these flags, which store files matter on Win7 media,
-and how to verify results with `bcdedit`, see: `docs/win7-bcd-offline-patching.md`.
+and how to verify results with `bcdedit`, see: `wiki/areas/drivers-windows.md`.
 
 ## What gets patched (object selection)
 

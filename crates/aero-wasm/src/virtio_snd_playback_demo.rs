@@ -17,9 +17,11 @@ use aero_virtio::devices::snd::{
     VIRTIO_SND_QUEUE_CONTROL, VIRTIO_SND_QUEUE_TX, VIRTIO_SND_R_PCM_PREPARE,
     VIRTIO_SND_R_PCM_SET_PARAMS, VIRTIO_SND_R_PCM_START, VIRTIO_SND_S_OK, VirtioSnd,
 };
-use aero_virtio::memory::{GuestMemory, GuestRam, read_u32_le, write_u16_le, write_u32_le, write_u64_le};
+use aero_virtio::memory::{
+    GuestMemory, GuestRam, read_u32_le, write_u16_le, write_u32_le, write_u64_le,
+};
 use aero_virtio::queue::{
-    PoppedDescriptorChain, VirtQueue, VirtQueueConfig, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE,
+    PoppedDescriptorChain, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE, VirtQueue, VirtQueueConfig,
 };
 
 fn js_error(message: impl core::fmt::Display) -> JsValue {
@@ -69,14 +71,21 @@ fn write_desc(
     next: u16,
 ) -> Result<(), JsValue> {
     let base = table + u64::from(index) * 16;
-    write_u64_le(mem, base, addr).map_err(|e| js_error(format!("write desc.addr failed: {e:?}")))?;
-    write_u32_le(mem, base + 8, len).map_err(|e| js_error(format!("write desc.len failed: {e:?}")))?;
-    write_u16_le(mem, base + 12, flags).map_err(|e| js_error(format!("write desc.flags failed: {e:?}")))?;
-    write_u16_le(mem, base + 14, next).map_err(|e| js_error(format!("write desc.next failed: {e:?}")))?;
+    write_u64_le(mem, base, addr)
+        .map_err(|e| js_error(format!("write desc.addr failed: {e:?}")))?;
+    write_u32_le(mem, base + 8, len)
+        .map_err(|e| js_error(format!("write desc.len failed: {e:?}")))?;
+    write_u16_le(mem, base + 12, flags)
+        .map_err(|e| js_error(format!("write desc.flags failed: {e:?}")))?;
+    write_u16_le(mem, base + 14, next)
+        .map_err(|e| js_error(format!("write desc.next failed: {e:?}")))?;
     Ok(())
 }
 
-fn pop_chain(queue: &mut VirtQueue, mem: &GuestRam) -> Result<aero_virtio::queue::DescriptorChain, JsValue> {
+fn pop_chain(
+    queue: &mut VirtQueue,
+    mem: &GuestRam,
+) -> Result<aero_virtio::queue::DescriptorChain, JsValue> {
     match queue
         .pop_descriptor_chain(mem)
         .map_err(|e| js_error(format!("virtqueue pop_descriptor_chain failed: {e:?}")))?
@@ -219,7 +228,9 @@ impl VirtioSndPlaybackDemo {
             .checked_add(MAX_TX_PAYLOAD_BYTES as u64)
             .ok_or_else(|| js_error("TX payload layout overflow"))?;
         if end > mem.len() {
-            return Err(js_error("Guest RAM allocation is too small for TX payload buffer"));
+            return Err(js_error(
+                "Guest RAM allocation is too small for TX payload buffer",
+            ));
         }
 
         // Bring the playback stream to RUNNING via the control queue.
@@ -287,7 +298,10 @@ impl VirtioSndPlaybackDemo {
 
         let (level, capacity) = {
             let sink = self.dev.output_mut();
-            (sink.bridge().buffer_level_frames(), sink.bridge().capacity_frames())
+            (
+                sink.bridge().buffer_level_frames(),
+                sink.bridge().capacity_frames(),
+            )
         };
         let free = capacity.saturating_sub(level);
         // Keep a small safety margin so rounding in the resampler cannot overflow the ring and
@@ -325,7 +339,8 @@ impl VirtioSndPlaybackDemo {
             let dst_minus1 = want_host_frames_u64 - 1;
             ((dst_minus1.saturating_mul(src_rate) + dst_rate - 1) / dst_rate).saturating_add(1)
         };
-        let max_src_per_tick = (MAX_TX_FRAMES_PER_REQ as u64).saturating_mul(MAX_TX_REQUESTS_PER_TICK as u64);
+        let max_src_per_tick =
+            (MAX_TX_FRAMES_PER_REQ as u64).saturating_mul(MAX_TX_REQUESTS_PER_TICK as u64);
         want_src_frames = want_src_frames.min(max_src_per_tick);
 
         // Avoid constructing requests larger than the virtio-snd contract limit.
@@ -475,11 +490,16 @@ impl VirtioSndPlaybackDemo {
         )?;
 
         // Publish the chain in the TX avail ring.
-        write_u16_le(&mut self.mem, TX_AVAIL, 0).map_err(|e| js_error(format!("write TX avail.flags failed: {e:?}")))?;
-        write_u16_le(&mut self.mem, TX_AVAIL + 2, 1).map_err(|e| js_error(format!("write TX avail.idx failed: {e:?}")))?;
-        write_u16_le(&mut self.mem, TX_AVAIL + 4, 0).map_err(|e| js_error(format!("write TX avail.ring failed: {e:?}")))?;
-        write_u16_le(&mut self.mem, TX_USED, 0).map_err(|e| js_error(format!("write TX used.flags failed: {e:?}")))?;
-        write_u16_le(&mut self.mem, TX_USED + 2, 0).map_err(|e| js_error(format!("write TX used.idx failed: {e:?}")))?;
+        write_u16_le(&mut self.mem, TX_AVAIL, 0)
+            .map_err(|e| js_error(format!("write TX avail.flags failed: {e:?}")))?;
+        write_u16_le(&mut self.mem, TX_AVAIL + 2, 1)
+            .map_err(|e| js_error(format!("write TX avail.idx failed: {e:?}")))?;
+        write_u16_le(&mut self.mem, TX_AVAIL + 4, 0)
+            .map_err(|e| js_error(format!("write TX avail.ring failed: {e:?}")))?;
+        write_u16_le(&mut self.mem, TX_USED, 0)
+            .map_err(|e| js_error(format!("write TX used.flags failed: {e:?}")))?;
+        write_u16_le(&mut self.mem, TX_USED + 2, 0)
+            .map_err(|e| js_error(format!("write TX used.idx failed: {e:?}")))?;
 
         let mut queue = VirtQueue::new(
             VirtQueueConfig {
@@ -501,14 +521,19 @@ impl VirtioSndPlaybackDemo {
         let status = read_u32_le(&self.mem, TX_RESP_BUF)
             .map_err(|e| js_error(format!("read TX status failed: {e:?}")))?;
         if status != VIRTIO_SND_S_OK {
-            return Err(js_error(format!("virtio-snd TX returned status 0x{status:08x}")));
+            return Err(js_error(format!(
+                "virtio-snd TX returned status 0x{status:08x}"
+            )));
         }
 
         Ok(())
     }
 }
 
-fn drive_playback_to_running(dev: &mut VirtioSnd<WorkletBridgeStatsSink>, mem: &mut GuestRam) -> Result<(), JsValue> {
+fn drive_playback_to_running(
+    dev: &mut VirtioSnd<WorkletBridgeStatsSink>,
+    mem: &mut GuestRam,
+) -> Result<(), JsValue> {
     // PCM_SET_PARAMS (24 bytes).
     let mut req = [0u8; 24];
     req[0..4].copy_from_slice(&VIRTIO_SND_R_PCM_SET_PARAMS.to_le_bytes());
@@ -586,11 +611,16 @@ fn run_control_req(
     )?;
 
     // Populate avail ring with one entry.
-    write_u16_le(mem, CONTROL_AVAIL, 0).map_err(|e| js_error(format!("write control avail.flags failed: {e:?}")))?;
-    write_u16_le(mem, CONTROL_AVAIL + 2, 1).map_err(|e| js_error(format!("write control avail.idx failed: {e:?}")))?;
-    write_u16_le(mem, CONTROL_AVAIL + 4, 0).map_err(|e| js_error(format!("write control avail.ring failed: {e:?}")))?;
-    write_u16_le(mem, CONTROL_USED, 0).map_err(|e| js_error(format!("write control used.flags failed: {e:?}")))?;
-    write_u16_le(mem, CONTROL_USED + 2, 0).map_err(|e| js_error(format!("write control used.idx failed: {e:?}")))?;
+    write_u16_le(mem, CONTROL_AVAIL, 0)
+        .map_err(|e| js_error(format!("write control avail.flags failed: {e:?}")))?;
+    write_u16_le(mem, CONTROL_AVAIL + 2, 1)
+        .map_err(|e| js_error(format!("write control avail.idx failed: {e:?}")))?;
+    write_u16_le(mem, CONTROL_AVAIL + 4, 0)
+        .map_err(|e| js_error(format!("write control avail.ring failed: {e:?}")))?;
+    write_u16_le(mem, CONTROL_USED, 0)
+        .map_err(|e| js_error(format!("write control used.flags failed: {e:?}")))?;
+    write_u16_le(mem, CONTROL_USED + 2, 0)
+        .map_err(|e| js_error(format!("write control used.idx failed: {e:?}")))?;
 
     let mut queue = VirtQueue::new(
         VirtQueueConfig {

@@ -205,18 +205,48 @@ pub enum MapError {
 /// 2. ROM regions
 /// 3. RAM
 /// 4. Unmapped (reads return all 1s, writes ignored)
-pub struct PhysicalMemoryBus {
-    pub ram: Box<dyn GuestMemory>,
+pub struct PhysicalMemoryBus<M: GuestMemory> {
+    pub ram: M,
     rom_regions: Vec<RomRegion>,
     mmio_regions: Vec<MmioRegion>,
+    /// Cached `ram.size()` so the hot read path does not vtable-call `size()` on
+    /// every access (common when `M` is `Box<dyn GuestMemory>`).
+    ram_size: u64,
+    /// Highest address (exclusive) of any ROM region. Reads above this
+    /// can skip the ROM overlap check.
+    max_rom_end: u64,
+    /// Lowest start address of any MMIO region, or u64::MAX if none.
+    /// Reads entirely below this can skip the MMIO overlap check.
+    min_mmio_start: u64,
 }
 
-impl PhysicalMemoryBus {
-    pub fn new(ram: Box<dyn GuestMemory>) -> Self {
+impl<M: GuestMemory> PhysicalMemoryBus<M> {
+    pub fn new(ram: M) -> Self {
+        let ram_size = ram.size();
         Self {
             ram,
             rom_regions: Vec::new(),
             mmio_regions: Vec::new(),
+            ram_size,
+            max_rom_end: 0,
+            min_mmio_start: u64::MAX,
+        }
+    }
+
+    /// Refresh the cached RAM size after replacing [`PhysicalMemoryBus::ram`].
+    #[inline]
+    pub fn refresh_ram_size(&mut self) {
+        self.ram_size = self.ram.size();
+    }
+
+    /// True when `[paddr, paddr+len)` is entirely within RAM and outside ROM/MMIO.
+    #[inline]
+    fn ram_fast_range(&self, paddr: u64, len: usize) -> Option<u64> {
+        let end = paddr.checked_add(len as u64)?;
+        if end <= self.ram_size && self.ram_no_region_overlap(paddr, end) {
+            Some(end)
+        } else {
+            None
         }
     }
 
@@ -249,6 +279,7 @@ impl PhysicalMemoryBus {
             }
         }
 
+        self.max_rom_end = self.max_rom_end.max(end);
         self.rom_regions
             .insert(insert_idx, RomRegion { start, data });
         Ok(())
@@ -279,6 +310,7 @@ impl PhysicalMemoryBus {
             }
         }
 
+        self.min_mmio_start = self.min_mmio_start.min(start);
         self.mmio_regions.insert(
             insert_idx,
             MmioRegion {
@@ -318,9 +350,52 @@ impl PhysicalMemoryBus {
         self.rom_regions.get(idx).map(|r| r.start)
     }
 
+    /// Returns `true` when `[paddr, end)` does not overlap any MMIO or ROM region,
+    /// i.e. every byte in the range is plain RAM. Both region lists are sorted by
+    /// `start` and non-overlapping (invariants enforced by `map_mmio`/`map_rom`),
+    /// so the first region that *ends* after `paddr` is the only one that could
+    /// overlap; the access is clear iff that region starts at or after `end`.
+    /// Used by the `read_physical` fast path to skip the full dispatch for the
+    /// overwhelmingly-common RAM-only access.
+    fn ram_no_region_overlap(&self, paddr: u64, end: u64) -> bool {
+        // Fast path: if the access starts above all ROM regions and
+        // ends before any MMIO region, no overlap is possible.
+        if paddr >= self.max_rom_end && end <= self.min_mmio_start {
+            return true;
+        }
+        let mi = self.mmio_regions.partition_point(|r| r.end <= paddr);
+        if let Some(r) = self.mmio_regions.get(mi) {
+            if r.start < end {
+                return false;
+            }
+        }
+        let ri = self.rom_regions.partition_point(|r| r.end() <= paddr);
+        if let Some(r) = self.rom_regions.get(ri) {
+            if r.start < end {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn read_physical(&mut self, paddr: u64, dst: &mut [u8]) {
+        // Fast path: the whole access is plain RAM with no MMIO/ROM overlap. This
+        // is the overwhelmingly common case (guest code fetches and data reads),
+        // and lets us do a single `ram.read_into` instead of the per-region
+        // dispatch loop with its repeated binary searches.
+        if !dst.is_empty() && self.ram_fast_range(paddr, dst.len()).is_some() {
+            // Prefer contiguous-slice copy when the backend exposes one (DenseMemory).
+            if let Some(src) = self.ram.get_slice(paddr, dst.len()) {
+                dst.copy_from_slice(src);
+                return;
+            }
+            if self.ram.read_into(paddr, dst).is_ok() {
+                return;
+            }
+        }
+
         let mut pos = 0usize;
-        let ram_len = self.ram.size();
+        let ram_len = self.ram_size;
 
         while pos < dst.len() {
             let addr = match paddr.checked_add(pos as u64) {
@@ -426,7 +501,7 @@ impl PhysicalMemoryBus {
 
     pub fn write_physical(&mut self, paddr: u64, src: &[u8]) {
         let mut pos = 0usize;
-        let ram_len = self.ram.size();
+        let ram_len = self.ram_size;
 
         while pos < src.len() {
             let addr = match paddr.checked_add(pos as u64) {
@@ -607,13 +682,81 @@ impl PhysicalMemoryBus {
     }
 }
 
-impl MemoryBus for PhysicalMemoryBus {
+impl<M: GuestMemory> MemoryBus for PhysicalMemoryBus<M> {
+    #[inline]
     fn read_physical(&mut self, paddr: u64, buf: &mut [u8]) {
         PhysicalMemoryBus::read_physical(self, paddr, buf)
     }
 
+    #[inline]
     fn write_physical(&mut self, paddr: u64, buf: &[u8]) {
         PhysicalMemoryBus::write_physical(self, paddr, buf)
+    }
+
+    #[inline]
+    fn read_u8(&mut self, paddr: u64) -> u8 {
+        if self.ram_fast_range(paddr, 1).is_some() {
+            if let Some(src) = self.ram.get_slice(paddr, 1) {
+                return src[0];
+            }
+            let mut buf = [0u8; 1];
+            if self.ram.read_into(paddr, &mut buf).is_ok() {
+                return buf[0];
+            }
+        }
+        let mut buf = [0u8; 1];
+        PhysicalMemoryBus::read_physical(self, paddr, &mut buf);
+        buf[0]
+    }
+
+    #[inline]
+    fn read_u16(&mut self, paddr: u64) -> u16 {
+        if self.ram_fast_range(paddr, 2).is_some() {
+            if let Some(src) = self.ram.get_slice(paddr, 2) {
+                return u16::from_le_bytes([src[0], src[1]]);
+            }
+            let mut buf = [0u8; 2];
+            if self.ram.read_into(paddr, &mut buf).is_ok() {
+                return u16::from_le_bytes(buf);
+            }
+        }
+        let mut buf = [0u8; 2];
+        PhysicalMemoryBus::read_physical(self, paddr, &mut buf);
+        u16::from_le_bytes(buf)
+    }
+
+    #[inline]
+    fn read_u32(&mut self, paddr: u64) -> u32 {
+        if self.ram_fast_range(paddr, 4).is_some() {
+            if let Some(src) = self.ram.get_slice(paddr, 4) {
+                return u32::from_le_bytes([src[0], src[1], src[2], src[3]]);
+            }
+            let mut buf = [0u8; 4];
+            if self.ram.read_into(paddr, &mut buf).is_ok() {
+                return u32::from_le_bytes(buf);
+            }
+        }
+        let mut buf = [0u8; 4];
+        PhysicalMemoryBus::read_physical(self, paddr, &mut buf);
+        u32::from_le_bytes(buf)
+    }
+
+    #[inline]
+    fn read_u64(&mut self, paddr: u64) -> u64 {
+        if self.ram_fast_range(paddr, 8).is_some() {
+            if let Some(src) = self.ram.get_slice(paddr, 8) {
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(src);
+                return u64::from_le_bytes(bytes);
+            }
+            let mut buf = [0u8; 8];
+            if self.ram.read_into(paddr, &mut buf).is_ok() {
+                return u64::from_le_bytes(buf);
+            }
+        }
+        let mut buf = [0u8; 8];
+        PhysicalMemoryBus::read_physical(self, paddr, &mut buf);
+        u64::from_le_bytes(buf)
     }
 }
 
@@ -827,7 +970,7 @@ mod tests {
     #[test]
     fn unmapped_reads_return_all_ones() {
         let ram = SharedRam::new(vec![0u8; 4]);
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         assert_eq!(bus.read_physical_u8(10), 0xFF);
         assert_eq!(bus.read_physical_u16(10), 0xFFFF);
@@ -844,7 +987,7 @@ mod tests {
     fn rom_is_read_only_and_does_not_write_through_to_ram() {
         let ram = SharedRam::new((0u8..16).collect());
         let ram_view = ram.clone();
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         bus.map_rom(4, Arc::from([0x10u8, 0x11, 0x12, 0x13].as_slice()))
             .unwrap();
@@ -867,7 +1010,7 @@ mod tests {
         base_ram[8..12].copy_from_slice(&[0x01, 0x02, 0x03, 0x04]);
         let ram = SharedRam::new(base_ram);
         let ram_view = ram.clone();
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         bus.map_rom(8, Arc::from([0x10u8, 0x20, 0x30, 0x40].as_slice()))
             .unwrap();
@@ -896,7 +1039,7 @@ mod tests {
         // Crossing the end of RAM should not panic and should use 0xFF for unmapped bytes.
         let ram = SharedRam::new(vec![0x01, 0x02, 0x03, 0x04]);
         let ram_view = ram.clone();
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         assert_eq!(bus.read_physical_u32(2), 0xFFFF_0403);
 
@@ -909,7 +1052,7 @@ mod tests {
         let base_ram: Vec<u8> = (0u8..8).collect();
         let ram = SharedRam::new(base_ram.clone());
         let ram_view = ram.clone();
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         let (mmio, mmio_state) = RecordingMmio::new(vec![0xAA, 0xBB]);
         bus.map_mmio(4, 2, Box::new(mmio)).unwrap();
@@ -933,7 +1076,7 @@ mod tests {
     #[test]
     fn unaligned_u64_mmio_accesses_are_split_into_aligned_operations() {
         let ram = SharedRam::new(vec![0u8; 32]);
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         let (mmio, mmio_state) = StrictMmio::new((0u8..16).collect());
         bus.map_mmio(0x1000, 16, Box::new(mmio)).unwrap();
@@ -1357,7 +1500,7 @@ mod bus_tests {
     #[test]
     fn unmapped_reads_return_all_ones() {
         let ram = SharedRam::new(vec![0u8; 4]);
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         assert_eq!(bus.read_physical_u8(10), 0xFF);
         assert_eq!(bus.read_physical_u16(10), 0xFFFF);
@@ -1374,7 +1517,7 @@ mod bus_tests {
     fn rom_is_read_only_and_does_not_write_through_to_ram() {
         let ram = SharedRam::new((0u8..16).collect());
         let ram_view = ram.clone();
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         bus.map_rom(4, Arc::from([0x10u8, 0x11, 0x12, 0x13].as_slice()))
             .unwrap();
@@ -1397,7 +1540,7 @@ mod bus_tests {
         base_ram[8..12].copy_from_slice(&[0x01, 0x02, 0x03, 0x04]);
         let ram = SharedRam::new(base_ram);
         let ram_view = ram.clone();
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         bus.map_rom(8, Arc::from([0x10u8, 0x20, 0x30, 0x40].as_slice()))
             .unwrap();
@@ -1426,7 +1569,7 @@ mod bus_tests {
         // Crossing the end of RAM should not panic and should use 0xFF for unmapped bytes.
         let ram = SharedRam::new(vec![0x01, 0x02, 0x03, 0x04]);
         let ram_view = ram.clone();
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         assert_eq!(bus.read_physical_u32(2), 0xFFFF_0403);
 
@@ -1439,7 +1582,7 @@ mod bus_tests {
         let base_ram: Vec<u8> = (0u8..8).collect();
         let ram = SharedRam::new(base_ram.clone());
         let ram_view = ram.clone();
-        let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+        let mut bus = PhysicalMemoryBus::new(ram);
 
         let (mmio, mmio_state) = RecordingMmio::new(vec![0xAA, 0xBB]);
         bus.map_mmio(4, 2, Box::new(mmio)).unwrap();

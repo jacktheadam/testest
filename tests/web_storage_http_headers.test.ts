@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   commaSeparatedTokenListHasToken,
   contentEncodingIsIdentity,
-} from "../web/src/storage/http_headers";
+} from "../apps/web/src/storage/http_headers";
 
 test("commaSeparatedTokenListHasToken: matches no-transform among Cache-Control directives", () => {
   assert.equal(commaSeparatedTokenListHasToken("no-transform", "no-transform", { maxLen: 128 }), true);

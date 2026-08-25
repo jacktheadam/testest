@@ -36,12 +36,10 @@ fn aerogpu_intx_is_gated_on_pci_command_intx_disable() {
         .expect("pc platform should provide PlatformInterrupts");
 
     let bdf = AEROGPU.bdf;
-    let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected AeroGPU INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let irq = u8::try_from(gsi).unwrap();
+    let irq = pci_intx
+        .borrow()
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("AeroGPU INTx should have a legacy PIC compatibility route");
     let vector = if irq < 8 {
         0x20 + irq
     } else {

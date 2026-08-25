@@ -45,7 +45,7 @@ Notes:
 
 To build Guest Tools locally from CI outputs, use:
 
-- `ci/package-guest-tools.ps1` (CI wrapper around `tools/packaging/aero_packager/`)
+- `drivers/build/package-guest-tools.ps1` (CI wrapper around `tools/packaging/aero_packager/`)
 - `drivers/scripts/make-guest-tools-from-ci.ps1` (convenience wrapper)
 
 CI/release packaging uses the spec:
@@ -119,7 +119,6 @@ Output:
 Both the staging directory and the zip include:
 
 - `manifest.json` (provenance info; records the source virtio-win ISO path/hash when applicable)
-- `THIRD_PARTY_NOTICES.md` (third-party attribution/redistribution notices for virtio-win-derived artifacts)
 - `licenses/virtio-win/` (best-effort copy of upstream license/notice files from the virtio-win distribution root)
 
 ### Optional: build a mountable drivers ISO (for Windows Setup “Load driver”)
@@ -148,9 +147,8 @@ On non-Windows hosts you have three options:
 - Extract first with `tools/virtio-win/extract.py` and pass `-VirtioWinRoot`
 - Run under `pwsh` and pass `-VirtioWinIso` directly (auto-extract fallback when `Mount-DiskImage` is unavailable or fails)
 
-See also: `docs/virtio-windows-drivers.md`.
+See also: `wiki/areas/drivers-windows.md`.
 
-Note: the resulting drivers ISO includes `THIRD_PARTY_NOTICES.md` at the ISO root
 so redistributed media carries virtio-win attribution requirements.
 
 ### Optional: build `aero-guest-tools.iso` from virtio-win (post-install enablement)
@@ -188,8 +186,7 @@ This emits the following under `dist/guest-tools/`:
 - `aero-guest-tools.zip`
 - `manifest.json`
 
-The Guest Tools ISO/zip root also includes `THIRD_PARTY_NOTICES.md` (sourced from
-`guest-tools/THIRD_PARTY_NOTICES.md` in this repo).
+
 
 When building Guest Tools from a virtio-win ISO/root using the wrapper script,
 upstream virtio-win license/notice files (if present) are also included under:
@@ -225,7 +222,7 @@ This validates the packaged drivers using:
 
 For end users, the intended flow is to mount **Aero Guest Tools** (`aero-guest-tools.iso`) in the Windows 7 guest and run `setup.cmd` as Administrator.
 
-See: `docs/windows7-guest-tools.md`.
+See: `wiki/areas/drivers-windows.md`.
 
 ### Manual install (virtio-win driver pack ZIP)
 
@@ -308,7 +305,7 @@ See: `drivers/docs/wdk-build.md`.
 - **GPU (AeroGPU)**
   - If using the optional AeroGPU WDDM stack, run the guest-side validation suite:
     - `drivers\\aerogpu\\tests\\win7\\run_all.cmd --require-vid=0xA3A0 --require-did=0x0001`
-    - If using the deprecated legacy AeroGPU device model, pass its matching VID/DID (see `docs/abi/aerogpu-pci-identity.md`).
+    - If using the deprecated legacy AeroGPU device model, pass its matching VID/DID (see `wiki/areas/graphics.md`).
     - (Use `run_all.cmd --help` for flags like `--dump` / `--allow-remote`.)
 
 ## Host-side protocol tests (shared structs)

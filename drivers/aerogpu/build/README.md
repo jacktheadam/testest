@@ -15,12 +15,12 @@ The top-level entrypoint is:
 From repo root:
 
 ```powershell
-pwsh ci/install-wdk.ps1
-pwsh ci/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
-pwsh ci/build-aerogpu-dbgctl.ps1 -ToolchainJson out/toolchain.json
-pwsh ci/make-catalogs.ps1 -ToolchainJson out/toolchain.json
-pwsh ci/sign-drivers.ps1 -ToolchainJson out/toolchain.json
-pwsh ci/package-drivers.ps1
+pwsh drivers/build/install-wdk.ps1
+pwsh drivers/build/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
+pwsh drivers/build/build-aerogpu-dbgctl.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/make-catalogs.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/sign-drivers.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/package-drivers.ps1
 ```
 
 Outputs:

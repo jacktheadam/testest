@@ -162,8 +162,11 @@ fn aerogpu_cmd_geometry_shader_trianglelist_smoke() {
             pixels[idx..idx + 4].try_into().unwrap()
         };
 
-        // Pixel inside the triangle should be black (missing color varying => v1 = 0).
-        assert_eq!(px(48, 16), [0, 0, 0, 0]);
+        // Pixel inside the triangle: the GS writes only position, so the colour varying is
+        // missing and the prepass fills it with D3D's default fill for absent components —
+        // (0, 0, 0, 1), not all zeroes. Opaque black is therefore the correct result, and an
+        // alpha of 0 here would mean the default fill had regressed to a bulk zero-init.
+        assert_eq!(px(48, 16), [0, 0, 0, 255]);
         // Center pixel should remain the blue clear color; the triangle is confined to the
         // top-right quadrant.
         assert_eq!(px(w / 2, h / 2), [0, 0, 255, 255]);

@@ -1,6 +1,7 @@
 use aero_devices::pci::{
-    PciBarDefinition, PciBdf, PciBus, PciConfigMechanism1, PciConfigSpace, PciDevice, PciPlatform,
-    PciResourceAllocator, PciResourceAllocatorConfig, PCI_CFG_ADDR_PORT, PCI_CFG_DATA_PORT,
+    bios_post, PciBarDefinition, PciBdf, PciBus, PciConfigMechanism1, PciConfigSpace, PciDevice,
+    PciPlatform, PciResourceAllocator, PciResourceAllocatorConfig, PCI_CFG_ADDR_PORT,
+    PCI_CFG_DATA_PORT,
 };
 
 fn cfg_addr(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
@@ -34,6 +35,19 @@ impl TestBarDevice {
             },
         );
         config.set_bar_definition(2, PciBarDefinition::Io { size: 0x20 });
+        Self { config }
+    }
+
+    fn mmio_only(class: u8, subclass: u8) -> Self {
+        let mut config = PciConfigSpace::new(0x1234, 0x5678);
+        config.set_class_code(class, subclass, 0x00, 0x00);
+        config.set_bar_definition(
+            0,
+            PciBarDefinition::Mmio32 {
+                size: 0x1000,
+                prefetchable: false,
+            },
+        );
         Self { config }
     }
 }
@@ -136,6 +150,35 @@ fn bar_allocation_is_deterministic_and_non_overlapping() {
             assert!(!overlap, "ranges overlap: {a:?} vs {b:?}");
         }
     }
+}
+
+#[test]
+fn bios_post_enables_fixed_legacy_io_decode_for_vga_compatible_controllers() {
+    let cfg = PciResourceAllocatorConfig {
+        mmio_base: 0xE000_0000,
+        mmio_size: 0x10_0000,
+        io_base: 0x1000,
+        io_size: 0x1000,
+    };
+    let mut allocator = PciResourceAllocator::new(cfg);
+    let vga = PciBdf::new(0, 2, 0);
+    let ethernet = PciBdf::new(0, 3, 0);
+    let mut bus = PciBus::new();
+    bus.add_device(vga, Box::new(TestBarDevice::mmio_only(0x03, 0x00)));
+    bus.add_device(ethernet, Box::new(TestBarDevice::mmio_only(0x02, 0x00)));
+
+    bios_post(&mut bus, &mut allocator).expect("PCI BIOS POST should succeed");
+
+    assert_eq!(
+        bus.device_config(vga).unwrap().command() & 0x3,
+        0x3,
+        "VGA-compatible controllers need fixed legacy I/O and memory decode"
+    );
+    assert_eq!(
+        bus.device_config(ethernet).unwrap().command() & 0x3,
+        0x2,
+        "non-VGA MMIO-only devices must not gain I/O decode"
+    );
 }
 
 #[test]

@@ -2,12 +2,12 @@ import { expect, test } from '@playwright/test';
 
 test.describe('web disk image manager', () => {
   test.beforeEach(async ({ page }) => {
-    // Use the Vite dev server so we can import source modules under /web/.
-    await page.goto('/', { waitUntil: 'load' });
+    // Use the Vite dev server so we can import source modules under /apps/web/.
+    await page.goto('/apps/web/', { waitUntil: 'load' });
     await page.evaluate(async (diskManagerSpec: string) => {
       const { DiskManager } = await import(diskManagerSpec);
       await DiskManager.clearAllStorage();
-    }, '/web/src/storage/disk_manager.ts');
+    }, '/apps/web/src/storage/disk_manager.ts');
   });
 
   test('create blank disk and verify size', async ({ page }) => {
@@ -18,7 +18,7 @@ test.describe('web disk image manager', () => {
       const stat = await dm.statDisk(meta.id);
       dm.close();
       return { meta, stat };
-    }, '/web/src/storage/disk_manager.ts');
+    }, '/apps/web/src/storage/disk_manager.ts');
 
     expect(result.meta.sizeBytes).toBe(1024 * 1024);
     expect(result.stat.actualSizeBytes).toBe(1024 * 1024);
@@ -44,7 +44,7 @@ test.describe('web disk image manager', () => {
 
       dm.close();
       return { meta, disks, expected };
-    }, { diskManager: '/web/src/storage/disk_manager.ts', crc32: '/web/src/storage/crc32.ts' });
+    }, { diskManager: '/apps/web/src/storage/disk_manager.ts', crc32: '/apps/web/src/storage/crc32.ts' });
 
     expect(result.meta.name).toBe('tiny');
     expect(result.meta.sizeBytes).toBe(32 * 1024);
@@ -78,7 +78,7 @@ test.describe('web disk image manager', () => {
 
       dm.close();
       return { meta, expected, exportedCrc, done };
-    }, { diskManager: '/web/src/storage/disk_manager.ts', crc32: '/web/src/storage/crc32.ts' });
+    }, { diskManager: '/apps/web/src/storage/disk_manager.ts', crc32: '/apps/web/src/storage/crc32.ts' });
 
     expect(result.meta.checksum.value).toBe(result.expected);
     expect(result.exportedCrc).toBe(result.expected);
@@ -123,7 +123,7 @@ test.describe('web disk image manager', () => {
 
       dm.close();
       return { expected, compressedCrc, decompressedCrc, done };
-    }, { diskManager: '/web/src/storage/disk_manager.ts', crc32: '/web/src/storage/crc32.ts' });
+    }, { diskManager: '/apps/web/src/storage/disk_manager.ts', crc32: '/apps/web/src/storage/crc32.ts' });
 
     expect(result.decompressedCrc).toBe(result.expected);
     expect(result.done.checksumCrc32).toBe(result.compressedCrc);
@@ -135,8 +135,10 @@ test.describe('web disk image manager', () => {
 
       const dm = await DiskManager.create();
 
-      const hddFile = new File([new Uint8Array([1, 2, 3])], 'disk.img', { type: 'application/octet-stream' });
-      const cdFile = new File([new Uint8Array([4, 5, 6])], 'install.iso', { type: 'application/octet-stream' });
+      // Disk images are validated as whole 512-byte sectors, so these carry one sector each.
+      // The contents are irrelevant to what this test checks; the sizes are not.
+      const hddFile = new File([new Uint8Array(512)], 'disk.img', { type: 'application/octet-stream' });
+      const cdFile = new File([new Uint8Array(512)], 'install.iso', { type: 'application/octet-stream' });
 
       const hdd = await dm.importDisk(hddFile);
       const cd = await dm.importDisk(cdFile);
@@ -145,7 +147,7 @@ test.describe('web disk image manager', () => {
       const mounts = await dm.getMounts();
       dm.close();
       return { hdd, cd, mounts };
-    }, '/web/src/storage/disk_manager.ts');
+    }, '/apps/web/src/storage/disk_manager.ts');
 
     expect(result.hdd.kind).toBe('hdd');
     expect(result.cd.kind).toBe('cd');

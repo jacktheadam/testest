@@ -5,7 +5,6 @@ use aero_audio::pcm::{decode_pcm_to_stereo_f32, StreamFormat};
 
 const REG_GCTL: u64 = 0x08;
 
-const SD_CTL_SRST: u32 = 1 << 0;
 const SD_CTL_RUN: u32 = 1 << 1;
 const SD_CTL_STRM_SHIFT: u32 = 20;
 
@@ -53,7 +52,7 @@ fn setup_capture_stream(
         sd.cbl = buf_len;
         sd.lvi = 0;
         sd.fmt = fmt_raw;
-        sd.ctl = SD_CTL_SRST | SD_CTL_RUN | ((stream_id as u32) << SD_CTL_STRM_SHIFT);
+        sd.ctl = SD_CTL_RUN | ((stream_id as u32) << SD_CTL_STRM_SHIFT);
     }
 }
 

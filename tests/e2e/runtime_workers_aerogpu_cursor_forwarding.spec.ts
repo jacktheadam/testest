@@ -7,7 +7,7 @@ async function waitForReady(page: Page) {
 test("runtime workers: AeroGPU cursor MMIO state is forwarded to the GPU presenter worker", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/runtime-workers-aerogpu-cursor-forwarding-smoke.html", { waitUntil: "load" });
+  await page.goto("/apps/web/runtime-workers-aerogpu-cursor-forwarding-smoke.html", { waitUntil: "load" });
   await waitForReady(page);
 
   const result = await page.evaluate(() => (window as any).__aeroTest);

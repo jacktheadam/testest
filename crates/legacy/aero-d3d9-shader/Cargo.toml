@@ -1,14 +1,15 @@
 [package]
 name = "aero-d3d9-shader"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
 # Legacy/reference-only crate; do not publish it independently.
 publish = false
 description = "Legacy SM2/SM3 D3D9 token-stream parser + disassembler (not used by runtime)."
 
 [dependencies]
 aero-dxbc = { path = "../../aero-dxbc" }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 # Dev-dependencies must use the same source (path/git/registry) as the

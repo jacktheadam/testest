@@ -47,4 +47,3 @@ fn spec_rejects_unknown_driver_fields() -> anyhow::Result<()> {
     );
     Ok(())
 }
-

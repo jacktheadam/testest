@@ -6,7 +6,7 @@ test.describe("disk manager: importDiskConverted()", () => {
   test.skip(({ browserName }) => browserName !== "chromium", "requires Chromium OPFS sync access handles");
 
   test.beforeEach(async ({ page }, testInfo) => {
-    await page.goto("/", { waitUntil: "load" });
+    await page.goto("/apps/web/", { waitUntil: "load" });
 
     const snapshotSupport = await probeOpfsSyncAccessHandle(page);
     if (!snapshotSupport.ok || !snapshotSupport.supported) {
@@ -18,7 +18,7 @@ test.describe("disk manager: importDiskConverted()", () => {
     }
 
     await page.evaluate(async () => {
-      const { DiskManager } = await import("/web/src/storage/disk_manager.ts");
+      const { DiskManager } = await import("/apps/web/src/storage/disk_manager.ts");
       await DiskManager.clearAllStorage();
     });
   });
@@ -76,8 +76,8 @@ test.describe("disk manager: importDiskConverted()", () => {
         return { file, logical };
       }
 
-      const { DiskManager } = await import("/web/src/storage/disk_manager.ts");
-      const { RuntimeDiskClient } = await import("/web/src/storage/runtime_disk_client.ts");
+      const { DiskManager } = await import("/apps/web/src/storage/disk_manager.ts");
+      const { RuntimeDiskClient } = await import("/apps/web/src/storage/runtime_disk_client.ts");
 
       const { file, logical } = buildQcow2Fixture();
       const input = new File([file], "fixture.qcow2", { type: "application/octet-stream" });

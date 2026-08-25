@@ -13,7 +13,7 @@ will bind the driver automatically when a virtio-input device is present.
 * **Aero Windows virtio contract (definitive)** → `docs/windows7-virtio-driver-contract.md`
   (PCI identity rules; subsystem IDs for keyboard vs mouse; Revision ID policy).
 * **Aero Windows device contract (tooling manifest)** → `docs/windows-device-contract.md` and
-  `docs/windows-device-contract.json` (stable PCI IDs + strict HWID patterns for automation).
+  `protocol-vectors/windows-device-contract.json` (stable PCI IDs + strict HWID patterns for automation).
 * **QEMU** (runtime verification) → QEMU monitor command `info pci` shows the
   currently-emitted `vendor:device` IDs for each `-device ...` option.
 
@@ -143,6 +143,6 @@ Topology notes:
   (`header_type = 0x80`) so guests enumerate function 1.
 * The mouse is **function 1** (`header_type = 0x00`).
 
-`docs/windows-device-contract.json` carries both strict and convenience HWID
+`protocol-vectors/windows-device-contract.json` carries both strict and convenience HWID
 patterns; automation should prefer the strict `...&SUBSYS_...&REV_01` patterns
 to avoid false positives against non-Aero virtio-input devices.

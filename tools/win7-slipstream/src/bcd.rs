@@ -32,8 +32,11 @@ pub fn patch_with_reg(reg: &Path, store: &Path, mode: SigningMode, verbose: bool
         .as_nanos();
     let mount = format!("HKLM\\AERO_BCD_{pid}_{nanos}");
 
-    run(Command::new(reg).arg("load").arg(&mount).arg(store), verbose)
-        .context("reg load (BCD hive) failed")?;
+    run(
+        Command::new(reg).arg("load").arg(&mount).arg(store),
+        verbose,
+    )
+    .context("reg load (BCD hive) failed")?;
 
     struct UnloadGuard<'a> {
         reg: &'a Path,
@@ -54,8 +57,7 @@ pub fn patch_with_reg(reg: &Path, store: &Path, mode: SigningMode, verbose: bool
         verbose,
     };
 
-    let default_obj = query_default_loader_object(reg, &mount, verbose)
-        .unwrap_or(None);
+    let default_obj = query_default_loader_object(reg, &mount, verbose).unwrap_or(None);
 
     let mut object_guids = vec![
         BCD_GLOBALSETTINGS_GUID.to_string(),
@@ -77,20 +79,29 @@ pub fn patch_with_reg(reg: &Path, store: &Path, mode: SigningMode, verbose: bool
     std::fs::write(patch_file.path(), reg_patch)
         .context("Failed to write temporary BCD patch file")?;
 
-    run(Command::new(reg).arg("import").arg(patch_file.path()), verbose)
-        .context("reg import (BCD patch) failed")?;
+    run(
+        Command::new(reg).arg("import").arg(patch_file.path()),
+        verbose,
+    )
+    .context("reg import (BCD patch) failed")?;
     Ok(())
 }
 
-pub fn patch_with_hivex(hivexregedit: &Path, store: &Path, mode: SigningMode, verbose: bool) -> Result<()> {
-    match mode {
-        SigningMode::None => return Ok(()),
-        _ => {}
+pub fn patch_with_hivex(
+    hivexregedit: &Path,
+    store: &Path,
+    mode: SigningMode,
+    verbose: bool,
+) -> Result<()> {
+    if mode == SigningMode::None {
+        return Ok(());
     }
 
-    let exported =
-        run_capture(Command::new(hivexregedit).arg("--export").arg(store), verbose)
-            .context("Failed to export BCD hive via hivexregedit")?;
+    let exported = run_capture(
+        Command::new(hivexregedit).arg("--export").arg(store),
+        verbose,
+    )
+    .context("Failed to export BCD hive via hivexregedit")?;
 
     // Prefer patching well-known library objects ({globalsettings} + {bootloadersettings}) since
     // Win7 loader entries commonly inherit settings from them. Additionally patch the store's
@@ -121,7 +132,8 @@ pub fn patch_with_hivex(hivexregedit: &Path, store: &Path, mode: SigningMode, ve
         .suffix(".reg")
         .tempfile()
         .context("Failed to create temporary BCD patch file")?;
-    std::fs::write(patch_file.path(), reg_patch).context("Failed to write temporary BCD patch file")?;
+    std::fs::write(patch_file.path(), reg_patch)
+        .context("Failed to write temporary BCD patch file")?;
 
     run(
         Command::new(hivexregedit)
@@ -145,7 +157,11 @@ pub fn hive_contains_policy(exported_reg: &str, mode: SigningMode) -> bool {
     }
 }
 
-fn render_bcd_boolean_patch(root_prefix: &str, object_guids: &[String], element_hex: &str) -> String {
+fn render_bcd_boolean_patch(
+    root_prefix: &str,
+    object_guids: &[String],
+    element_hex: &str,
+) -> String {
     let mut out = String::new();
     out.push_str("Windows Registry Editor Version 5.00\n\n");
     for guid in object_guids {
@@ -154,7 +170,12 @@ fn render_bcd_boolean_patch(root_prefix: &str, object_guids: &[String], element_
     out
 }
 
-fn render_bool_element(root_prefix: &str, object_guid: &str, element_hex: &str, value: bool) -> String {
+fn render_bool_element(
+    root_prefix: &str,
+    object_guid: &str,
+    element_hex: &str,
+    value: bool,
+) -> String {
     // Win7 BCD "Element" values are REG_BINARY and usually encode as:
     //   [u32 element_type (LE)][u32 data_len (LE)][data...]
     //
@@ -201,7 +222,10 @@ fn run_capture(cmd: &mut Command, verbose: bool) -> Result<String> {
         .output()
         .context("Failed to spawn external command")?;
     if !out.status.success() {
-        return Err(anyhow!("External command failed with status: {}", out.status));
+        return Err(anyhow!(
+            "External command failed with status: {}",
+            out.status
+        ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
@@ -244,7 +268,11 @@ fn is_enabled_bool_bytes(bytes: &[u8]) -> bool {
     }
 }
 
-fn parse_guid_element_from_export(exported_reg: &str, object_guid: &str, element_hex: &str) -> Option<String> {
+fn parse_guid_element_from_export(
+    exported_reg: &str,
+    object_guid: &str,
+    element_hex: &str,
+) -> Option<String> {
     let header = format!(
         "[HKEY_LOCAL_MACHINE\\Objects\\{{{object_guid}}}\\Elements\\{element_hex}]",
         object_guid = object_guid,
@@ -298,7 +326,10 @@ fn guid_from_le_bytes(bytes: &[u8]) -> Option<String> {
     ))
 }
 
-fn parse_reg_binary_value<'a, I>(first_line: &str, rest: &mut std::iter::Peekable<I>) -> Option<Vec<u8>>
+fn parse_reg_binary_value<'a, I>(
+    first_line: &str,
+    rest: &mut std::iter::Peekable<I>,
+) -> Option<Vec<u8>>
 where
     I: Iterator<Item = &'a str>,
 {
@@ -308,7 +339,7 @@ where
         return None;
     }
 
-    let mut value = line.splitn(2, '=').nth(1)?.trim().to_string();
+    let mut value = line.split_once('=')?.1.trim().to_string();
     while value.ends_with('\\') {
         value.pop();
         let next = rest.next()?.trim();
@@ -362,8 +393,9 @@ fn query_default_loader_object(reg: &Path, mount: &str, verbose: bool) -> Result
         return Ok(None);
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let bytes = parse_reg_query_binary_value(&stdout)
-        .ok_or_else(|| anyhow!("reg query succeeded but did not contain a parseable Element REG_BINARY value"))?;
+    let bytes = parse_reg_query_binary_value(&stdout).ok_or_else(|| {
+        anyhow!("reg query succeeded but did not contain a parseable Element REG_BINARY value")
+    })?;
     Ok(guid_from_le_bytes(&bytes))
 }
 
@@ -405,18 +437,25 @@ mod tests {
 "Element"=hex:49,00,00,16,04,00,00,00,01,00,00,00
 "#;
         assert!(hive_contains_policy(export, SigningMode::TestSigning));
-        assert!(!hive_contains_policy(export, SigningMode::NoIntegrityChecks));
+        assert!(!hive_contains_policy(
+            export,
+            SigningMode::NoIntegrityChecks
+        ));
     }
 
     #[test]
     fn parses_guid_element() {
         // {01234567-89ab-cdef-0123-456789abcdef}
         let guid_bytes = [
-            0x67, 0x45, 0x23, 0x01, 0xab, 0x89, 0xef, 0xcd, 0x01, 0x23, 0x45, 0x67, 0x89,
-            0xab, 0xcd, 0xef,
+            0x67, 0x45, 0x23, 0x01, 0xab, 0x89, 0xef, 0xcd, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+            0xcd, 0xef,
         ];
         let mut element_bytes = Vec::new();
-        element_bytes.extend_from_slice(&u32::from_str_radix(ELEMENT_BOOTMGR_DEFAULT_OBJECT, 16).unwrap().to_le_bytes());
+        element_bytes.extend_from_slice(
+            &u32::from_str_radix(ELEMENT_BOOTMGR_DEFAULT_OBJECT, 16)
+                .unwrap()
+                .to_le_bytes(),
+        );
         element_bytes.extend_from_slice(&16u32.to_le_bytes());
         element_bytes.extend_from_slice(&guid_bytes);
         let guid_hex = crate::wim::format_reg_binary(&element_bytes);
@@ -424,9 +463,12 @@ mod tests {
             "Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\Objects\\{{{}}}\\Elements\\{}]\n\"Element\"=hex:{}\n",
             BCD_BOOTMGR_GUID, ELEMENT_BOOTMGR_DEFAULT_OBJECT, guid_hex
         );
-        let parsed =
-            parse_guid_element_from_export(&export, BCD_BOOTMGR_GUID, ELEMENT_BOOTMGR_DEFAULT_OBJECT)
-                .unwrap();
+        let parsed = parse_guid_element_from_export(
+            &export,
+            BCD_BOOTMGR_GUID,
+            ELEMENT_BOOTMGR_DEFAULT_OBJECT,
+        )
+        .unwrap();
         assert_eq!(parsed, "01234567-89ab-cdef-0123-456789abcdef");
     }
 
@@ -439,8 +481,8 @@ mod tests {
         assert_eq!(
             bytes,
             vec![
-                0x67, 0x45, 0x23, 0x01, 0xab, 0x89, 0xef, 0xcd, 0x01, 0x23, 0x45, 0x67,
-                0x89, 0xab, 0xcd, 0xef
+                0x67, 0x45, 0x23, 0x01, 0xab, 0x89, 0xef, 0xcd, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+                0xcd, 0xef
             ]
         );
         assert_eq!(

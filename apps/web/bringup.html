@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  The Windows 7 bring-up shell: the fuller of the two, and the one used for manual bring-up work.
+
+  `index.html` beside this file is the canonical browser host that CI and Playwright drive. Both
+  draw on the same module library under `src/`; this one wires up more of it.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aero Platform</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!--
+      Use a relative module URL so this entrypoint works both:
+      - when served as the web app root (vite root=web → `/`)
+      - when served under the repo-root harness (`/apps/web/`) for Playwright and dev tooling
+    -->
+    <script type="module" src="./src/bringup_main.ts"></script>
+  </body>
+</html>

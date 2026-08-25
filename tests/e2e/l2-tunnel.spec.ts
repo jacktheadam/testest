@@ -6,13 +6,13 @@ import { once } from 'node:events';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 
-import { unrefBestEffort } from '../../src/unref_safe.js';
-import { L2_TUNNEL_SUBPROTOCOL } from '../../web/src/shared/l2TunnelProtocol.ts';
+import { unrefBestEffort } from '../../packages/transport-safety/src/unref_safe.js';
+import { L2_TUNNEL_SUBPROTOCOL } from '../../apps/web/src/shared/l2TunnelProtocol.ts';
 import { startRustL2Proxy } from '../../tools/rust_l2_proxy.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const TS_STRIP_LOADER_URL = new URL('../../scripts/register-ts-strip-loader.mjs', import.meta.url);
-const GATEWAY_ENTRY_PATH = fileURLToPath(new URL('../../backend/aero-gateway/src/index.ts', import.meta.url));
+const GATEWAY_ENTRY_PATH = fileURLToPath(new URL('../../services/gateway/src/index.ts', import.meta.url));
 
 type UdpEchoServer = {
   port: number;
@@ -238,7 +238,7 @@ test.describe.serial('l2 tunnel (session auth)', () => {
       const result = await page.evaluate(
         async ({ gatewayOrigin, l2ProxyOrigin, udpEchoPort }) => {
           const { decodeL2Message, encodeL2Frame, L2_TUNNEL_SUBPROTOCOL, L2_TUNNEL_TYPE_FRAME } = await import(
-            '/web/src/shared/l2TunnelProtocol.ts'
+            '/apps/web/src/shared/l2TunnelProtocol.ts'
           );
 
           function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {

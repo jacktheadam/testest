@@ -81,9 +81,9 @@ fn write_tx_ctx_desc(
     bytes[10] = 0x2 << 4;
     bytes[11] = 1 << 5;
 
-    bytes[12..14].copy_from_slice(&mss.to_le_bytes());
-    bytes[14] = hdr_len;
-    bytes[15] = 0; // tcp_hdr_len (unused by the device model)
+    // Per 82540EM spec: dword 3 = {status:8 @12, hdr_len:8 @13, mss:16 @14..16}.
+    bytes[13] = hdr_len;
+    bytes[14..16].copy_from_slice(&mss.to_le_bytes());
 
     dma.write(addr, &bytes);
 }

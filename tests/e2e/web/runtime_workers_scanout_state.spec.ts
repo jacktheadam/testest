@@ -3,16 +3,16 @@ import { expect, test } from "@playwright/test";
 test("runtime workers: gpu worker presents ScanoutState framebuffer (B8G8R8X8 -> RGBA)", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
 
   const result = await page.evaluate(async () => {
-    const { WorkerCoordinator } = await import("/web/src/runtime/coordinator.ts");
-    const { startFrameScheduler } = await import("/web/src/main/frameScheduler.ts");
-    const gpuProto = await import("/web/src/ipc/gpu-protocol.ts");
-    const sharedLayout = await import("/web/src/runtime/shared_layout.ts");
-    const scanout = await import("/web/src/ipc/scanout_state.ts");
-    const sharedFb = await import("/web/src/ipc/shared-layout.ts");
-    const { formatOneLineUtf8 } = await import("/web/src/text.ts");
+    const { WorkerCoordinator } = await import("/apps/web/src/runtime/coordinator.ts");
+    const { startFrameScheduler } = await import("/apps/web/src/main/frameScheduler.ts");
+    const gpuProto = await import("/apps/web/src/ipc/gpu-protocol.ts");
+    const sharedLayout = await import("/apps/web/src/runtime/shared_layout.ts");
+    const scanout = await import("/apps/web/src/ipc/scanout_state.ts");
+    const sharedFb = await import("/apps/web/src/ipc/shared-layout.ts");
+    const { formatOneLineUtf8 } = await import("/packages/transport-safety/src/text.js");
 
     const MAX_ERROR_BYTES = 512;
 

@@ -21,8 +21,8 @@ fn iso_from_dir_fails_on_non_utf8_paths() -> anyhow::Result<()> {
     let out = tempfile::tempdir()?;
     let iso_path = out.path().join("out.iso");
 
-    let err = aero_packager::write_iso9660_joliet_from_dir(root, &iso_path, "TEST_VOL", 0)
-        .unwrap_err();
+    let err =
+        aero_packager::write_iso9660_joliet_from_dir(root, &iso_path, "TEST_VOL", 0).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
         msg.contains("non-UTF8 path component") && msg.contains("\\xFF"),
@@ -31,4 +31,3 @@ fn iso_from_dir_fails_on_non_utf8_paths() -> anyhow::Result<()> {
 
     Ok(())
 }
-

@@ -24,12 +24,12 @@ function isCodeFile(p) {
 }
 
 test("contract: upgrade rejections must not embed raw HTTP/1.1 4xx/5xx status lines", async () => {
-  // If we need a raw HTTP response, use `src/http_text_response.js` (+ `endThenDestroyQuietly`)
+  // If we need a raw HTTP response, use `packages/transport-safety/src/http_text_response.js` (+ `endThenDestroyQuietly`)
   // so headers and Content-Length can't drift.
   const roots = [
-    path.join(REPO_ROOT, "server", "src"),
-    path.join(REPO_ROOT, "net-proxy", "src"),
-    path.join(REPO_ROOT, "backend", "aero-gateway", "src"),
+    path.join(REPO_ROOT, "apps/web/src"),
+    path.join(REPO_ROOT, "services/net-proxy", "src"),
+    path.join(REPO_ROOT, "services", "gateway", "src"),
     path.join(REPO_ROOT, "tools"),
     path.join(REPO_ROOT, "scripts"),
   ];
@@ -37,7 +37,10 @@ test("contract: upgrade rejections must not embed raw HTTP/1.1 4xx/5xx status li
   const allowlist = new Set([
     // net-proxy is a CJS workspace; importing the repo-root ESM encoder is unsafe under Node 22.
     // This module has its own dedicated unit tests that lock down headers/formatting.
-    "net-proxy/src/wsUpgradeHttp.ts",
+    "services/net-proxy/src/wsUpgradeHttp.ts",
+    // The sanctioned shared encoder itself: this is the module the contract tells everyone to use.
+    "packages/transport-safety/src/http_text_response.js",
+    "packages/transport-safety/src/http_text_response.cjs",
   ]);
 
   const forbidden = [

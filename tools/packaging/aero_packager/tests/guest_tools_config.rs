@@ -11,7 +11,9 @@ fn guest_tools_devices_cmd_is_generated_from_device_contract() -> anyhow::Result
     let packager_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = packager_root.join("..").join("..").join("..");
 
-    let contract_path = repo_root.join("docs").join("windows-device-contract.json");
+    let contract_path = repo_root
+        .join("protocol-vectors")
+        .join("windows-device-contract.json");
     let devices_cmd_path = repo_root
         .join("guest-tools")
         .join("config")
@@ -49,7 +51,9 @@ fn virtio_win_packaging_overrides_service_names_in_devices_cmd() -> anyhow::Resu
         .join("specs")
         .join("win7-virtio-win.json");
 
-    let contract_path = repo_root.join("docs").join("windows-device-contract.json");
+    let contract_path = repo_root
+        .join("protocol-vectors")
+        .join("windows-device-contract.json");
 
     // Build a minimal virtio-win-style driver tree containing `viostor` and `netkvm`.
     // The packager only validates that expected HWID patterns appear in at least one INF,
@@ -98,7 +102,7 @@ fn virtio_win_packaging_overrides_service_names_in_devices_cmd() -> anyhow::Resu
     // service overrides for `viostor`/`netkvm`.
     //
     // Newer virtio-win workflows should prefer passing the virtio-win contract variant
-    // (`docs/windows-device-contract-virtio-win.json`) so the contract remains the source of truth.
+    // (`protocol-vectors/windows-device-contract-virtio-win.json`) so the contract remains the source of truth.
     let zip_file = fs::File::open(&outputs.zip_path)?;
     let mut zip = zip::ZipArchive::new(zip_file)?;
     let mut entry = zip.by_name("config/devices.cmd")?;
@@ -139,7 +143,7 @@ fn virtio_win_contract_service_names_are_not_overridden() -> anyhow::Result<()> 
     // custom value. The packager should respect the contract when it is non-canonical rather than
     // blindly overriding based on the spec driver names.
     let base_contract_path = repo_root
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract-virtio-win.json");
     let mut contract_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&base_contract_path)?)?;

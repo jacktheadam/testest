@@ -155,7 +155,7 @@ def _build_iso_with_imapi(stage_root: Path, out_path: Path, label: str) -> None:
             str(out_path),
             "-VolumeLabel",
             label,
-            # ci/lib/New-IsoFile.ps1 requires cargo by default. This fallback explicitly requests
+            # drivers/build/lib/New-IsoFile.ps1 requires cargo by default. This fallback explicitly requests
             # the legacy built-in IMAPI2 path.
             "-LegacyIso",
         ],
@@ -263,7 +263,7 @@ def _write_readme(stage_root: Path, filename: str, label: str) -> None:
                 "This ISO is intended to be mounted inside the Aero Windows 7 VM as a CD-ROM.",
                 "Install drivers via Windows Setup (Load Driver) or Device Manager.",
                 "",
-                "See docs/virtio-windows-drivers.md in the Aero repo for the recommended flow.",
+                "See the Windows guest drivers area page in the Aero repo for the recommended flow.",
                 "",
             ]
         )

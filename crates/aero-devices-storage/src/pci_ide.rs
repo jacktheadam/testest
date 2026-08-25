@@ -2,14 +2,16 @@
 //!
 //! This device model is designed for compatibility with:
 //! - BIOS-era software using legacy IDE ports (0x1F0/0x3F6 and 0x170/0x376)
-//! - Windows 7 `pciide.sys` / `atapi.sys` in IDE mode (including Bus Master DMA)
+//! - Windows 7 `intelide.sys` / `atapi.sys` in PIIX3 legacy mode (prog-if 0x80,
+//!   BMIDE BAR4 only; command blocks are hardwired, not PCI BARs)
 
 use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 
+use aero_devices::irq::IrqLine;
 use aero_devices::pci::profile::IDE_PIIX3;
-use aero_devices::pci::{PciConfigSpace, PciDevice};
+use aero_devices::pci::{PciBarDefinition, PciConfigSpace, PciDevice};
 use aero_io_snapshot::io::state::{IoSnapshot, SnapshotResult, SnapshotVersion};
 use aero_io_snapshot::io::storage::state::{
     IdeAtaDeviceState, IdeChannelState, IdeControllerState, IdeDataMode, IdeDmaCommitState,
@@ -26,6 +28,7 @@ use crate::busmaster::{BusMasterChannel, DmaCommit, DmaRequest};
 
 const IDE_STATUS_BSY: u8 = 0x80;
 const IDE_STATUS_DRDY: u8 = 0x40;
+const IDE_STATUS_DSC: u8 = 0x10; // SEEK_STAT / Drive Seek Complete
 const IDE_STATUS_DRQ: u8 = 0x08;
 const IDE_STATUS_ERR: u8 = 0x01;
 
@@ -61,6 +64,11 @@ pub const SECONDARY_PORTS: IdePortMap = IdePortMap {
     cmd_base: 0x170,
     ctrl_base: 0x376,
 };
+
+fn ide_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("AERO_IDE_TRACE").is_some())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DriveSelect {
@@ -162,51 +170,35 @@ impl TaskFile {
     }
 
     fn write_reg(&mut self, reg: u16, val: u8) {
+        // QEMU/ATA: every write updates the visible register and the previous
+        // value becomes the HOB. A single write is immediately readable (Win7
+        // ataport reads back the ATAPI byte-count limit). A second write of the
+        // same register (LBA48) leaves low=new, hob=previous.
         match reg {
             ATA_REG_ERROR_FEATURES => {
-                if !self.pending_features_high {
-                    self.hob_features = val;
-                    self.pending_features_high = true;
-                } else {
-                    self.features = val;
-                    self.pending_features_high = false;
-                }
+                self.hob_features = self.features;
+                self.features = val;
+                self.pending_features_high = false;
             }
             ATA_REG_SECTOR_COUNT => {
-                if !self.pending_sector_count_high {
-                    self.hob_sector_count = val;
-                    self.pending_sector_count_high = true;
-                } else {
-                    self.sector_count = val;
-                    self.pending_sector_count_high = false;
-                }
+                self.hob_sector_count = self.sector_count;
+                self.sector_count = val;
+                self.pending_sector_count_high = false;
             }
             ATA_REG_LBA0 => {
-                if !self.pending_lba0_high {
-                    self.hob_lba0 = val;
-                    self.pending_lba0_high = true;
-                } else {
-                    self.lba0 = val;
-                    self.pending_lba0_high = false;
-                }
+                self.hob_lba0 = self.lba0;
+                self.lba0 = val;
+                self.pending_lba0_high = false;
             }
             ATA_REG_LBA1 => {
-                if !self.pending_lba1_high {
-                    self.hob_lba1 = val;
-                    self.pending_lba1_high = true;
-                } else {
-                    self.lba1 = val;
-                    self.pending_lba1_high = false;
-                }
+                self.hob_lba1 = self.lba1;
+                self.lba1 = val;
+                self.pending_lba1_high = false;
             }
             ATA_REG_LBA2 => {
-                if !self.pending_lba2_high {
-                    self.hob_lba2 = val;
-                    self.pending_lba2_high = true;
-                } else {
-                    self.lba2 = val;
-                    self.pending_lba2_high = false;
-                }
+                self.hob_lba2 = self.lba2;
+                self.lba2 = val;
+                self.pending_lba2_high = false;
             }
             ATA_REG_DEVICE => {
                 self.device = val;
@@ -216,9 +208,8 @@ impl TaskFile {
     }
 
     fn normalize_for_command(&mut self, is_lba48: bool) {
-        // For non-LBA48 commands the driver writes each register once. We
-        // capture the first write in the HOB shadow, so commit those into the
-        // visible "low" registers here.
+        // Old snapshots could still have the pre-QEMU "first write lives in HOB"
+        // pending flags set mid-command. Apply them once so restore stays coherent.
         if self.pending_features_high {
             self.features = self.hob_features;
             self.pending_features_high = false;
@@ -314,6 +305,16 @@ struct Channel {
     data_index: usize,
 
     irq_pending: bool,
+    /// Optional pin driven immediately when `irq_pending` / nIEN changes.
+    ///
+    /// Win7 `ataport` ATAPI PIO is a two-IRQ protocol: data-in, then status.
+    /// The status-phase edge is raised by the last data-port read *inside the
+    /// same Tier-0 I/O batch* that acked the data-in IRQ. If we only push the
+    /// pin at batch-boundary `poll_pci_intx_lines`, the PIC/IOAPIC never sees
+    /// the 1→0→1 transition and the status IRQ is lost (DiscoverLuns INQUIRY
+    /// times out; no `IDE\CdRom`). The older `ide.rs` model already drove the
+    /// pin from `set_irq`. QEMU `ide_set_irq` does the same.
+    irq_line: Option<Box<dyn IrqLine>>,
 
     // DMA requested by the currently-selected device and waiting for the Bus
     // Master engine to be started.
@@ -339,6 +340,7 @@ impl Channel {
             data: Vec::new(),
             data_index: 0,
             irq_pending: false,
+            irq_line: None,
             pending_dma: None,
             pio_write: None,
         }
@@ -367,6 +369,16 @@ impl Channel {
         DriveSelect::from_device_reg(self.tf.device)
     }
 
+    fn irq_pin_level(&self) -> bool {
+        self.irq_pending && (self.control & IDE_CTRL_NIEN) == 0
+    }
+
+    fn sync_irq_pin(&self) {
+        if let Some(line) = &self.irq_line {
+            line.set_level(self.irq_pin_level());
+        }
+    }
+
     fn set_irq(&mut self) {
         // `nIEN` (bit 1 of the Device Control register) masks the interrupt *output*, but the
         // interrupt condition itself is still latched until the guest acknowledges it (typically
@@ -375,10 +387,32 @@ impl Channel {
         // This matches how the simpler legacy IDE model in `src/ide.rs` behaves and avoids losing
         // interrupts if the guest temporarily disables them while polling.
         self.irq_pending = true;
+        self.sync_irq_pin();
+        if ide_trace_enabled() {
+            let which = if self.ports.cmd_base == SECONDARY_PORTS.cmd_base {
+                "sec"
+            } else {
+                "pri"
+            };
+            eprintln!(
+                "AERO_IDE_TRACE: {which} irq set status={:#04x} ireason={:#04x} err={:#04x} nien={}",
+                self.status,
+                self.tf.sector_count,
+                self.error,
+                (self.control & IDE_CTRL_NIEN) != 0
+            );
+        }
     }
 
     fn clear_irq(&mut self) {
         self.irq_pending = false;
+        self.sync_irq_pin();
+    }
+
+    /// QEMU `nsector = (nsector & ~7) | reason`: ATAPI interrupt reason lives in
+    /// the low 3 bits; the rest of the Sector Count register is preserved.
+    fn set_atapi_ireason(&mut self, reason: u8) {
+        self.tf.sector_count = (self.tf.sector_count & !0x07) | (reason & 0x07);
     }
 
     fn reset(&mut self) {
@@ -392,6 +426,38 @@ impl Channel {
         self.pending_dma = None;
         self.pio_write = None;
         self.clear_irq();
+
+        // Per ATA/ATAPI-7: after SRST deassertion, the selected device must
+        // present its signature in the task file so the host can classify it:
+        //   ATAPI CD-ROM: sector_count=0x01, lba_low=0x01, lba_mid=0x14, lba_high=0xEB
+        //   ATA disk:     sector_count=0x01, lba_low=0x01, lba_mid=0x00, lba_high=0x00
+        // Without this, Win7's atapi.sys/pciide.sys can't detect the CD-ROM
+        // via SRST-based enumeration.
+        self.tf.sector_count = 0x01;
+        self.tf.lba0 = 0x01;
+        if matches!(self.devices[0], Some(IdeDevice::Atapi(_))) {
+            self.tf.lba1 = 0x14;
+            self.tf.lba2 = 0xEB;
+        }
+    }
+
+    fn apply_device_signature(&mut self, dev_idx: usize) {
+        self.tf.sector_count = 0x01;
+        self.tf.lba0 = 0x01;
+        match self.devices[dev_idx].as_ref() {
+            Some(IdeDevice::Atapi(_)) => {
+                self.tf.lba1 = 0x14;
+                self.tf.lba2 = 0xEB;
+            }
+            Some(IdeDevice::Ata(_)) => {
+                self.tf.lba1 = 0x00;
+                self.tf.lba2 = 0x00;
+            }
+            None => {
+                self.tf.lba1 = 0x00;
+                self.tf.lba2 = 0x00;
+            }
+        }
     }
 
     fn set_error(&mut self, err: u8) {
@@ -414,7 +480,7 @@ impl Channel {
 
         self.set_error(err);
         self.status &= !(IDE_STATUS_BSY | IDE_STATUS_DRQ);
-        self.status |= IDE_STATUS_DRDY;
+        self.status |= IDE_STATUS_DRDY | IDE_STATUS_DSC;
         self.set_irq();
     }
 
@@ -424,7 +490,7 @@ impl Channel {
         self.data_mode = DataMode::PioIn;
         self.transfer_kind = Some(kind);
         self.status &= !IDE_STATUS_BSY;
-        self.status |= IDE_STATUS_DRQ | IDE_STATUS_DRDY;
+        self.status |= IDE_STATUS_DRQ | IDE_STATUS_DRDY | IDE_STATUS_DSC;
         self.clear_error();
         self.set_irq();
     }
@@ -439,9 +505,14 @@ impl Channel {
         self.data_mode = DataMode::PioOut;
         self.transfer_kind = Some(kind);
         self.status &= !IDE_STATUS_BSY;
-        self.status |= IDE_STATUS_DRQ | IDE_STATUS_DRDY;
+        self.status |= IDE_STATUS_DRQ | IDE_STATUS_DRDY | IDE_STATUS_DSC;
         self.clear_error();
-        self.set_irq();
+        // QEMU `cmd_packet` sets DRQ for the 12-byte CDB but does *not* raise
+        // INTRQ. Win7 ataport polls that phase; an extra IRQ looks like a
+        // completion and the first INQUIRY times out (~400M inst).
+        if kind != TransferKind::AtapiPacket {
+            self.set_irq();
+        }
     }
 
     fn complete_non_data_command(&mut self) {
@@ -450,7 +521,7 @@ impl Channel {
         self.data.clear();
         self.data_index = 0;
         self.status &= !(IDE_STATUS_BSY | IDE_STATUS_DRQ);
-        self.status |= IDE_STATUS_DRDY;
+        self.status |= IDE_STATUS_DRDY | IDE_STATUS_DSC;
         self.clear_error();
         self.set_irq();
     }
@@ -540,13 +611,30 @@ impl Channel {
             }
             Some(TransferKind::AtapiPioIn) => {
                 // Data phase complete; transition to status phase.
-                self.tf.sector_count = 0x03; // IO=1, CoD=1
+                // QEMU `ide_atapi_cmd_ok`: IO=1, CoD=1, preserve nsector[7:3].
+                self.set_atapi_ireason(0x03);
                 self.complete_non_data_command();
             }
             Some(TransferKind::AtapiPacket) => {
                 let mut packet = [0u8; 12];
                 packet.copy_from_slice(&self.data[..12]);
                 let dma_requested = (self.tf.features & 0x01) != 0;
+                let bcl = u16::from(self.tf.lba1) | (u16::from(self.tf.lba2) << 8);
+                if ide_trace_enabled() {
+                    eprintln!(
+                        "AERO_IDE_TRACE: packet op={:#04x} {:02x}{:02x}{:02x}{:02x} dma={} bcl={bcl:#06x}",
+                        packet[0], packet[1], packet[2], packet[3], packet[4],
+                        dma_requested as u8
+                    );
+                }
+                // QEMU `validate_bcl`: PIO data commands with a 0 byte-count
+                // limit abort at the ATA layer. Win7's first INQUIRY is sent
+                // with BCL=0; accepting it leaves DRQ set and the miniport
+                // times out (~400M inst) instead of creating a CdRom PDO.
+                if !dma_requested && bcl == 0 && atapi_packet_transfers_data(packet[0]) {
+                    self.abort_command(0x04);
+                    return;
+                }
                 let idx = self.selected_drive() as usize;
                 let result = match self.devices[idx].as_mut() {
                     Some(IdeDevice::Atapi(dev)) => dev.handle_packet(&packet, dma_requested),
@@ -557,28 +645,53 @@ impl Channel {
                 };
 
                 match result {
-                    PacketResult::DataIn(buf) => {
+                    PacketResult::DataIn(mut buf) => {
                         // ATAPI uses sector_count as interrupt reason; IO=1, CoD=0.
-                        self.tf.sector_count = 0x02;
-                        let byte_count = buf.len().min(u16::MAX as usize) as u16;
+                        // QEMU `ide_atapi_cmd_reply_end` preserves nsector[7:3].
+                        self.set_atapi_ireason(0x02);
+                        if bcl != 0 && buf.len() > bcl as usize {
+                            buf.truncate(if bcl == 0xffff { 0xfffe } else { bcl } as usize);
+                        }
+                        let mut byte_count = buf.len().min(u16::MAX as usize) as u16;
+                        if byte_count & 1 != 0 {
+                            byte_count = byte_count.saturating_add(1);
+                        }
                         self.tf.lba1 = (byte_count & 0xFF) as u8;
                         self.tf.lba2 = (byte_count >> 8) as u8;
+                        if ide_trace_enabled() {
+                            eprintln!(
+                                "AERO_IDE_TRACE: pio_in len={} bcl={bcl:#06x} ireason={:#04x}",
+                                buf.len(),
+                                self.tf.sector_count
+                            );
+                        }
                         self.begin_pio_in(TransferKind::AtapiPioIn, buf);
                     }
                     PacketResult::NoDataSuccess => {
-                        self.tf.sector_count = 0x03; // IO=1, CoD=1 (status)
+                        self.set_atapi_ireason(0x03); // IO=1, CoD=1 (status)
                         self.complete_non_data_command();
                     }
-                    PacketResult::Error { .. } => {
-                        self.tf.sector_count = 0x03;
-                        self.abort_command(0x04);
+                    PacketResult::Error { sense_key, .. } => {
+                        // QEMU `ide_atapi_cmd_error`: error = sense_key<<4,
+                        // status = READY|ERR (no DSC), IREASON = IO|CoD.
+                        self.set_atapi_ireason(0x03);
+                        self.data_mode = DataMode::None;
+                        self.transfer_kind = None;
+                        self.data.clear();
+                        self.data_index = 0;
+                        self.pending_dma = None;
+                        self.pio_write = None;
+                        self.error = sense_key << 4;
+                        self.status &= !(IDE_STATUS_BSY | IDE_STATUS_DRQ | IDE_STATUS_DSC);
+                        self.status |= IDE_STATUS_DRDY | IDE_STATUS_ERR;
+                        self.set_irq();
                     }
                     PacketResult::DmaIn(buf) => {
                         // Queue a DMA transfer; completion will raise IRQ.
-                        self.tf.sector_count = 0x02;
+                        self.set_atapi_ireason(0x02);
                         self.pending_dma = Some(DmaRequest::atapi_data_in(buf));
                         self.status &= !(IDE_STATUS_DRQ | IDE_STATUS_BSY);
-                        self.status |= IDE_STATUS_DRDY;
+                        self.status |= IDE_STATUS_DRDY | IDE_STATUS_DSC;
                         // Packet phase completed; DMA engine will move data.
                         self.data_mode = DataMode::None;
                         self.transfer_kind = None;
@@ -673,6 +786,18 @@ impl IdeController {
         self.secondary.devices[0] = Some(IdeDevice::Atapi(dev));
         self.secondary.drive_present[0] = true;
         self.bus_master[1].set_drive_dma_capable(0, dma);
+    }
+
+    /// Drive IRQ14/IRQ15 immediately when the latch changes.
+    ///
+    /// Pass clones of the same `PlatformIrqLine` objects used by
+    /// `poll_pci_intx_lines` so the ref-counted GSI assert count stays
+    /// coherent.
+    pub fn attach_irq_lines(&mut self, irq14: Box<dyn IrqLine>, irq15: Box<dyn IrqLine>) {
+        self.primary.irq_line = Some(irq14);
+        self.secondary.irq_line = Some(irq15);
+        self.primary.sync_irq_pin();
+        self.secondary.sync_irq_pin();
     }
 
     /// Eject media from the secondary master ATAPI device (IDE secondary channel, drive 0).
@@ -902,6 +1027,14 @@ impl IdeController {
             | ATA_REG_LBA1
             | ATA_REG_LBA2
             | ATA_REG_DEVICE => {
+                // QEMU `ide_ioport_write`: command-block writes other than the
+                // command register are ignored while BSY or DRQ. Data is a
+                // separate port. Leaving these live during ATAPI CDB/data
+                // phases lets a leftover SET FEATURES count or a mid-DRQ BCL
+                // write corrupt IREASON.
+                if (chan.status & (IDE_STATUS_BSY | IDE_STATUS_DRQ)) != 0 {
+                    return;
+                }
                 chan.tf.write_reg(reg, val as u8);
             }
             ATA_REG_STATUS_COMMAND => {
@@ -937,11 +1070,38 @@ impl IdeController {
         let prev = chan.control;
         chan.control = val;
         if (prev & IDE_CTRL_SRST) == 0 && (val & IDE_CTRL_SRST) != 0 {
+            if ide_trace_enabled() {
+                let which = if chan.ports.cmd_base == SECONDARY_PORTS.cmd_base {
+                    "sec"
+                } else {
+                    "pri"
+                };
+                eprintln!("AERO_IDE_TRACE: {which} SRST assert");
+            }
             chan.reset();
+        } else if (prev ^ val) & IDE_CTRL_NIEN != 0 {
+            // nIEN masks the pin but not the latch. Drive the pin now so a
+            // guest that clears nIEN mid-batch sees the pending edge.
+            chan.sync_irq_pin();
         }
     }
 
     fn exec_command(chan: &mut Channel, cmd: u8) {
+        if ide_trace_enabled() {
+            let which = if chan.ports.cmd_base == SECONDARY_PORTS.cmd_base {
+                "sec"
+            } else {
+                "pri"
+            };
+            eprintln!(
+                "AERO_IDE_TRACE: {which} cmd={cmd:#04x} dev={:#04x} present={} status={:#04x} lba1={:#04x} lba2={:#04x}",
+                chan.tf.device,
+                chan.drive_present[chan.selected_drive() as usize],
+                chan.status,
+                chan.tf.lba1,
+                chan.tf.lba2
+            );
+        }
         chan.status |= IDE_STATUS_BSY;
         chan.status &= !IDE_STATUS_DRQ;
         chan.clear_irq();
@@ -1079,10 +1239,24 @@ impl IdeController {
                     chan.abort_command(0x04);
                 }
             }
+            0x40 | 0x42 | 0x91 => {
+                // READ VERIFY / READ VERIFY EXT / INITIALIZE DEVICE PARAMETERS.
+                // No data phase. FormatEx issues VERIFY while preparing NTFS.
+                if matches!(chan.devices[dev_idx], Some(IdeDevice::Ata(_))) {
+                    chan.complete_non_data_command();
+                } else {
+                    chan.abort_command(0x04);
+                }
+            }
             0xEF => {
                 // SET FEATURES
                 let features = chan.tf.features;
                 let sector_count = chan.tf.sector_count;
+                if ide_trace_enabled() {
+                    eprintln!(
+                        "AERO_IDE_TRACE: set_features sub={features:#04x} count={sector_count:#04x}"
+                    );
+                }
                 let ok = match chan.devices[dev_idx].as_mut() {
                     Some(IdeDevice::Ata(dev)) => {
                         match features {
@@ -1099,6 +1273,11 @@ impl IdeController {
                             _ => true,
                         }
                     }
+                    // ATAPI devices accept SET FEATURES (transfer mode negotiation)
+                    // as a no-op success per typical ATAPI behavior. Without this,
+                    // Win7's atapi.sys fails DMA mode negotiation and falls back to
+                    // slow PIO for the CD-ROM.
+                    Some(IdeDevice::Atapi(_)) => true,
                     _ => false,
                 };
                 if ok {
@@ -1107,10 +1286,66 @@ impl IdeController {
                     chan.abort_command(0x04);
                 }
             }
+            0x90 => {
+                // EXECUTE DEVICE DIAGNOSTIC. Win7 atapi.sys uses this (not only
+                // SRST) to classify PACKET vs ATA. ABRT here leaves ERR set and
+                // the miniport drops the drive — no CdRom PDO.
+                if matches!(chan.devices[dev_idx], Some(IdeDevice::Atapi(_)) | Some(IdeDevice::Ata(_)))
+                {
+                    chan.data_mode = DataMode::None;
+                    chan.transfer_kind = None;
+                    chan.data.clear();
+                    chan.data_index = 0;
+                    chan.pending_dma = None;
+                    chan.pio_write = None;
+                    chan.apply_device_signature(dev_idx);
+                    chan.error = 0x01; // device 0 passed
+                    if matches!(chan.devices[dev_idx], Some(IdeDevice::Atapi(_))) {
+                        // ATA/ATAPI-6 9.10: packet devices return a clear
+                        // status (READY not set) and do not raise INTRQ.
+                        chan.status = 0;
+                        chan.clear_irq();
+                    } else {
+                        chan.status &= !(IDE_STATUS_BSY | IDE_STATUS_DRQ | IDE_STATUS_ERR);
+                        chan.status |= IDE_STATUS_DRDY | IDE_STATUS_DSC;
+                        chan.set_irq();
+                    }
+                } else {
+                    chan.abort_command(0x04);
+                }
+            }
+            0x08 => {
+                // DEVICE RESET — mandatory for PACKET devices (ATA/ATAPI-7).
+                // Win7 atapi.sys issues this before IDENTIFY PACKET. An ABRT
+                // here makes the miniport drop the drive (no CdRom PDO).
+                if matches!(chan.devices[dev_idx], Some(IdeDevice::Atapi(_))) {
+                    chan.data_mode = DataMode::None;
+                    chan.transfer_kind = None;
+                    chan.data.clear();
+                    chan.data_index = 0;
+                    chan.pending_dma = None;
+                    chan.pio_write = None;
+                    chan.tf.sector_count = 0x01;
+                    chan.tf.lba0 = 0x01;
+                    chan.tf.lba1 = 0x14;
+                    chan.tf.lba2 = 0xEB;
+                    // ATA8-ACS3: DEVICE RESET leaves status = 0 (READY clear)
+                    // and does not assert INTRQ.
+                    chan.status = 0;
+                    chan.clear_error();
+                    chan.clear_irq();
+                } else {
+                    chan.abort_command(0x04);
+                }
+            }
             0xA0 => {
                 // ATAPI PACKET
                 if matches!(chan.devices[dev_idx], Some(IdeDevice::Atapi(_))) {
-                    chan.tf.sector_count = 0x01; // IO=0, CoD=1 (packet)
+                    // QEMU `cmd_packet` *assigns* nsector = ATAPI_INT_REASON_CD
+                    // (1). A leftover SET FEATURES count (Win7 uses 0x0C = PIO
+                    // mode 4) must not leak into IREASON; later reply_end
+                    // preserves only bits 7:3 of this freshly assigned value.
+                    chan.tf.sector_count = 0x01;
                     chan.begin_pio_out(TransferKind::AtapiPacket, 12);
                 } else {
                     chan.abort_command(0x04);
@@ -1158,7 +1393,7 @@ impl IdeController {
                     // For ATAPI DMA commands, transition to status phase (interrupt reason).
                     let dev_idx = chan.selected_drive() as usize;
                     if matches!(chan.devices[dev_idx], Some(IdeDevice::Atapi(_))) {
-                        chan.tf.sector_count = 0x03; // IO=1, CoD=1
+                        chan.set_atapi_ireason(0x03); // IO=1, CoD=1
                     }
                     chan.complete_non_data_command();
                 } else {
@@ -1171,7 +1406,7 @@ impl IdeController {
                 // For ATAPI DMA commands, still transition to status phase.
                 let dev_idx = chan.selected_drive() as usize;
                 if matches!(chan.devices[dev_idx], Some(IdeDevice::Atapi(_))) {
-                    chan.tf.sector_count = 0x03;
+                    chan.set_atapi_ireason(0x03);
                 }
                 chan.abort_command(0x04);
             }
@@ -1185,6 +1420,11 @@ impl IdeController {
     pub fn secondary_irq_pending(&self) -> bool {
         self.secondary.irq_pending && (self.secondary.control & IDE_CTRL_NIEN) == 0
     }
+}
+
+fn atapi_packet_transfers_data(opcode: u8) -> bool {
+    // Mirror QEMU's NONDATA flag: these complete without a data phase.
+    !matches!(opcode, 0x00 | 0x1B | 0x1E | 0xBB | 0x2B)
 }
 
 fn try_alloc_zeroed(len: usize) -> Option<Vec<u8>> {
@@ -1252,20 +1492,31 @@ pub struct Piix3IdePciDevice {
 impl Piix3IdePciDevice {
     pub const DEFAULT_BUS_MASTER_BASE: u16 = 0xC000;
 
+    /// PIIX3 IDE Timing (IDETIM) registers: primary at 0x40, secondary at 0x42.
+    /// Bit 15 is IDE Decode Enable. Firmware (and QEMU/KVM after the
+    /// "initialize channels as enabled" fix) sets this so `intelide.sys`
+    /// creates channel PDOs; a zero register means "channel disabled."
+    const IDETIM_PRIMARY: u16 = 0x40;
+    const IDETIM_SECONDARY: u16 = 0x42;
+    const IDETIM_DECODE_ENABLE: u16 = 0x8000;
+
     pub fn new() -> Self {
         let mut config = IDE_PIIX3.build_config_space();
 
-        // Provide sensible legacy defaults for firmware/BIOS-era software.
-        config.set_bar_base(0, PRIMARY_PORTS.cmd_base as u64);
-        config.set_bar_base(1, 0x3F4); // primary control block base; alt-status at +2 => 0x3F6
-        config.set_bar_base(2, SECONDARY_PORTS.cmd_base as u64);
-        config.set_bar_base(3, 0x374); // secondary control block base; alt-status at +2 => 0x376
+        // Only BAR4 (BMIDE) is a PCI BAR. Command/control blocks are hardwired
+        // ISA compatibility ports, matching QEMU `piix3-ide`.
         config.set_bar_base(4, Self::DEFAULT_BUS_MASTER_BASE as u64);
+        Self::enable_legacy_channels(&mut config);
 
         Self {
             controller: IdeController::new(Self::DEFAULT_BUS_MASTER_BASE),
             config,
         }
+    }
+
+    fn enable_legacy_channels(config: &mut PciConfigSpace) {
+        config.write(Self::IDETIM_PRIMARY, 2, u32::from(Self::IDETIM_DECODE_ENABLE));
+        config.write(Self::IDETIM_SECONDARY, 2, u32::from(Self::IDETIM_DECODE_ENABLE));
     }
 
     /// Reset device state back to its power-on baseline while preserving attached drives/media.
@@ -1275,6 +1526,7 @@ impl Piix3IdePciDevice {
         // Note: We implement `PciDevice::reset` for this type by calling this method, so avoid
         // calling the trait method here (it would recurse).
         self.config.set_command(0);
+        Self::enable_legacy_channels(&mut self.config);
         self.controller.reset();
     }
 
@@ -1326,6 +1578,10 @@ impl Piix3IdePciDevice {
             return;
         }
         self.controller.io_write(port, size, value)
+    }
+
+    pub fn attach_irq_lines(&mut self, irq14: Box<dyn IrqLine>, irq15: Box<dyn IrqLine>) {
+        self.controller.attach_irq_lines(irq14, irq15);
     }
 
     pub fn snapshot_state(&self) -> IdeControllerState {
@@ -1420,16 +1676,25 @@ impl Piix3IdePciDevice {
             }
         }
 
-        // Snapshot the PCI config space and BAR state. `PciConfigSpaceState::bytes` stores
-        // BAR dwords as raw base addresses (without the IO space indicator bit), so derive
-        // guest-visible BAR register values from `bar_base` and keep the byte image in sync.
+        // Snapshot the PCI config space and BAR state. Unimplemented BAR0–3 must
+        // stay zero (not "I/O BAR at address 0") so a restore cannot resurrect
+        // the phantom native windows Win7 mis-assigns.
         let pci_snap = self.config.snapshot_state();
         let mut regs = pci_snap.bytes;
-        let bar0 = (pci_snap.bar_base[0] as u32 & 0xFFFF_FFFC) | 0x01;
-        let bar1 = (pci_snap.bar_base[1] as u32 & 0xFFFF_FFFC) | 0x01;
-        let bar2 = (pci_snap.bar_base[2] as u32 & 0xFFFF_FFFC) | 0x01;
-        let bar3 = (pci_snap.bar_base[3] as u32 & 0xFFFF_FFFC) | 0x01;
-        let bar4 = (pci_snap.bar_base[4] as u32 & 0xFFFF_FFFC) | 0x01;
+        let bar_dword = |index: usize| -> u32 {
+            match self.config.bar_definition(index as u8) {
+                Some(PciBarDefinition::Io { .. }) => {
+                    (pci_snap.bar_base[index] as u32 & 0xFFFF_FFFC) | 0x01
+                }
+                Some(_) => pci_snap.bar_base[index] as u32,
+                None => 0,
+            }
+        };
+        let bar0 = bar_dword(0);
+        let bar1 = bar_dword(1);
+        let bar2 = bar_dword(2);
+        let bar3 = bar_dword(3);
+        let bar4 = bar_dword(4);
 
         regs[0x10..0x14].copy_from_slice(&bar0.to_le_bytes());
         regs[0x14..0x18].copy_from_slice(&bar1.to_le_bytes());
@@ -1580,6 +1845,15 @@ impl Piix3IdePciDevice {
                 bar_probe,
             });
 
+        // Older snapshots leave IDETIM at 0 (channel decode off). intelide.sys
+        // then creates no channel PDOs. Re-apply the firmware default so a
+        // resume still looks like QEMU/KVM's enabled PIIX3.
+        let primary = self.config.read(Self::IDETIM_PRIMARY, 2) as u16;
+        let secondary = self.config.read(Self::IDETIM_SECONDARY, 2) as u16;
+        if primary & Self::IDETIM_DECODE_ENABLE == 0 || secondary & Self::IDETIM_DECODE_ENABLE == 0 {
+            Self::enable_legacy_channels(&mut self.config);
+        }
+
         // Keep controller and config BAR4 decode consistent.
         self.controller.bus_master_base = state.pci.bus_master_base;
 
@@ -1593,6 +1867,8 @@ impl Piix3IdePciDevice {
             &mut self.controller.bus_master[1],
             &state.secondary,
         );
+        self.controller.primary.sync_irq_pin();
+        self.controller.secondary.sync_irq_pin();
     }
 }
 
@@ -2007,16 +2283,16 @@ mod tests {
 
         ctl.io_write(command_port, 1, 0xA0);
 
-        // PACKET phase should assert DRQ and raise an IRQ to request the 12-byte packet.
+        // PACKET phase asserts DRQ so the host can write the CDB. QEMU does
+        // not raise INTRQ here; Win7 ataport polls.
         let st = ctl.io_read(alt_status_port, 1) as u8;
         assert_ne!(st & IDE_STATUS_DRQ, 0);
         assert_ne!(st & IDE_STATUS_DRDY, 0);
         assert_eq!(st & IDE_STATUS_BSY, 0);
-        assert!(ctl.primary_irq_pending());
-
-        // Acknowledge the PACKET-phase IRQ. DMA completion should re-assert it.
-        let _ = ctl.io_read(command_port, 1);
-        assert!(!ctl.primary_irq_pending());
+        assert!(
+            !ctl.primary_irq_pending(),
+            "PACKET CDB phase must not raise IRQ (QEMU/Win7)"
+        );
 
         // Build an ATAPI READ(10) packet for LBA=0, blocks=1.
         let mut pkt = [0u8; 12];
@@ -2112,15 +2388,11 @@ mod tests {
         ctl.io_write(lba2_port, 1, 0x08); // 2048-byte packet byte count
         ctl.io_write(command_port, 1, 0xA0); // PACKET
 
-        // PACKET phase asserts DRQ and raises an IRQ.
+        // PACKET phase asserts DRQ so the host can write the CDB. No INTRQ.
         let st = ctl.io_read(alt_status_port, 1) as u8;
         assert_ne!(st & IDE_STATUS_DRQ, 0);
         assert_ne!(st & IDE_STATUS_DRDY, 0);
         assert_eq!(st & IDE_STATUS_BSY, 0);
-        assert!(ctl.primary_irq_pending());
-
-        // Acknowledge the PACKET IRQ.
-        let _ = ctl.io_read(command_port, 1);
         assert!(!ctl.primary_irq_pending());
 
         // READ(10) packet (LBA=0, blocks=1).
@@ -2235,17 +2507,13 @@ mod tests {
         ctl.io_write(lba2_port, 1, 0x08); // 2048-byte packet byte count
         ctl.io_write(command_port, 1, 0xA0); // PACKET
 
-        // PACKET phase asserts DRQ and raises a secondary IRQ.
+        // PACKET phase asserts DRQ so the host can write the CDB. No INTRQ.
         let st = ctl.io_read(alt_status_port, 1) as u8;
         assert_ne!(st & IDE_STATUS_DRQ, 0);
         assert_ne!(st & IDE_STATUS_DRDY, 0);
         assert_eq!(st & IDE_STATUS_BSY, 0);
-        assert!(ctl.secondary_irq_pending());
-        assert!(!ctl.primary_irq_pending());
-
-        // Acknowledge the PACKET IRQ.
-        let _ = ctl.io_read(command_port, 1);
         assert!(!ctl.secondary_irq_pending());
+        assert!(!ctl.primary_irq_pending());
 
         // READ(10) packet (LBA=0, blocks=1).
         let mut pkt = [0u8; 12];
@@ -2347,15 +2615,11 @@ mod tests {
         ctl.io_write(lba2_port, 1, 0x08); // 2048-byte packet byte count
         ctl.io_write(command_port, 1, 0xA0); // PACKET
 
-        // PACKET phase asserts DRQ and raises an IRQ.
+        // PACKET phase asserts DRQ so the host can write the CDB. No INTRQ.
         let st = ctl.io_read(alt_status_port, 1) as u8;
         assert_ne!(st & IDE_STATUS_DRQ, 0);
         assert_ne!(st & IDE_STATUS_DRDY, 0);
         assert_eq!(st & IDE_STATUS_BSY, 0);
-        assert!(ctl.primary_irq_pending());
-
-        // Acknowledge the PACKET IRQ.
-        let _ = ctl.io_read(command_port, 1);
         assert!(!ctl.primary_irq_pending());
 
         // Build an ATAPI READ(10) packet for LBA=0, blocks=1.
@@ -2538,15 +2802,11 @@ mod tests {
         ctl.io_write(lba2_port, 1, 0x08); // 2048-byte packet byte count
         ctl.io_write(command_port, 1, 0xA0); // PACKET
 
-        // PACKET phase asserts DRQ and raises an IRQ.
+        // PACKET phase asserts DRQ so the host can write the CDB. No INTRQ.
         let st = ctl.io_read(alt_status_port, 1) as u8;
         assert_ne!(st & IDE_STATUS_DRQ, 0);
         assert_ne!(st & IDE_STATUS_DRDY, 0);
         assert_eq!(st & IDE_STATUS_BSY, 0);
-        assert!(ctl.primary_irq_pending());
-
-        // Acknowledge the PACKET IRQ.
-        let _ = ctl.io_read(command_port, 1);
         assert!(!ctl.primary_irq_pending());
 
         // READ(10) packet (LBA=0, blocks=1).
@@ -2670,15 +2930,11 @@ mod tests {
         ctl.io_write(lba2_port, 1, 0x08); // 2048-byte packet byte count
         ctl.io_write(command_port, 1, 0xA0); // PACKET
 
-        // PACKET phase asserts DRQ and raises an IRQ.
+        // PACKET phase asserts DRQ so the host can write the CDB. No INTRQ.
         let st = ctl.io_read(alt_status_port, 1) as u8;
         assert_ne!(st & IDE_STATUS_DRQ, 0);
         assert_ne!(st & IDE_STATUS_DRDY, 0);
         assert_eq!(st & IDE_STATUS_BSY, 0);
-        assert!(ctl.primary_irq_pending());
-
-        // Acknowledge the PACKET IRQ.
-        let _ = ctl.io_read(command_port, 1);
         assert!(!ctl.primary_irq_pending());
 
         // READ(10) packet (LBA=0, blocks=1).
@@ -3366,5 +3622,215 @@ mod tests {
         // ignore LBA/CHS mode and just reflect head/device selection.)
         ctl.io_write(device_port, 1, 0xA0);
         assert_eq!(ctl.io_read(drive_addr_port, 1) as u8, 0xEF);
+    }
+
+    #[test]
+    fn win7_ataport_inquiry_pio_uses_qemu_ireason_and_no_cdb_irq() {
+        // Exact sequence Win7 atapi.sys uses during IdeIssueInquiry:
+        // PACKET 0xA0, poll DRQ (no INTRQ), write 12-byte CDB, then the data
+        // phase must present IREASON=IO, BCL=0x24, DRQ+IRQ so ProcessInterrupt
+        // copies the INQUIRY buffer and completes the IRB as SUCCESS.
+        let mut ctl = IdeController::new(0xC000);
+        ctl.attach_secondary_master_atapi(AtapiCdrom::new(None));
+
+        let cmd_base = SECONDARY_PORTS.cmd_base;
+        let ctrl_base = SECONDARY_PORTS.ctrl_base;
+        let data_port = cmd_base + ATA_REG_DATA;
+        let features_port = cmd_base + ATA_REG_ERROR_FEATURES;
+        let lba1_port = cmd_base + ATA_REG_LBA1;
+        let lba2_port = cmd_base + ATA_REG_LBA2;
+        let device_port = cmd_base + ATA_REG_DEVICE;
+        let command_port = cmd_base + ATA_REG_STATUS_COMMAND;
+        let ireason_port = cmd_base + ATA_REG_SECTOR_COUNT;
+        let alt_status_port = ctrl_base + ATA_CTRL_ALT_STATUS_DEVICE_CTRL;
+
+        ctl.io_write(device_port, 1, 0xA0);
+        ctl.io_write(features_port, 1, 0x00); // PIO
+        ctl.io_write(lba1_port, 1, 0x24);
+        ctl.io_write(lba2_port, 1, 0x00);
+        ctl.io_write(command_port, 1, 0xA0);
+
+        let st = ctl.io_read(alt_status_port, 1) as u8;
+        assert_ne!(st & IDE_STATUS_DRQ, 0, "CDB phase must assert DRQ");
+        assert_eq!(st & IDE_STATUS_BSY, 0);
+        assert!(
+            !ctl.secondary_irq_pending(),
+            "CDB phase must not raise IRQ"
+        );
+        assert_eq!(
+            ctl.io_read(ireason_port, 1) as u8 & 0x07,
+            0x01,
+            "CDB phase IREASON is CoD, !IO"
+        );
+
+        let mut pkt = [0u8; 12];
+        pkt[0] = 0x12;
+        pkt[4] = 0x24;
+        for chunk in pkt.chunks_exact(2) {
+            let w = u16::from_le_bytes([chunk[0], chunk[1]]);
+            ctl.io_write(data_port, 2, w as u32);
+        }
+
+        assert!(
+            ctl.secondary_irq_pending(),
+            "INQUIRY data phase must raise IRQ"
+        );
+        let st = ctl.io_read(alt_status_port, 1) as u8;
+        assert_ne!(st & IDE_STATUS_DRQ, 0);
+        assert_eq!(st & IDE_STATUS_ERR, 0);
+        assert_eq!(
+            ctl.io_read(ireason_port, 1) as u8 & 0x07,
+            0x02,
+            "data phase IREASON is IO, !CoD"
+        );
+        let bcl = ctl.io_read(lba1_port, 1) as u16 | ((ctl.io_read(lba2_port, 1) as u16) << 8);
+        assert_eq!(bcl, 0x24);
+
+        let mut inquiry = [0u8; 36];
+        for i in 0..18 {
+            let w = ctl.io_read(data_port, 2) as u16;
+            inquiry[i * 2] = w as u8;
+            inquiry[i * 2 + 1] = (w >> 8) as u8;
+        }
+        assert_eq!(inquiry[0], 0x05, "PDT = CD/DVD");
+        assert_eq!(inquiry[1], 0x80, "removable");
+        assert_eq!(inquiry[3], 0x21, "ATAPI response format");
+
+        // Last word of the PIO read must drop DRQ, set IREASON=IO|CoD, and
+        // raise the completion IRQ — Win7 ProcessInterrupt then marks SUCCESS.
+        assert!(ctl.secondary_irq_pending(), "status phase must raise IRQ");
+        let st = ctl.io_read(alt_status_port, 1) as u8;
+        assert_eq!(st & IDE_STATUS_DRQ, 0);
+        assert_eq!(st & IDE_STATUS_ERR, 0);
+        assert_eq!(
+            ctl.io_read(ireason_port, 1) as u8 & 0x07,
+            0x03,
+            "status phase IREASON is IO|CoD"
+        );
+    }
+
+    #[test]
+    fn atapi_inquiry_status_ack_drops_then_reasserts_irq_line_without_a_poll() {
+        // ataport ProcessInterrupt: read STATUS (ack data-in), then `rep insw`
+        // the 36-byte INQUIRY. The last word raises the status-phase IRQ.
+        // That whole sequence is one Tier-0 I/O batch, so a poll-only pin
+        // never goes 1→0→1 and DiscoverLuns times out.
+        use crate::bus::TestIrqLine;
+
+        let mut ctl = IdeController::new(0xC000);
+        let irq14 = TestIrqLine::default();
+        let irq15 = TestIrqLine::default();
+        ctl.attach_irq_lines(Box::new(irq14.clone()), Box::new(irq15.clone()));
+        ctl.attach_secondary_master_atapi(AtapiCdrom::new(None));
+
+        let cmd_base = SECONDARY_PORTS.cmd_base;
+        let data_port = cmd_base + ATA_REG_DATA;
+        let lba1_port = cmd_base + ATA_REG_LBA1;
+        let device_port = cmd_base + ATA_REG_DEVICE;
+        let command_port = cmd_base + ATA_REG_STATUS_COMMAND;
+
+        ctl.io_write(device_port, 1, 0xA0);
+        ctl.io_write(lba1_port, 1, 0x24);
+        ctl.io_write(command_port, 1, 0xA0);
+        let mut pkt = [0u8; 12];
+        pkt[0] = 0x12;
+        pkt[4] = 0x24;
+        for chunk in pkt.chunks_exact(2) {
+            let w = u16::from_le_bytes([chunk[0], chunk[1]]);
+            ctl.io_write(data_port, 2, w as u32);
+        }
+        assert!(irq15.level(), "data-in must raise IRQ15 immediately");
+        assert_eq!(irq15.transitions(), vec![true]);
+
+        let _ = ctl.io_read(command_port, 1);
+        assert!(
+            !irq15.level(),
+            "STATUS read must drop the pin before the PIO drain"
+        );
+        assert_eq!(irq15.transitions(), vec![true, false]);
+
+        for _ in 0..18 {
+            let _ = ctl.io_read(data_port, 2);
+        }
+        assert!(
+            irq15.level(),
+            "last INQUIRY word must raise the status-phase edge immediately"
+        );
+        assert_eq!(irq15.transitions(), vec![true, false, true]);
+        assert!(!irq14.level(), "primary pin must stay quiet");
+    }
+
+    #[test]
+    fn taskfile_writes_ignored_while_drq_like_qemu() {
+        let mut ctl = IdeController::new(0xC000);
+        ctl.attach_secondary_master_atapi(AtapiCdrom::new(None));
+
+        let cmd_base = SECONDARY_PORTS.cmd_base;
+        let count_port = cmd_base + ATA_REG_SECTOR_COUNT;
+        let lba1_port = cmd_base + ATA_REG_LBA1;
+        let device_port = cmd_base + ATA_REG_DEVICE;
+        let command_port = cmd_base + ATA_REG_STATUS_COMMAND;
+
+        ctl.io_write(device_port, 1, 0xA0);
+        ctl.io_write(lba1_port, 1, 0x24);
+        ctl.io_write(command_port, 1, 0xA0);
+
+        let ireason = ctl.io_read(count_port, 1) as u8;
+        let bcl_lo = ctl.io_read(lba1_port, 1) as u8;
+        ctl.io_write(count_port, 1, 0x0C);
+        ctl.io_write(lba1_port, 1, 0x00);
+        assert_eq!(
+            ctl.io_read(count_port, 1) as u8,
+            ireason,
+            "Sector Count (IREASON) must be frozen while DRQ"
+        );
+        assert_eq!(
+            ctl.io_read(lba1_port, 1) as u8,
+            bcl_lo,
+            "BCL must be frozen while DRQ"
+        );
+    }
+
+    #[test]
+    fn packet_ireason_is_assigned_not_ored_so_set_features_count_does_not_leak() {
+        // Live Win7: SET FEATURES 0x03 / count=0x0C (PIO mode 4), then PACKET
+        // INQUIRY. QEMU cmd_packet assigns nsector=1; preserving 0x0C produced
+        // IREASON 0x0A/0x0B on the next INQUIRY.
+        let mut ctl = IdeController::new(0xC000);
+        ctl.attach_secondary_master_atapi(AtapiCdrom::new(None));
+
+        let cmd_base = SECONDARY_PORTS.cmd_base;
+        let features_port = cmd_base + ATA_REG_ERROR_FEATURES;
+        let count_port = cmd_base + ATA_REG_SECTOR_COUNT;
+        let device_port = cmd_base + ATA_REG_DEVICE;
+        let command_port = cmd_base + ATA_REG_STATUS_COMMAND;
+        let lba1_port = cmd_base + ATA_REG_LBA1;
+        let lba2_port = cmd_base + ATA_REG_LBA2;
+        let data_port = cmd_base + ATA_REG_DATA;
+
+        ctl.io_write(device_port, 1, 0xA0);
+        ctl.io_write(features_port, 1, 0x03);
+        ctl.io_write(count_port, 1, 0x0C);
+        ctl.io_write(command_port, 1, 0xEF);
+        let _ = ctl.io_read(command_port, 1); // ack IRQ
+
+        ctl.io_write(features_port, 1, 0x00);
+        ctl.io_write(lba1_port, 1, 0x24);
+        ctl.io_write(lba2_port, 1, 0x00);
+        ctl.io_write(command_port, 1, 0xA0);
+        assert_eq!(
+            ctl.io_read(count_port, 1) as u8,
+            0x01,
+            "PACKET must assign IREASON=1, not OR leftover 0x0C"
+        );
+
+        let mut pkt = [0u8; 12];
+        pkt[0] = 0x12;
+        pkt[4] = 0x24;
+        for chunk in pkt.chunks_exact(2) {
+            let w = u16::from_le_bytes([chunk[0], chunk[1]]);
+            ctl.io_write(data_port, 2, w as u32);
+        }
+        assert_eq!(ctl.io_read(count_port, 1) as u8, 0x02);
     }
 }

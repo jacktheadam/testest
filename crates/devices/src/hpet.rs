@@ -80,7 +80,14 @@ pub struct HpetConfig {
 struct HpetTimer {
     cap_bits: u64,
     config: u64,
+    /// Guest-visible comparator register value.
     comparator: u64,
+    /// Comparator extended into the main counter's 64-bit epoch.
+    ///
+    /// A 32-bit comparator names a low-32-bit counter value, not an absolute 64-bit
+    /// deadline. Keeping the extended deadline separately prevents a target below the
+    /// current low 32 bits from being mistaken for an already-expired timer.
+    deadline: u64,
     period: u64,
     fsb_route: u64,
     armed: bool,
@@ -102,6 +109,7 @@ impl HpetTimer {
             cap_bits,
             config,
             comparator: 0,
+            deadline: 0,
             period: 0,
             fsb_route: 0,
             armed: false,
@@ -127,6 +135,19 @@ impl HpetTimer {
 
     fn route(&self) -> u32 {
         ((self.config & TIMER_CFG_INT_ROUTE_MASK) >> TIMER_CFG_INT_ROUTE_SHIFT) as u32
+    }
+
+    fn comparator_deadline(&self, main_counter: u64) -> u64 {
+        if self.config & TIMER_CFG_32MODE == 0 {
+            return self.comparator;
+        }
+
+        let mut deadline =
+            (main_counter & !u64::from(u32::MAX)) | (self.comparator & u64::from(u32::MAX));
+        if deadline < main_counter {
+            deadline = deadline.wrapping_add(1u64 << 32);
+        }
+        deadline
     }
 }
 
@@ -199,6 +220,7 @@ impl<C: Clock> IoSnapshot for Hpet<C> {
             // Preserve the reset/default route, but clear dynamic state.
             timer.config &= TIMER_CFG_INT_ROUTE_MASK;
             timer.comparator = 0;
+            timer.deadline = 0;
             timer.period = 0;
             timer.fsb_route = 0;
             timer.armed = false;
@@ -225,7 +247,12 @@ impl<C: Clock> IoSnapshot for Hpet<C> {
                 if idx < timers.len() {
                     let timer = &mut timers[idx];
                     timer.config = config & TIMER_WRITABLE_MASK & !TIMER_CFG_FSB_ENABLE;
-                    timer.comparator = comparator;
+                    timer.comparator = if timer.config & TIMER_CFG_32MODE != 0 {
+                        comparator & u64::from(u32::MAX)
+                    } else {
+                        comparator
+                    };
+                    timer.deadline = timer.comparator_deadline(main_counter);
                     timer.period = if timer.is_periodic() { period } else { 0 };
                     timer.fsb_route = fsb_route;
                     timer.armed = armed;
@@ -312,6 +339,7 @@ impl<C: Clock> Hpet<C> {
             // Preserve the reset/default route, but clear dynamic state.
             timer.config &= TIMER_CFG_INT_ROUTE_MASK;
             timer.comparator = 0;
+            timer.deadline = 0;
             timer.period = 0;
             timer.fsb_route = 0;
             timer.armed = false;
@@ -344,7 +372,7 @@ impl<C: Clock> Hpet<C> {
             //
             // Timers that are edge-triggered or not interrupt-enabled should not manipulate the
             // shared GSI line at all; doing so can spuriously deassert lines that are routed from
-            // other devices (e.g. PCI INTx on GSI10).
+            // other devices sharing the same routed GSI.
             if !timer.is_level_triggered() || !timer.int_enabled() {
                 if timer.irq_asserted {
                     let gsi = apply_legacy_replacement_route(legacy, idx, timer.route());
@@ -491,11 +519,13 @@ impl<C: Clock> Hpet<C> {
                 continue;
             }
 
-            if self.main_counter < timer.comparator {
+            if self.main_counter < timer.deadline {
                 continue;
             }
 
-            let was_pending = self.general_int_status & status_bit != 0;
+            // Sticky (W1C) status bit: set on every comparator match. Does **not**
+            // suppress further edge deliveries on real HPET hardware — only level mode
+            // treats the line as held high while the bit remains set.
             self.general_int_status |= status_bit;
 
             if timer.is_level_triggered() {
@@ -503,16 +533,27 @@ impl<C: Clock> Hpet<C> {
                     sink.raise_gsi(gsi);
                     timer.irq_asserted = true;
                 }
-            } else if !was_pending {
+            } else {
+                // Edge-triggered: pulse on every comparator match, even when the
+                // General Interrupt Status bit is already set. Gating on a 0→1
+                // status transition permanently silences a periodic timer if the
+                // guest has not yet W1C'd the bit (or if a prior edge was lost
+                // while the CPU could not accept IRQs) — which parks Windows in
+                // `sti; hlt` with a black screen once the first edge is missed.
                 sink.pulse_gsi(gsi);
             }
 
             if timer.is_periodic() && timer.period != 0 {
-                let delta = self.main_counter.wrapping_sub(timer.comparator);
+                let delta = self.main_counter.wrapping_sub(timer.deadline);
                 let skips = delta / timer.period + 1;
-                timer.comparator = timer
-                    .comparator
+                timer.deadline = timer
+                    .deadline
                     .wrapping_add(timer.period.wrapping_mul(skips));
+                timer.comparator = if timer.config & TIMER_CFG_32MODE != 0 {
+                    timer.deadline & u64::from(u32::MAX)
+                } else {
+                    timer.deadline
+                };
             } else {
                 timer.armed = false;
             }
@@ -567,6 +608,11 @@ impl<C: Clock> Hpet<C> {
                 if !was_enabled && now_enabled {
                     self.last_update_ns = self.clock.now_ns();
                     self.remainder_fs = 0;
+                    for timer in &mut self.timers {
+                        if timer.armed {
+                            timer.deadline = timer.comparator_deadline(self.main_counter);
+                        }
+                    }
                 }
 
                 // If HPET is disabled while level-triggered lines are asserted, deassert them to
@@ -670,6 +716,14 @@ impl<C: Clock> Hpet<C> {
                         let before_level = before & TIMER_CFG_INT_LEVEL != 0;
                         let after_level = timer.is_level_triggered();
 
+                        if timer.config & TIMER_CFG_32MODE != 0 {
+                            timer.comparator &= u64::from(u32::MAX);
+                            timer.period &= u64::from(u32::MAX);
+                        }
+                        if timer.armed {
+                            timer.deadline = timer.comparator_deadline(self.main_counter);
+                        }
+
                         if timer.irq_asserted {
                             // If a level interrupt is asserted and the guest either disables the
                             // interrupt, or switches the timer to edge-triggered mode, deassert it
@@ -694,19 +748,32 @@ impl<C: Clock> Hpet<C> {
                     }
                     REG_TIMER_COMPARATOR => {
                         let timer = &mut self.timers[timer_idx];
-                        let new_value = (timer.comparator & !write_mask) | (value & write_mask);
+                        let effective_write_mask = if timer.config & TIMER_CFG_32MODE != 0 {
+                            write_mask & u64::from(u32::MAX)
+                        } else {
+                            write_mask
+                        };
+                        let new_value = (timer.comparator & !effective_write_mask)
+                            | (value & effective_write_mask);
 
                         if timer.is_periodic() {
                             if (timer.config & TIMER_CFG_SETVAL != 0) || timer.period == 0 {
                                 timer.period = new_value;
-                                timer.comparator = self.main_counter.wrapping_add(timer.period);
+                                timer.deadline = self.main_counter.wrapping_add(timer.period);
+                                timer.comparator = if timer.config & TIMER_CFG_32MODE != 0 {
+                                    timer.deadline & u64::from(u32::MAX)
+                                } else {
+                                    timer.deadline
+                                };
                                 timer.config &= !TIMER_CFG_SETVAL;
                             } else {
                                 timer.comparator = new_value;
+                                timer.deadline = timer.comparator_deadline(self.main_counter);
                             }
                         } else {
                             timer.period = 0;
                             timer.comparator = new_value;
+                            timer.deadline = timer.comparator_deadline(self.main_counter);
                         }
                         timer.armed = true;
                     }

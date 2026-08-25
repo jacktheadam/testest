@@ -725,8 +725,10 @@ impl HdaCodec {
     fn get_parameter_output(&self, param_id: u8) -> u32 {
         match param_id {
             0x09 => {
-                // Audio widget capabilities: type=audio output (0), stereo, out amp present, format override.
-                (1u32 << 4) | (1u32 << 6) | (1u32 << 8)
+                // Audio widget capabilities: TYPE=audio output (0) in bits [23:20],
+                // stereo (bit 0), out amp present (bit 2), format override (bit 4),
+                // connection list (bit 8).
+                (1 << 0) | (1 << 2) | (1 << 4) | (1 << 8)
             }
             0x0A => supported_pcm_caps(),
             0x0B => {
@@ -744,8 +746,10 @@ impl HdaCodec {
     fn get_parameter_input(&self, param_id: u8) -> u32 {
         match param_id {
             0x09 => {
-                // Audio widget capabilities: type=audio input (1), stereo, in amp present, format override.
-                (0x1u32) | (1 << 4) | (1 << 5) | (1 << 8)
+                // Audio widget capabilities: TYPE=audio input (1) in bits [23:20],
+                // stereo (bit 0), in amp present (bit 1), format override (bit 4),
+                // connection list (bit 8).
+                (0x1u32 << 20) | (1 << 0) | (1 << 1) | (1 << 4) | (1 << 8)
             }
             0x0A => supported_pcm_caps(),
             0x0B => 1,
@@ -760,8 +764,9 @@ impl HdaCodec {
     fn get_parameter_output_pin(&self, param_id: u8) -> u32 {
         match param_id {
             0x09 => {
-                // Audio widget capabilities: type=pin complex (0x4), connection list, power control.
-                (0x4u32) | (1 << 12) | (1 << 10)
+                // Audio widget capabilities: TYPE=pin complex (4) in bits [23:20],
+                // connection list (bit 8), power control (bit 10).
+                (0x4u32 << 20) | (1 << 8) | (1 << 10)
             }
             0x0A => supported_pcm_caps(),
             0x0B => 1,
@@ -776,7 +781,7 @@ impl HdaCodec {
 
     fn get_parameter_mic_pin(&self, param_id: u8) -> u32 {
         match param_id {
-            0x09 => (0x4u32) | (1 << 12) | (1 << 10),
+            0x09 => (0x4u32 << 20) | (1 << 8) | (1 << 10),
             0x0A => supported_pcm_caps(),
             0x0B => 1,
             0x0C => {
@@ -1017,11 +1022,16 @@ impl HdaController {
         let num_streams = num_output_streams + num_input_streams + num_bidir_streams;
         let audio_ring_frames = (output_rate_hz as usize / 10).max(1); // ~100ms
         Self {
-            // GCAP: OSS=1, ISS=1, BSS=0, NSDO=1.
-            gcap: ((num_output_streams as u16) & 0xF)
-                | (((num_input_streams as u16) & 0xF) << 4)
-                | (((num_bidir_streams as u16) & 0xF) << 8)
-                | (1u16 << 12),
+            // GCAP per Intel HDA spec:
+            //   bit 0:    64OK (64-bit addressing supported)
+            //   bits 2:1:  NSDO (number of serial data outputs, 0=1)
+            //   bits 7:3:  BSS (number of bidirectional streams)
+            //   bits 11:8: ISS (number of input streams)
+            //   bits 15:12: OSS (number of output streams)
+            gcap: 1u16 // 64OK
+                | ((num_bidir_streams as u16) << 3)
+                | ((num_input_streams as u16) << 8)
+                | ((num_output_streams as u16) << 12),
             vmin: 0x00,
             vmaj: 0x01,
             gctl: 0,
@@ -1112,8 +1122,8 @@ impl HdaController {
         // rewind guest playback/capture).
         //
         // Stream descriptor order follows the HDA spec: output streams, input streams, bidirectional streams.
-        let oss = (self.gcap & 0xF) as usize;
-        let iss = ((self.gcap >> 4) & 0xF) as usize;
+        let oss = ((self.gcap >> 12) & 0xF) as usize;
+        let iss = ((self.gcap >> 8) & 0xF) as usize;
         let capture_sample_rate_hz = self.capture_sample_rate_hz;
         for (idx, rt) in self.stream_rt.iter_mut().enumerate() {
             rt.capture_frame_accum = 0;
@@ -1154,8 +1164,8 @@ impl HdaController {
         self.capture_sample_rate_hz = capture_sample_rate_hz;
 
         // Reset capture stream resamplers (but keep DMA position tracking).
-        let oss = (self.gcap & 0xF) as usize;
-        let iss = ((self.gcap >> 4) & 0xF) as usize;
+        let oss = ((self.gcap >> 12) & 0xF) as usize;
+        let iss = ((self.gcap >> 8) & 0xF) as usize;
         for rt in self.stream_rt.iter_mut().skip(oss).take(iss) {
             rt.dma_scratch.clear();
             rt.decode_scratch.clear();
@@ -1653,7 +1663,7 @@ impl HdaController {
                         (prev, sd.ctl)
                     };
 
-                    // SRST cleared -> stream enters reset.
+                    // SRST deasserted (1 → 0): the reset completes on this edge.
                     if (prev & SD_CTL_SRST) != 0 && (now & SD_CTL_SRST) == 0 {
                         self.reset_stream_engine(stream);
                     }
@@ -1987,7 +1997,11 @@ impl HdaController {
         if (self.gctl & GCTL_CRST) == 0 {
             return;
         }
-        if (self.streams[stream].ctl & (SD_CTL_SRST | SD_CTL_RUN)) != (SD_CTL_SRST | SD_CTL_RUN) {
+        // A stream runs on RUN=1 with SRST=0. SRST is not a start bit and it does not
+        // self-clear: software asserts it, reads back 1 to confirm the descriptor is in
+        // reset, then writes 0 and reads back 0 before setting RUN. So a descriptor
+        // carrying both bits is asking to run while held in reset, and must not move data.
+        if (self.streams[stream].ctl & (SD_CTL_SRST | SD_CTL_RUN)) != SD_CTL_RUN {
             return;
         }
 
@@ -2104,7 +2118,8 @@ impl HdaController {
         }
 
         let ctl = self.streams[stream].ctl;
-        if (ctl & (SD_CTL_SRST | SD_CTL_RUN)) != (SD_CTL_SRST | SD_CTL_RUN) {
+        // Stream runs when RUN=1 and SRST=0 (see process_output_stream comment).
+        if (ctl & (SD_CTL_SRST | SD_CTL_RUN)) != SD_CTL_RUN {
             return;
         }
 
@@ -2390,8 +2405,8 @@ impl HdaController {
             sd.bdpu = s.bdpu;
         }
 
-        let num_output_streams = (self.gcap & 0x0f) as usize;
-        let num_input_streams = ((self.gcap >> 4) & 0x0f) as usize;
+        let num_output_streams = ((self.gcap >> 12) & 0x0f) as usize;
+        let num_input_streams = ((self.gcap >> 8) & 0x0f) as usize;
 
         for (idx, (rt, s)) in self
             .stream_rt
@@ -2638,7 +2653,7 @@ mod tests {
 
         {
             let sd = hda.stream_mut(0);
-            sd.ctl = SD_CTL_SRST | SD_CTL_RUN | ((1u32) << SD_CTL_STRM_SHIFT);
+            sd.ctl = SD_CTL_RUN | ((1u32) << SD_CTL_STRM_SHIFT);
             sd.cbl = out_buf_len;
             sd.lvi = 0;
             sd.fmt = 0x0011; // 48kHz, 16-bit, stereo
@@ -2655,7 +2670,7 @@ mod tests {
 
         {
             let sd = hda.stream_mut(1);
-            sd.ctl = SD_CTL_SRST | SD_CTL_RUN | ((2u32) << SD_CTL_STRM_SHIFT);
+            sd.ctl = SD_CTL_RUN | ((2u32) << SD_CTL_STRM_SHIFT);
             sd.cbl = in_buf_len;
             sd.lvi = 0;
             sd.fmt = 0x0010; // 48kHz, 16-bit, mono
@@ -2824,5 +2839,34 @@ mod tests {
             result.is_ok(),
             "dma_write_stream_bytes must not panic on DMA address range overflow"
         );
+    }
+
+    #[test]
+    fn widget_capabilities_type_is_in_bits_23_20() {
+        // Regression test: the Audio Widget Capabilities TYPE field must be in
+        // bits [23:20] per the Intel HDA spec. Win7's hdaudio.sys enumerates
+        // pin complexes by checking TYPE==4; if TYPE is in the wrong bits,
+        // no audio endpoints are discovered.
+        let mut codec = HdaCodec::new();
+
+        // Output pin (NID 3): TYPE should be 4 (Pin Complex) in bits [23:20].
+        let pin_wcap = codec.execute_verb(3, verb_12(0xF00, 0x09));
+        let pin_type = (pin_wcap >> 20) & 0xF;
+        assert_eq!(pin_type, 4, "Output pin TYPE must be 4 (Pin Complex)");
+
+        // DAC (NID 2): TYPE should be 0 (Audio Output).
+        let dac_wcap = codec.execute_verb(2, verb_12(0xF00, 0x09));
+        let dac_type = (dac_wcap >> 20) & 0xF;
+        assert_eq!(dac_type, 0, "DAC TYPE must be 0 (Audio Output)");
+
+        // ADC (NID 4): TYPE should be 1 (Audio Input).
+        let adc_wcap = codec.execute_verb(4, verb_12(0xF00, 0x09));
+        let adc_type = (adc_wcap >> 20) & 0xF;
+        assert_eq!(adc_type, 1, "ADC TYPE must be 1 (Audio Input)");
+
+        // Mic pin (NID 5): TYPE should be 4 (Pin Complex).
+        let mic_wcap = codec.execute_verb(5, verb_12(0xF00, 0x09));
+        let mic_type = (mic_wcap >> 20) & 0xF;
+        assert_eq!(mic_type, 4, "Mic pin TYPE must be 4 (Pin Complex)");
     }
 }

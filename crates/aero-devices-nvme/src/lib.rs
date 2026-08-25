@@ -334,8 +334,15 @@ impl NvmeController {
         let mpsmin: u64 = 0; // 2^(12 + 0) = 4KiB.
         let mpsmax: u64 = 0;
         let css_nvm: u64 = 1; // NVM command set supported.
-        let cap =
-            (mqes & 0xffff) | (css_nvm << 37) | (mpsmin << 48) | (mpsmax << 52) | (dstrd << 32);
+        let cap = (mqes & 0xffff)
+            | (css_nvm << 37)
+            | (mpsmin << 48)
+            | (mpsmax << 52)
+            | (dstrd << 32)
+            // CAP.TO (bits 31:24) = ready timeout in 500ms units. 0x08 = 4s.
+            // Without this, a strict driver computing a wait budget from TO=0
+            // may spuriously timeout waiting for CSTS.RDY.
+            | (0x08u64 << 24);
 
         debug_assert!(
             disk.capacity_bytes().is_multiple_of(NVME_LBA_SIZE),
@@ -913,6 +920,14 @@ impl NvmeController {
             }
             0x05 => self.cmd_create_io_cq(cmd),
             0x01 => self.cmd_create_io_sq(cmd),
+            0x02 => self.cmd_get_log_page(cmd, memory),
+            0x0c => {
+                // Asynchronous Event Request: accept but don't complete immediately
+                // (the host expects no CQE until an async event fires). Returning
+                // SUCCESS with 0 DWD0 is the safest bring-up behavior — avoids the
+                // driver treating it as INVALID_OPCODE and aborting init.
+                (NvmeStatus::SUCCESS, 0)
+            }
             _ => (NvmeStatus::INVALID_OPCODE, 0),
         }
     }
@@ -1117,6 +1132,22 @@ impl NvmeController {
             ),
             _ => (NvmeStatus::INVALID_FIELD, 0),
         }
+    }
+
+    fn cmd_get_log_page(
+        &mut self,
+        cmd: NvmeCommand,
+        memory: &mut dyn MemoryBus,
+    ) -> (NvmeStatus, u32) {
+        // Get Log Page (opcode 0x02). LID is in cdw10 bits 7:0.
+        // Return a zeroed page for known LIDs (Error=0x01, SMART/Health=0x02)
+        // so the driver's init query succeeds rather than getting INVALID_OPCODE.
+        if cmd.psdt > 1 {
+            return (NvmeStatus::INVALID_FIELD, 0);
+        }
+        let page = [0u8; 4096];
+        let status = self.dma_write(memory, cmd.psdt, cmd.prp1, cmd.prp2, &page);
+        (status, 0)
     }
 
     fn cmd_set_features(&mut self, cmd: NvmeCommand) -> (NvmeStatus, u32) {

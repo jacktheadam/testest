@@ -7,7 +7,7 @@ async function waitForReady(page: Page) {
 test("gpu worker smoke: renders pattern and returns screenshot hash", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/gpu-worker-smoke.html", { waitUntil: "load" });
+  await page.goto("/apps/web/gpu-worker-smoke.html", { waitUntil: "load" });
   await waitForReady(page);
 
   const result = await page.evaluate(async () => {
@@ -43,7 +43,7 @@ test("gpu worker smoke: renders pattern and returns screenshot hash", async ({ p
 test("gpu worker smoke: disableWebGpu forces WebGL2 fallback", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/gpu-worker-smoke.html?disableWebGpu=1", { waitUntil: "load" });
+  await page.goto("/apps/web/gpu-worker-smoke.html?disableWebGpu=1", { waitUntil: "load" });
   await waitForReady(page);
 
   // The worker should emit a structured Init warning event describing the fallback.
@@ -83,7 +83,7 @@ test("gpu worker smoke: disableWebGpu forces WebGL2 fallback", async ({ page, br
 test("gpu worker smoke: presenter errors emit structured events", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/gpu-worker-smoke.html?triggerPresenterError=1", { waitUntil: "load" });
+  await page.goto("/apps/web/gpu-worker-smoke.html?triggerPresenterError=1", { waitUntil: "load" });
   await waitForReady(page);
 
   // The smoke page triggers the same validation error twice. The worker should:
@@ -118,7 +118,7 @@ test("gpu worker smoke: presenter errors emit structured events", async ({ page,
 test("gpu worker smoke: init failure emits structured Init fatal event", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/gpu-worker-smoke.html?expectInitFailure=1&forceBackend=webgpu&disableWebGpu=1", {
+  await page.goto("/apps/web/gpu-worker-smoke.html?expectInitFailure=1&forceBackend=webgpu&disableWebGpu=1", {
     waitUntil: "load",
   });
   await waitForReady(page);

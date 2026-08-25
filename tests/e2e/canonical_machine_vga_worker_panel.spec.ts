@@ -2,19 +2,19 @@ import { expect, test, type Page } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const SINGLE_WASM_BINARY_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-single/aero_wasm_bg.wasm", import.meta.url));
-const SINGLE_WASM_JS_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-single/aero_wasm.js", import.meta.url));
-const SINGLE_WASM_BINARY_DEV = fileURLToPath(new URL("../../web/src/wasm/pkg-single-dev/aero_wasm_bg.wasm", import.meta.url));
-const SINGLE_WASM_JS_DEV = fileURLToPath(new URL("../../web/src/wasm/pkg-single-dev/aero_wasm.js", import.meta.url));
+const SINGLE_WASM_BINARY_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-single/aero_wasm_bg.wasm", import.meta.url));
+const SINGLE_WASM_JS_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-single/aero_wasm.js", import.meta.url));
+const SINGLE_WASM_BINARY_DEV = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-single-dev/aero_wasm_bg.wasm", import.meta.url));
+const SINGLE_WASM_JS_DEV = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-single-dev/aero_wasm.js", import.meta.url));
 
 const THREADED_WASM_BINARY_RELEASE = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
 );
-const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
+const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
 const THREADED_WASM_BINARY_DEV = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
 );
-const THREADED_WASM_JS_DEV = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url));
+const THREADED_WASM_JS_DEV = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url));
 
 const HAS_WASM_BUNDLE =
   (existsSync(SINGLE_WASM_BINARY_RELEASE) && existsSync(SINGLE_WASM_JS_RELEASE)) ||
@@ -49,7 +49,7 @@ test("canonical Machine worker panel: renders VGA scanout to a canvas", async ({
     test.skip(true, message);
   }
 
-  await page.goto("/web/index.html", { waitUntil: "load" });
+  await page.goto("/apps/web/bringup.html", { waitUntil: "load" });
   await waitForMachineWorkerPanelReady(page);
 
   await page.click("#canonical-machine-vga-worker-start");

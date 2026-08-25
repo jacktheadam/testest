@@ -6,7 +6,7 @@ test("GPU worker: CursorState uploads cursor image from guest memory and screens
 }) => {
   test.skip(browserName !== "chromium", "OffscreenCanvas + WebGL2-in-worker coverage is Chromium-only for now.");
 
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
 
   await page.setContent(`
     <style>
@@ -23,22 +23,22 @@ test("GPU worker: CursorState uploads cursor image from guest memory and screens
         FRAME_SEQ_INDEX,
         FRAME_STATUS_INDEX,
         isGpuWorkerMessageBase,
-      } from "/web/src/ipc/gpu-protocol.ts";
+      } from "/apps/web/src/ipc/gpu-protocol.ts";
       import {
         FRAMEBUFFER_FORMAT_RGBA8888,
         HEADER_BYTE_LENGTH,
         HEADER_I32_COUNT,
         HEADER_INDEX_FRAME_COUNTER,
         initFramebufferHeader,
-      } from "/web/src/display/framebuffer_protocol.ts";
-        import { allocateHarnessSharedMemorySegments } from "/web/src/runtime/harness_shared_memory.ts";
-        import { createSharedMemoryViews } from "/web/src/runtime/shared_layout.ts";
+      } from "/apps/web/src/display/framebuffer_protocol.ts";
+        import { allocateHarnessSharedMemorySegments } from "/apps/web/src/runtime/harness_shared_memory.ts";
+        import { createSharedMemoryViews } from "/apps/web/src/runtime/shared_layout.ts";
       import {
         CURSOR_FORMAT_B8G8R8A8,
         publishCursorState,
         wrapCursorState,
-      } from "/web/src/ipc/cursor_state.ts";
-      import { formatOneLineUtf8 } from "/web/src/text.ts";
+      } from "/apps/web/src/ipc/cursor_state.ts";
+      import { formatOneLineUtf8 } from "/packages/transport-safety/src/text.js";
 
       const W = 64;
       const H = 64;
@@ -91,7 +91,7 @@ test("GPU worker: CursorState uploads cursor image from guest memory and screens
             pixels[i + 3] = 255;
           }
 
-          const worker = new Worker("/web/src/workers/gpu.worker.ts", { type: "module" });
+          const worker = new Worker("/apps/web/src/workers/gpu.worker.ts", { type: "module" });
 
           let readyResolve;
           let readyReject;

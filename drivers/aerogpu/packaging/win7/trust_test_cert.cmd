@@ -10,7 +10,7 @@ rem   - LocalMachine\TrustedPublisher (Trusted Publishers)
 rem and (optionally) enables Windows test-signing mode.
 rem
 rem This is intended for Win7 VMs when the driver package was signed on a build
-rem host (e.g. via ci/sign-drivers.ps1, which produces out/certs/aero-test.cer).
+rem host (e.g. via drivers/build/sign-drivers.ps1, which produces out/certs/aero-test.cer).
 rem -----------------------------------------------------------------------------
 
 set "SCRIPT_DIR=%~dp0"

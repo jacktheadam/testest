@@ -4,7 +4,7 @@ Minimal user-mode HID probe utility for validating the `virtio-input` HID minidr
 
 For the consolidated end-to-end virtio-input validation plan (device model + driver + web runtime), see:
 
-- [`docs/virtio-input-test-plan.md`](../../../../../docs/virtio-input-test-plan.md)
+- [`wiki/areas/usb-input.md`](wiki/areas/usb-input.md)
 
 ## What it does
 

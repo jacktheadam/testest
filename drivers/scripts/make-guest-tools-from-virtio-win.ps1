@@ -95,7 +95,7 @@ param(
   # Virtio-win driver bundles must use the virtio-win contract so:
   # - AERO_VIRTIO_*_SERVICE values match the upstream INF AddService names (viostor/netkvm/...)
   # - guest-tools/setup.cmd can pre-seed boot-critical storage registry keys without /skipstorage.
-  [string]$WindowsDeviceContractPath = "docs/windows-device-contract-virtio-win.json",
+  [string]$WindowsDeviceContractPath = "protocol-vectors/windows-device-contract-virtio-win.json",
 
   [switch]$CleanStage
 )

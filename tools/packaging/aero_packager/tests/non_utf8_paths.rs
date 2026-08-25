@@ -284,7 +284,9 @@ fn packaging_fails_on_non_utf8_spec_path() -> anyhow::Result<()> {
 
     let spec_bytes = fs::read(testdata.join("spec.json"))?;
     let spec_tmp = tempfile::tempdir()?;
-    let invalid_name = OsString::from_vec(vec![b's', b'p', b'e', b'c', 0xFF, b'.', b'j', b's', b'o', b'n']);
+    let invalid_name = OsString::from_vec(vec![
+        b's', b'p', b'e', b'c', 0xFF, b'.', b'j', b's', b'o', b'n',
+    ]);
     let spec_path = spec_tmp.path().join(invalid_name);
     fs::write(&spec_path, spec_bytes)?;
 
@@ -414,6 +416,6 @@ fn device_contract_path() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }

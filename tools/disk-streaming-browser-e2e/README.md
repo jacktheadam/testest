@@ -13,7 +13,7 @@ The Playwright suite spins up **two local HTTP origins** on separate ports:
 1. **App origin** – serves a minimal HTML page with:
    - `Cross-Origin-Opener-Policy: same-origin`
    - `Cross-Origin-Embedder-Policy: require-corp`
-2. **Disk origin** – the real reference `server/disk-gateway` (Rust) started via `cargo run --locked` and configured to serve:
+2. **Disk origin** – the real reference `tools/disk-gateway` (Rust) started via `cargo run --locked` and configured to serve:
    - Public image id `win7` → `GET /disk/win7` (Range-capable)
    - Private image id `secret` for user `alice` → `POST /api/images/secret/lease` + `GET /disk/secret` with `Authorization: Bearer <token>`
 
@@ -29,7 +29,7 @@ npm -w tools/disk-streaming-browser-e2e test
 
 Prerequisites:
 
-- A Rust toolchain (`cargo`) capable of building `server/disk-gateway`.
+- A Rust toolchain (`cargo`) capable of building `tools/disk-gateway`.
 - On minimal Linux environments, Playwright may require extra system packages. If `npm test` fails with
   missing shared libraries, install them via:
   ```bash

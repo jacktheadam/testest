@@ -280,7 +280,8 @@ fn pc_platform_ehci_async_schedule_in_transfer_dmas_and_asserts_intx() {
 
     // Unmask the routed IRQ (and cascade) so we can observe EHCI INTx through the legacy PIC.
     let gsi = pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA);
-    let irq = u8::try_from(gsi).expect("EHCI INTx should route to a PIC IRQ in legacy mode");
+    let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+        .expect("Q35 EHCI GSI should have a compatibility PIC route");
     {
         let mut interrupts = pc.interrupts.borrow_mut();
         interrupts.pic_mut().set_offsets(0x20, 0x28);

@@ -73,6 +73,14 @@ impl LapicInterruptSink for RoutedLapicSink {
             self.lapic.inject_fixed_interrupt(vector);
         }
     }
+
+    fn processor_priority(&self) -> u8 {
+        LapicInterruptSink::processor_priority(self.lapic.as_ref())
+    }
+
+    fn matches_logical_destination(&self, dest: u8) -> bool {
+        LapicInterruptSink::matches_logical_destination(self.lapic.as_ref(), dest)
+    }
 }
 
 #[derive(Clone)]
@@ -384,6 +392,18 @@ impl PlatformInterrupts {
         lapic.mmio_write(0xF0, &svr.to_le_bytes());
     }
 
+    /// Sync guest CR8 (x64 IRQL) into this vCPU's LAPIC TPR before polling.
+    ///
+    /// No-op in legacy PIC mode (no per-CPU TPR). See [`LocalApic::set_tpr_from_cr8`].
+    pub fn sync_cr8_tpr_for_cpu(&self, cpu: usize, cr8: u64) {
+        if self.mode != PlatformInterruptMode::Apic {
+            return;
+        }
+        if let Some(lapic) = self.lapics.get(cpu) {
+            lapic.set_tpr_from_cr8(cr8);
+        }
+    }
+
     /// Like [`InterruptController::get_pending`], but scoped to a specific vCPU.
     pub fn get_pending_for_cpu(&self, cpu: usize) -> Option<u8> {
         match self.mode {
@@ -656,10 +676,20 @@ impl PlatformInterrupts {
     }
 
     pub fn ioapic_mmio_write(&mut self, offset: u64, value: u32) {
-        let mut ioapic = self.ioapic.lock().unwrap();
-        ioapic.mmio_write(offset, 4, u64::from(value));
-        if self.mode != PlatformInterruptMode::Apic {
-            ioapic.clear_remote_irr();
+        let enter_symmetric_io = {
+            let mut ioapic = self.ioapic.lock().unwrap();
+            ioapic.mmio_write(offset, 4, u64::from(value));
+            if self.mode != PlatformInterruptMode::Apic {
+                ioapic.clear_remote_irr();
+            }
+            self.mode != PlatformInterruptMode::Apic && ioapic.has_unmasked_redirection_entry()
+        };
+
+        // Aero does not publish an MP-table IMCRP capability. Intel's no-IMCR transition contract
+        // therefore applies: enabling an IOAPIC redirection entry enters Symmetric I/O Mode
+        // without a ports 22/23 write. Keep the IMCR ports as a compatibility/debugging surface.
+        if enter_symmetric_io {
+            self.set_mode(PlatformInterruptMode::Apic);
         }
     }
 
@@ -893,6 +923,9 @@ impl PlatformInterrupts {
     }
 
     fn legacy_pic_irq_for_gsi(&self, gsi: u32) -> Option<u8> {
+        if let Some(irq) = aero_pci_routing::q35_legacy_pic_irq_for_gsi(gsi) {
+            return Some(irq);
+        }
         if gsi >= 16 {
             return None;
         }
@@ -1173,6 +1206,13 @@ impl IoSnapshot for PlatformInterrupts {
         self.gsi_restore_baseline.resize(num_gsis, false);
         self.gsi_assert_count.resize(num_gsis, 0);
 
+        // Migrate checkpoints captured before the no-IMCR transition was modeled. Windows may
+        // already have enabled IOAPIC routes while the old snapshot still says `LegacyPic`.
+        let restored_symmetric_io = self.ioapic.lock().unwrap().has_unmasked_redirection_entry();
+        if self.mode != PlatformInterruptMode::Apic && restored_symmetric_io {
+            self.set_mode(PlatformInterruptMode::Apic);
+        }
+
         if self.mode == PlatformInterruptMode::Apic {
             // Re-synchronize asserted level-triggered IOAPIC lines into the LAPIC.
             //
@@ -1230,6 +1270,36 @@ mod tests {
         bus.write_u8(IMCR_SELECT_PORT, IMCR_INDEX);
         bus.write_u8(IMCR_DATA_PORT, 0x00);
         assert_eq!(interrupts.borrow().mode(), PlatformInterruptMode::LegacyPic);
+    }
+
+    #[test]
+    fn unmasking_ioapic_route_enters_symmetric_io_mode_without_imcr() {
+        let mut ints = PlatformInterrupts::new();
+        assert_eq!(ints.mode(), PlatformInterruptMode::LegacyPic);
+
+        // Aero's firmware exposes ACPI/MADT but does not advertise an IMCR. Such platforms must
+        // transition as the OS enables IOAPIC redirection; Windows 7 does not write ports 22/23.
+        program_ioapic_entry(&mut ints, 2, 0xD1 | (1 << 11), 1 << 24);
+
+        assert_eq!(ints.mode(), PlatformInterruptMode::Apic);
+        ints.raise_irq(InterruptInput::Gsi(2));
+        assert_eq!(ints.get_pending(), Some(0xD1));
+    }
+
+    #[test]
+    fn restore_migrates_legacy_mode_checkpoint_with_enabled_ioapic_route() {
+        let mut old = PlatformInterrupts::new();
+        program_ioapic_entry(&mut old, 2, 0xD1 | (1 << 11), 1 << 24);
+        // Recreate the inconsistent state written by older Aero builds.
+        old.set_mode(PlatformInterruptMode::LegacyPic);
+        let state = old.save_state();
+
+        let mut restored = PlatformInterrupts::new();
+        restored.load_state(&state).unwrap();
+
+        assert_eq!(restored.mode(), PlatformInterruptMode::Apic);
+        restored.raise_irq(InterruptInput::Gsi(2));
+        assert_eq!(restored.get_pending(), Some(0xD1));
     }
 
     #[test]
@@ -1305,16 +1375,22 @@ mod tests {
     }
 
     #[test]
-    fn switching_to_apic_delivers_asserted_level_lines() {
+    fn unmasking_ioapic_delivers_asserted_level_lines() {
         let mut ints = PlatformInterrupts::new();
 
-        // GSI1 -> vector 0x60, level-triggered, unmasked.
-        program_ioapic_entry(&mut ints, 1, 0x60 | (1 << 15), 0);
+        // Prepare GSI1 as vector 0x60, level-triggered, but keep it masked while the source
+        // asserts. This remains in the firmware-compatible PIC path.
+        let low = 0x60 | (1 << 15);
+        program_ioapic_entry(&mut ints, 1, low | (1 << 16), 0);
 
         ints.raise_irq(InterruptInput::Gsi(1));
         assert_eq!(ints.get_pending(), None);
 
-        ints.set_mode(PlatformInterruptMode::Apic);
+        // Unmasking the route enters Symmetric I/O Mode and must synchronize the already-asserted
+        // level into the LAPIC.
+        ints.ioapic_mmio_write(0x00, 0x12);
+        ints.ioapic_mmio_write(0x10, low);
+        assert_eq!(ints.mode(), PlatformInterruptMode::Apic);
         assert_eq!(ints.get_pending(), Some(0x60));
     }
 

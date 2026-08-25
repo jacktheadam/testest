@@ -945,7 +945,7 @@ struct Resource {
   //
   // Do not confuse this with the numeric value of the user-mode shared `HANDLE` (process-local for
   // real NT handles, and sometimes a token-style value). See:
-  // docs/graphics/win7-shared-surfaces-share-token.md
+  // wiki/areas/graphics.md
   //
   // 0 if the resource is not shareable.
   uint64_t share_token = 0;

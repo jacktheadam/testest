@@ -33,6 +33,7 @@ pub mod mode;
 pub mod msr;
 pub mod paging_bus;
 pub mod segmentation;
+pub mod sha2_constants;
 pub mod sse_state;
 pub mod state;
 pub mod time;

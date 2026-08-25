@@ -27,8 +27,8 @@ fn assert_piix3_ide_pci_intx_is_configured(pc: &mut PcPlatform) {
     let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, pin))
         .expect("router-selected GSI should fit in u8");
     assert_eq!(
-        expected_irq, 11,
-        "topology contract expects IDE INTA# -> GSI11"
+        expected_irq, 21,
+        "topology contract expects IDE INTA# -> GSI21"
     );
 
     // PCI config-space Interrupt Line/Pin should match the router-selected GSI.

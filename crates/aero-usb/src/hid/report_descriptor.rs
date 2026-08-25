@@ -33,7 +33,7 @@ pub struct HidReportInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HidReportItem {
     // Main-item (Input/Output/Feature) flag booleans, aligned with WebHID `HIDReportItem`.
-    // See `docs/webhid-hid-report-descriptor-synthesis.md` for the HID bit mapping.
+    // See the USB and input area page for the HID bit mapping.
     pub is_array: bool,
     pub is_absolute: bool,
     pub is_buffered_bytes: bool,

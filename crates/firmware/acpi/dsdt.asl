@@ -65,39 +65,6 @@ DefinitionBlock ("dsdt.aml", "DSDT", 2, "AERO  ", "AEROACPI", 0x00000001)
 
     Scope (_SB)
     {
-        /*
-         * Motherboard resources device.
-         *
-         * Reserving the fixed-function ACPI PM I/O ports (and reset port), plus
-         * platform-owned legacy I/O ports (IMCR/A20/i8042), prevents OS resource
-         * allocators from treating them as free PCI I/O space.
-         */
-        Device (SYS0)
-        {
-            Name (_HID, EisaId ("PNP0C02"))
-            Name (_UID, Zero)
-            Name (_STA, 0x0F)
-            Name (_CRS, ResourceTemplate ()
-            {
-                // FADT SMI command port used for the ACPI enable handshake.
-                IO (Decode16, 0x00B2, 0x00B2, 0x01, 0x01)
-
-                // ACPI fixed-feature PM blocks.
-                IO (Decode16, 0x0400, 0x0400, 0x01, 0x04) // PM1a_EVT_BLK
-                IO (Decode16, 0x0404, 0x0404, 0x01, 0x02) // PM1a_CNT_BLK
-                IO (Decode16, 0x0408, 0x0408, 0x01, 0x04) // PM_TMR_BLK
-                IO (Decode16, 0x0420, 0x0420, 0x01, 0x08) // GPE0_BLK
- 
-                // Legacy chipset ports used by the platform.
-                IO (Decode16, 0x0022, 0x0022, 0x01, 0x02) // IMCR (0x22..0x23)
-                IO (Decode16, 0x0092, 0x0092, 0x01, 0x01) // A20 gate (0x92)
-                IO (Decode16, 0x0060, 0x0060, 0x01, 0x05) // i8042 (0x60..0x64)
-
-                // Reset port used by the FADT ResetReg.
-                IO (Decode16, 0x0CF9, 0x0CF9, 0x01, 0x01)
-            })
-        }
-
         Device (PWRB)
         {
             Name (_HID, EisaId ("PNP0C0C"))
@@ -154,8 +121,17 @@ DefinitionBlock ("dsdt.aml", "DSDT", 2, "AERO  ", "AEROACPI", 0x00000001)
                     0xF300,             // Length
                     ,, , TypeStatic, DenseTranslation)
 
-                // PCI MMIO window.
+                // Legacy VGA memory aperture.
                 DWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, Cacheable, ReadWrite,
+                    0x00000000,
+                    0x000A0000,
+                    0x000BFFFF,
+                    0x00000000,
+                    0x00020000,
+                    ,, , AddressRangeMemory, TypeStatic)
+
+                // Relocatable PCI MMIO window.
+                DWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, NonCacheable, ReadWrite,
                     0x00000000,         // Granularity
                     0xC0000000,         // Range Minimum
                     0xFEBFFFFF,         // Range Maximum
@@ -170,135 +146,200 @@ DefinitionBlock ("dsdt.aml", "DSDT", 2, "AERO  ", "AEROACPI", 0x00000001)
              * We use conventional PCI INTx swizzling:
              *   PIRQ = (Device + Pin) % 4
              * and map PIRQs to GSIs:
-              *   A → 10, B → 11, C → 12, D → 13
+              *   A → 20, B → 21, C → 22, D → 23
               */
             Name (_PRT, Package (0x7C)
             {
-                Package () { 0x0001FFFF, 0, Zero, 11 },
-                Package () { 0x0001FFFF, 1, Zero, 12 },
-                Package () { 0x0001FFFF, 2, Zero, 13 },
-                Package () { 0x0001FFFF, 3, Zero, 10 },
-                Package () { 0x0002FFFF, 0, Zero, 12 },
-                Package () { 0x0002FFFF, 1, Zero, 13 },
-                Package () { 0x0002FFFF, 2, Zero, 10 },
-                Package () { 0x0002FFFF, 3, Zero, 11 },
-                Package () { 0x0003FFFF, 0, Zero, 13 },
-                Package () { 0x0003FFFF, 1, Zero, 10 },
-                Package () { 0x0003FFFF, 2, Zero, 11 },
-                Package () { 0x0003FFFF, 3, Zero, 12 },
-                Package () { 0x0004FFFF, 0, Zero, 10 },
-                Package () { 0x0004FFFF, 1, Zero, 11 },
-                Package () { 0x0004FFFF, 2, Zero, 12 },
-                Package () { 0x0004FFFF, 3, Zero, 13 },
-                Package () { 0x0005FFFF, 0, Zero, 11 },
-                Package () { 0x0005FFFF, 1, Zero, 12 },
-                Package () { 0x0005FFFF, 2, Zero, 13 },
-                Package () { 0x0005FFFF, 3, Zero, 10 },
-                Package () { 0x0006FFFF, 0, Zero, 12 },
-                Package () { 0x0006FFFF, 1, Zero, 13 },
-                Package () { 0x0006FFFF, 2, Zero, 10 },
-                Package () { 0x0006FFFF, 3, Zero, 11 },
-                Package () { 0x0007FFFF, 0, Zero, 13 },
-                Package () { 0x0007FFFF, 1, Zero, 10 },
-                Package () { 0x0007FFFF, 2, Zero, 11 },
-                Package () { 0x0007FFFF, 3, Zero, 12 },
-                Package () { 0x0008FFFF, 0, Zero, 10 },
-                Package () { 0x0008FFFF, 1, Zero, 11 },
-                Package () { 0x0008FFFF, 2, Zero, 12 },
-                Package () { 0x0008FFFF, 3, Zero, 13 },
-                Package () { 0x0009FFFF, 0, Zero, 11 },
-                Package () { 0x0009FFFF, 1, Zero, 12 },
-                Package () { 0x0009FFFF, 2, Zero, 13 },
-                Package () { 0x0009FFFF, 3, Zero, 10 },
-                Package () { 0x000AFFFF, 0, Zero, 12 },
-                Package () { 0x000AFFFF, 1, Zero, 13 },
-                Package () { 0x000AFFFF, 2, Zero, 10 },
-                Package () { 0x000AFFFF, 3, Zero, 11 },
-                Package () { 0x000BFFFF, 0, Zero, 13 },
-                Package () { 0x000BFFFF, 1, Zero, 10 },
-                Package () { 0x000BFFFF, 2, Zero, 11 },
-                Package () { 0x000BFFFF, 3, Zero, 12 },
-                Package () { 0x000CFFFF, 0, Zero, 10 },
-                Package () { 0x000CFFFF, 1, Zero, 11 },
-                Package () { 0x000CFFFF, 2, Zero, 12 },
-                Package () { 0x000CFFFF, 3, Zero, 13 },
-                Package () { 0x000DFFFF, 0, Zero, 11 },
-                Package () { 0x000DFFFF, 1, Zero, 12 },
-                Package () { 0x000DFFFF, 2, Zero, 13 },
-                Package () { 0x000DFFFF, 3, Zero, 10 },
-                Package () { 0x000EFFFF, 0, Zero, 12 },
-                Package () { 0x000EFFFF, 1, Zero, 13 },
-                Package () { 0x000EFFFF, 2, Zero, 10 },
-                Package () { 0x000EFFFF, 3, Zero, 11 },
-                Package () { 0x000FFFFF, 0, Zero, 13 },
-                Package () { 0x000FFFFF, 1, Zero, 10 },
-                Package () { 0x000FFFFF, 2, Zero, 11 },
-                Package () { 0x000FFFFF, 3, Zero, 12 },
-                Package () { 0x0010FFFF, 0, Zero, 10 },
-                Package () { 0x0010FFFF, 1, Zero, 11 },
-                Package () { 0x0010FFFF, 2, Zero, 12 },
-                Package () { 0x0010FFFF, 3, Zero, 13 },
-                Package () { 0x0011FFFF, 0, Zero, 11 },
-                Package () { 0x0011FFFF, 1, Zero, 12 },
-                Package () { 0x0011FFFF, 2, Zero, 13 },
-                Package () { 0x0011FFFF, 3, Zero, 10 },
-                Package () { 0x0012FFFF, 0, Zero, 12 },
-                Package () { 0x0012FFFF, 1, Zero, 13 },
-                Package () { 0x0012FFFF, 2, Zero, 10 },
-                Package () { 0x0012FFFF, 3, Zero, 11 },
-                Package () { 0x0013FFFF, 0, Zero, 13 },
-                Package () { 0x0013FFFF, 1, Zero, 10 },
-                Package () { 0x0013FFFF, 2, Zero, 11 },
-                Package () { 0x0013FFFF, 3, Zero, 12 },
-                Package () { 0x0014FFFF, 0, Zero, 10 },
-                Package () { 0x0014FFFF, 1, Zero, 11 },
-                Package () { 0x0014FFFF, 2, Zero, 12 },
-                Package () { 0x0014FFFF, 3, Zero, 13 },
-                Package () { 0x0015FFFF, 0, Zero, 11 },
-                Package () { 0x0015FFFF, 1, Zero, 12 },
-                Package () { 0x0015FFFF, 2, Zero, 13 },
-                Package () { 0x0015FFFF, 3, Zero, 10 },
-                Package () { 0x0016FFFF, 0, Zero, 12 },
-                Package () { 0x0016FFFF, 1, Zero, 13 },
-                Package () { 0x0016FFFF, 2, Zero, 10 },
-                Package () { 0x0016FFFF, 3, Zero, 11 },
-                Package () { 0x0017FFFF, 0, Zero, 13 },
-                Package () { 0x0017FFFF, 1, Zero, 10 },
-                Package () { 0x0017FFFF, 2, Zero, 11 },
-                Package () { 0x0017FFFF, 3, Zero, 12 },
-                Package () { 0x0018FFFF, 0, Zero, 10 },
-                Package () { 0x0018FFFF, 1, Zero, 11 },
-                Package () { 0x0018FFFF, 2, Zero, 12 },
-                Package () { 0x0018FFFF, 3, Zero, 13 },
-                Package () { 0x0019FFFF, 0, Zero, 11 },
-                Package () { 0x0019FFFF, 1, Zero, 12 },
-                Package () { 0x0019FFFF, 2, Zero, 13 },
-                Package () { 0x0019FFFF, 3, Zero, 10 },
-                Package () { 0x001AFFFF, 0, Zero, 12 },
-                Package () { 0x001AFFFF, 1, Zero, 13 },
-                Package () { 0x001AFFFF, 2, Zero, 10 },
-                Package () { 0x001AFFFF, 3, Zero, 11 },
-                Package () { 0x001BFFFF, 0, Zero, 13 },
-                Package () { 0x001BFFFF, 1, Zero, 10 },
-                Package () { 0x001BFFFF, 2, Zero, 11 },
-                Package () { 0x001BFFFF, 3, Zero, 12 },
-                Package () { 0x001CFFFF, 0, Zero, 10 },
-                Package () { 0x001CFFFF, 1, Zero, 11 },
-                Package () { 0x001CFFFF, 2, Zero, 12 },
-                Package () { 0x001CFFFF, 3, Zero, 13 },
-                Package () { 0x001DFFFF, 0, Zero, 11 },
-                Package () { 0x001DFFFF, 1, Zero, 12 },
-                Package () { 0x001DFFFF, 2, Zero, 13 },
-                Package () { 0x001DFFFF, 3, Zero, 10 },
-                Package () { 0x001EFFFF, 0, Zero, 12 },
-                Package () { 0x001EFFFF, 1, Zero, 13 },
-                Package () { 0x001EFFFF, 2, Zero, 10 },
-                Package () { 0x001EFFFF, 3, Zero, 11 },
-                 Package () { 0x001FFFFF, 0, Zero, 13 },
-                 Package () { 0x001FFFFF, 1, Zero, 10 },
-                 Package () { 0x001FFFFF, 2, Zero, 11 },
-                 Package () { 0x001FFFFF, 3, Zero, 12 },
+                Package () { 0x0001FFFF, 0, Zero, 21 },
+                Package () { 0x0001FFFF, 1, Zero, 22 },
+                Package () { 0x0001FFFF, 2, Zero, 23 },
+                Package () { 0x0001FFFF, 3, Zero, 20 },
+                Package () { 0x0002FFFF, 0, Zero, 22 },
+                Package () { 0x0002FFFF, 1, Zero, 23 },
+                Package () { 0x0002FFFF, 2, Zero, 20 },
+                Package () { 0x0002FFFF, 3, Zero, 21 },
+                Package () { 0x0003FFFF, 0, Zero, 23 },
+                Package () { 0x0003FFFF, 1, Zero, 20 },
+                Package () { 0x0003FFFF, 2, Zero, 21 },
+                Package () { 0x0003FFFF, 3, Zero, 22 },
+                Package () { 0x0004FFFF, 0, Zero, 20 },
+                Package () { 0x0004FFFF, 1, Zero, 21 },
+                Package () { 0x0004FFFF, 2, Zero, 22 },
+                Package () { 0x0004FFFF, 3, Zero, 23 },
+                Package () { 0x0005FFFF, 0, Zero, 21 },
+                Package () { 0x0005FFFF, 1, Zero, 22 },
+                Package () { 0x0005FFFF, 2, Zero, 23 },
+                Package () { 0x0005FFFF, 3, Zero, 20 },
+                Package () { 0x0006FFFF, 0, Zero, 22 },
+                Package () { 0x0006FFFF, 1, Zero, 23 },
+                Package () { 0x0006FFFF, 2, Zero, 20 },
+                Package () { 0x0006FFFF, 3, Zero, 21 },
+                Package () { 0x0007FFFF, 0, Zero, 23 },
+                Package () { 0x0007FFFF, 1, Zero, 20 },
+                Package () { 0x0007FFFF, 2, Zero, 21 },
+                Package () { 0x0007FFFF, 3, Zero, 22 },
+                Package () { 0x0008FFFF, 0, Zero, 20 },
+                Package () { 0x0008FFFF, 1, Zero, 21 },
+                Package () { 0x0008FFFF, 2, Zero, 22 },
+                Package () { 0x0008FFFF, 3, Zero, 23 },
+                Package () { 0x0009FFFF, 0, Zero, 21 },
+                Package () { 0x0009FFFF, 1, Zero, 22 },
+                Package () { 0x0009FFFF, 2, Zero, 23 },
+                Package () { 0x0009FFFF, 3, Zero, 20 },
+                Package () { 0x000AFFFF, 0, Zero, 22 },
+                Package () { 0x000AFFFF, 1, Zero, 23 },
+                Package () { 0x000AFFFF, 2, Zero, 20 },
+                Package () { 0x000AFFFF, 3, Zero, 21 },
+                Package () { 0x000BFFFF, 0, Zero, 23 },
+                Package () { 0x000BFFFF, 1, Zero, 20 },
+                Package () { 0x000BFFFF, 2, Zero, 21 },
+                Package () { 0x000BFFFF, 3, Zero, 22 },
+                Package () { 0x000CFFFF, 0, Zero, 20 },
+                Package () { 0x000CFFFF, 1, Zero, 21 },
+                Package () { 0x000CFFFF, 2, Zero, 22 },
+                Package () { 0x000CFFFF, 3, Zero, 23 },
+                Package () { 0x000DFFFF, 0, Zero, 21 },
+                Package () { 0x000DFFFF, 1, Zero, 22 },
+                Package () { 0x000DFFFF, 2, Zero, 23 },
+                Package () { 0x000DFFFF, 3, Zero, 20 },
+                Package () { 0x000EFFFF, 0, Zero, 22 },
+                Package () { 0x000EFFFF, 1, Zero, 23 },
+                Package () { 0x000EFFFF, 2, Zero, 20 },
+                Package () { 0x000EFFFF, 3, Zero, 21 },
+                Package () { 0x000FFFFF, 0, Zero, 23 },
+                Package () { 0x000FFFFF, 1, Zero, 20 },
+                Package () { 0x000FFFFF, 2, Zero, 21 },
+                Package () { 0x000FFFFF, 3, Zero, 22 },
+                Package () { 0x0010FFFF, 0, Zero, 20 },
+                Package () { 0x0010FFFF, 1, Zero, 21 },
+                Package () { 0x0010FFFF, 2, Zero, 22 },
+                Package () { 0x0010FFFF, 3, Zero, 23 },
+                Package () { 0x0011FFFF, 0, Zero, 21 },
+                Package () { 0x0011FFFF, 1, Zero, 22 },
+                Package () { 0x0011FFFF, 2, Zero, 23 },
+                Package () { 0x0011FFFF, 3, Zero, 20 },
+                Package () { 0x0012FFFF, 0, Zero, 22 },
+                Package () { 0x0012FFFF, 1, Zero, 23 },
+                Package () { 0x0012FFFF, 2, Zero, 20 },
+                Package () { 0x0012FFFF, 3, Zero, 21 },
+                Package () { 0x0013FFFF, 0, Zero, 23 },
+                Package () { 0x0013FFFF, 1, Zero, 20 },
+                Package () { 0x0013FFFF, 2, Zero, 21 },
+                Package () { 0x0013FFFF, 3, Zero, 22 },
+                Package () { 0x0014FFFF, 0, Zero, 20 },
+                Package () { 0x0014FFFF, 1, Zero, 21 },
+                Package () { 0x0014FFFF, 2, Zero, 22 },
+                Package () { 0x0014FFFF, 3, Zero, 23 },
+                Package () { 0x0015FFFF, 0, Zero, 21 },
+                Package () { 0x0015FFFF, 1, Zero, 22 },
+                Package () { 0x0015FFFF, 2, Zero, 23 },
+                Package () { 0x0015FFFF, 3, Zero, 20 },
+                Package () { 0x0016FFFF, 0, Zero, 22 },
+                Package () { 0x0016FFFF, 1, Zero, 23 },
+                Package () { 0x0016FFFF, 2, Zero, 20 },
+                Package () { 0x0016FFFF, 3, Zero, 21 },
+                Package () { 0x0017FFFF, 0, Zero, 23 },
+                Package () { 0x0017FFFF, 1, Zero, 20 },
+                Package () { 0x0017FFFF, 2, Zero, 21 },
+                Package () { 0x0017FFFF, 3, Zero, 22 },
+                Package () { 0x0018FFFF, 0, Zero, 20 },
+                Package () { 0x0018FFFF, 1, Zero, 21 },
+                Package () { 0x0018FFFF, 2, Zero, 22 },
+                Package () { 0x0018FFFF, 3, Zero, 23 },
+                Package () { 0x0019FFFF, 0, Zero, 21 },
+                Package () { 0x0019FFFF, 1, Zero, 22 },
+                Package () { 0x0019FFFF, 2, Zero, 23 },
+                Package () { 0x0019FFFF, 3, Zero, 20 },
+                Package () { 0x001AFFFF, 0, Zero, 22 },
+                Package () { 0x001AFFFF, 1, Zero, 23 },
+                Package () { 0x001AFFFF, 2, Zero, 20 },
+                Package () { 0x001AFFFF, 3, Zero, 21 },
+                Package () { 0x001BFFFF, 0, Zero, 23 },
+                Package () { 0x001BFFFF, 1, Zero, 20 },
+                Package () { 0x001BFFFF, 2, Zero, 21 },
+                Package () { 0x001BFFFF, 3, Zero, 22 },
+                Package () { 0x001CFFFF, 0, Zero, 20 },
+                Package () { 0x001CFFFF, 1, Zero, 21 },
+                Package () { 0x001CFFFF, 2, Zero, 22 },
+                Package () { 0x001CFFFF, 3, Zero, 23 },
+                Package () { 0x001DFFFF, 0, Zero, 21 },
+                Package () { 0x001DFFFF, 1, Zero, 22 },
+                Package () { 0x001DFFFF, 2, Zero, 23 },
+                Package () { 0x001DFFFF, 3, Zero, 20 },
+                Package () { 0x001EFFFF, 0, Zero, 22 },
+                Package () { 0x001EFFFF, 1, Zero, 23 },
+                Package () { 0x001EFFFF, 2, Zero, 20 },
+                Package () { 0x001EFFFF, 3, Zero, 21 },
+                 Package () { 0x001FFFFF, 0, Zero, 23 },
+                 Package () { 0x001FFFFF, 1, Zero, 20 },
+                 Package () { 0x001FFFFF, 2, Zero, 21 },
+                 Package () { 0x001FFFFF, 3, Zero, 22 },
             })
+
+            Device (ISA)
+            {
+                Name (_ADR, 0x001F0000)
+
+                Device (SYS0)
+                {
+                    Name (_HID, EisaId ("PNP0C02"))
+                    Name (_STA, 0x0F)
+                    Name (_CRS, ResourceTemplate ()
+                    {
+                        IO (Decode16, 0x00B2, 0x00B2, 0x01, 0x01)
+                        IO (Decode16, 0x0400, 0x0400, 0x01, 0x04)
+                        IO (Decode16, 0x0404, 0x0404, 0x01, 0x02)
+                        IO (Decode16, 0x0408, 0x0408, 0x01, 0x04)
+                        IO (Decode16, 0x0420, 0x0420, 0x01, 0x08)
+                        IO (Decode16, 0x0022, 0x0022, 0x01, 0x02)
+                        IO (Decode16, 0x0092, 0x0092, 0x01, 0x01)
+                    })
+                }
+
+                Device (RTC)
+                {
+                    Name (_HID, EisaId ("PNP0B00"))
+                    Name (_STA, 0x0F)
+                    Name (_CRS, ResourceTemplate ()
+                    {
+                        IO (Decode16, 0x0070, 0x0070, 0x01, 0x02)
+                        IRQNoFlags () { 8 }
+                    })
+                }
+
+                Device (TIMR)
+                {
+                    Name (_HID, EisaId ("PNP0100"))
+                    Name (_STA, 0x0F)
+                    Name (_CRS, ResourceTemplate ()
+                    {
+                        IO (Decode16, 0x0040, 0x0040, 0x01, 0x04)
+                        IRQNoFlags () { 0 }
+                    })
+                }
+
+                Device (KBD)
+                {
+                    Name (_HID, EisaId ("PNP0303"))
+                    Name (_STA, 0x0F)
+                    Name (_CRS, ResourceTemplate ()
+                    {
+                        IO (Decode16, 0x0060, 0x0060, 0x01, 0x01)
+                        IO (Decode16, 0x0064, 0x0064, 0x01, 0x01)
+                        IRQNoFlags () { 1 }
+                    })
+                }
+
+                Device (MOU)
+                {
+                    Name (_HID, EisaId ("PNP0F13"))
+                    Name (_STA, 0x0F)
+                    Name (_CRS, ResourceTemplate ()
+                    {
+                        IRQNoFlags () { 12 }
+                    })
+                }
+            }
         }
 
         Device (HPET)
@@ -312,29 +353,6 @@ DefinitionBlock ("dsdt.aml", "DSDT", 2, "AERO  ", "AEROACPI", 0x00000001)
             })
         }
 
-        Device (RTC)
-        {
-            Name (_HID, EisaId ("PNP0B00"))
-            Name (_UID, Zero)
-            Name (_STA, 0x0F)
-            Name (_CRS, ResourceTemplate ()
-            {
-                IO (Decode16, 0x0070, 0x0070, 0x01, 0x02)
-                IRQNoFlags () { 8 }
-            })
-        }
-
-        Device (TIMR)
-        {
-            Name (_HID, EisaId ("PNP0100"))
-            Name (_UID, Zero)
-            Name (_STA, 0x0F)
-            Name (_CRS, ResourceTemplate ()
-            {
-                IO (Decode16, 0x0040, 0x0040, 0x01, 0x04)
-                IRQNoFlags () { 0 }
-            })
-        }
     }
 
     // CPU objects (default generator config emits CPU0 only).

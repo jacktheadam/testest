@@ -47,7 +47,7 @@ Contract v1 is **virtio-pci modern only** (PCI vendor-specific capabilities + MM
 Windows tooling (Guest Tools manifests, CI tooling, etc.) must remain consistent with that contract:
 
 - [`docs/windows-device-contract.md`](../../../../docs/windows-device-contract.md)
-- [`docs/windows-device-contract.json`](../../../../docs/windows-device-contract.json)
+- [`protocol-vectors/windows-device-contract.json`](../../../../protocol-vectors/windows-device-contract.json)
 
 ### INF hardware IDs (what Windows 7 will bind to)
 

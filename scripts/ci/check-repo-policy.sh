@@ -79,6 +79,14 @@ FORBIDDEN_PATH_GLOBS=(
 # cannot silently drift into proprietary binaries. If you intentionally update a
 # pinned fixture, update the expected blob hash here (and explain why).
 declare -A ALLOWLIST_FORBIDDEN_BLOB_OIDS=(
+  # Two single compiled functions (SHA-256 / SHA-512 compression rounds) lifted
+  # from Windows DLLs, used as differential-test input so the interpreter and the
+  # compiled tier can be checked against real guest code rather than a hand-written
+  # approximation of it. Not ours; pinned by hash so they cannot drift, and kept
+  # small deliberately — the full mapped DLL image is gitignored, not committed.
+  # Provenance and rationale: crates/aero-cpu-core/tests/data/README.md
+  [crates/aero-cpu-core/tests/data/bcryptprimitives_sha512_compress.bin]=a3bf43579db7ec6ab5352db3447338c78a3f1ac5
+  [crates/aero-cpu-core/tests/data/cryptsp_sha256_compress.bin]=8ad1151cb0a3ae0fad229582dd70696d1b0840f4
   # Synthetic, deterministic pattern images used for disk streaming E2E tests.
   [tools/disk-streaming-browser-e2e/fixtures/secret.img]=ebae3de9a572e69924863ebc50a4baaf8b3c14ac
   [tools/disk-streaming-browser-e2e/fixtures/win7.img]=ea8e482b990b87c0f69d29fd1dd6a41d0f1a514b
@@ -372,8 +380,8 @@ Remediation guidance:
       cargo xtask bios-rom
     (or: cargo xtask fixtures)
 
-See also: docs/13-legal-considerations.md
-See also: docs/FIXTURES.md
+See also: wiki/areas/testing.md ("Fixtures & Test Assets Policy"), and
+         crates/aero-cpu-core/tests/data/README.md for the guest-code fixtures.
 EOF
 
 exit 1

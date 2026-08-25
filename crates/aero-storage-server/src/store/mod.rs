@@ -68,7 +68,7 @@ pub enum StoreError {
 /// abstraction for the emulator/device stack. For in-process synchronous disk image formats and
 /// controller/device integration, prefer `aero_storage::{StorageBackend, VirtualDisk}`.
 ///
-/// See `docs/20-storage-trait-consolidation.md`.
+/// See `wiki/areas/storage.md`.
 pub trait ImageStore: Send + Sync {
     /// List available images (control-plane catalog).
     async fn list_images(&self) -> Result<Vec<ImageCatalogEntry>, StoreError>;

@@ -4,13 +4,13 @@ import { fileURLToPath } from "node:url";
 const threadedWasmBundleCache = new Map<string, Promise<boolean>>();
 
 const THREADED_WASM_BINARY_RELEASE = fileURLToPath(
-  new URL("../../../web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../../apps/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
 );
-const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../../web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
+const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../../apps/web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
 const THREADED_WASM_BINARY_DEV = fileURLToPath(
-  new URL("../../../web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
 );
-const THREADED_WASM_JS_DEV = fileURLToPath(new URL("../../../web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url));
+const THREADED_WASM_JS_DEV = fileURLToPath(new URL("../../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url));
 
 function threadedWasmMissingMessage(): string {
   return [
@@ -59,10 +59,10 @@ export async function hasThreadedWasmBundle(page: Page): Promise<boolean> {
       }
     };
 
-    if (await check("/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", "/web/src/wasm/pkg-threaded/aero_wasm.js")) {
+    if (await check("/apps/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", "/apps/web/src/wasm/pkg-threaded/aero_wasm.js")) {
       return true;
     }
-    return await check("/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", "/web/src/wasm/pkg-threaded-dev/aero_wasm.js");
+    return await check("/apps/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", "/apps/web/src/wasm/pkg-threaded-dev/aero_wasm.js");
   })();
 
   // Cache success. If the bundle is missing (or the dev server isn't ready), allow later tests to retry.

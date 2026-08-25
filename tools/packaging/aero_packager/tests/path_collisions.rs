@@ -61,7 +61,6 @@ fn device_contract_path() -> std::path::PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }
-

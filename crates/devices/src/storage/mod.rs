@@ -26,7 +26,7 @@ pub use aero_storage_adapters::AeroVirtualDiskAsDeviceBackend as AeroStorageDisk
 /// [`aero_storage::VirtualDisk`] so you can layer disk wrappers on top), use
 /// [`DeviceBackendAsAeroVirtualDisk`].
 ///
-/// See `docs/20-storage-trait-consolidation.md`.
+/// See `wiki/areas/storage.md`.
 #[cfg(not(target_arch = "wasm32"))]
 pub trait DiskBackend: Send {
     /// Total disk size in bytes.

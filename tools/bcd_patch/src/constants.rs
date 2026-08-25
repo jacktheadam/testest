@@ -69,3 +69,33 @@ pub const ELEM_BOOTMGR_DEFAULT_OBJECT: u32 = 0x2300_0003;
 
 /// `{bootmgr} displayorder` – Display order list of boot entries (bootmgr object list element).
 pub const ELEM_BOOTMGR_DISPLAY_ORDER: u32 = 0x2400_0001;
+
+// --- Kernel debugging ---
+//
+// `bcdedit /debug on` and `bcdedit /bootdebug on` both set
+// `BcdLibraryBoolean_DebuggerEnabled`; the transport is described by the three
+// integer elements below. They normally live on `{dbgsettings}` and are
+// inherited, but they are ordinary library elements and may be written directly
+// onto each loader object, which is what offline patching does — it avoids
+// having to synthesise a well-formed new object in the hive.
+
+/// `debug` / `bootdebug` – enable the kernel debugger (library boolean).
+pub const ELEM_DEBUGGER_ENABLED: u32 = 0x1600_0010;
+
+/// `debugtype` – debugger transport (library integer). 0 = serial.
+pub const ELEM_DEBUGGER_TYPE: u32 = 0x2500_0011;
+
+/// `debugport` – serial port number (library integer). 1 = COM1.
+pub const ELEM_DEBUGGER_SERIAL_PORT: u32 = 0x2500_0013;
+
+/// `baudrate` – serial debugger baud rate (library integer).
+pub const ELEM_DEBUGGER_SERIAL_BAUDRATE: u32 = 0x2500_0014;
+
+/// Debugger transport: serial.
+pub const DEBUGGER_TYPE_SERIAL: u64 = 0;
+
+/// Aero exposes COM1 and the runner captures it with `--serial-out`.
+pub const DEBUGGER_DEFAULT_PORT: u64 = 1;
+
+/// Baud is not physically meaningful to an emulated 16550, but Windows validates it.
+pub const DEBUGGER_DEFAULT_BAUDRATE: u64 = 115_200;

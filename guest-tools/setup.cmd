@@ -1046,7 +1046,7 @@ call :log "Checking for Windows 7 signing prerequisites (KB3033929/KB4474419/KB4
 
 if not exist "%SYS32%\wmic.exe" (
   call :log "WARNING: wmic.exe not found; cannot detect installed hotfixes (KB3033929/KB4474419/KB4490628)."
-  call :log "         See: docs/windows7-driver-troubleshooting.md#issue-missing-kb3033929-sha-256-signature-support"
+  call :log "         See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
   exit /b 0
 )
 
@@ -1101,7 +1101,7 @@ if errorlevel 1 (
 )
 
 if "%KB_MISSING%"=="1" (
-  call :log "         Guidance: docs/windows7-driver-troubleshooting.md#issue-missing-kb3033929-sha-256-signature-support"
+  call :log "         Guidance: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
 )
 
 exit /b 0

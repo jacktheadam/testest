@@ -5,6 +5,7 @@ use aero_platform::interrupts::{InterruptController, PlatformInterrupts};
 
 const REG_GENERAL_CONFIG: u64 = 0x010;
 const REG_GENERAL_INT_STATUS: u64 = 0x020;
+const REG_MAIN_COUNTER: u64 = 0x0F0;
 
 const REG_TIMER0_BASE: u64 = 0x100;
 const TIMER_STRIDE: u64 = 0x20;
@@ -17,6 +18,7 @@ const GEN_CONF_LEGACY_ROUTE: u64 = 1 << 1;
 const TIMER_CFG_INT_LEVEL: u64 = 1 << 1;
 const TIMER_CFG_INT_ENABLE: u64 = 1 << 2;
 const TIMER_CFG_PERIODIC: u64 = 1 << 3;
+const TIMER_CFG_32MODE: u64 = 1 << 8;
 const TIMER_CFG_INT_ROUTE_SHIFT: u64 = 9;
 const TIMER_CFG_INT_ROUTE_MASK: u64 = 0x1F << TIMER_CFG_INT_ROUTE_SHIFT;
 
@@ -135,6 +137,57 @@ fn level_triggered_timer_does_not_storm_without_clear() {
     clock.advance_ns(100);
     hpet.poll(&mut ioapic);
     assert_eq!(ioapic.take_events(), vec![GsiEvent::Raise(5)]);
+}
+
+#[test]
+fn one_shot_32bit_zero_comparator_waits_for_next_counter_wrap() {
+    let clock = ManualClock::new();
+    let mut ioapic = IoApic::default();
+    let mut hpet = Hpet::new_default(clock.clone());
+
+    // Match the Windows 7 HAL rollover-timer setup: timer1 is a 32-bit, edge-triggered
+    // one-shot routed through HPET legacy replacement to GSI8. A comparator value below
+    // the current low 32 bits names the matching value in the *next* counter epoch; it is
+    // not an already-expired absolute deadline.
+    hpet.mmio_write(REG_MAIN_COUNTER, 8, 0x8000_0000, &mut ioapic);
+    hpet.mmio_write(
+        REG_GENERAL_CONFIG,
+        8,
+        GEN_CONF_ENABLE | GEN_CONF_LEGACY_ROUTE,
+        &mut ioapic,
+    );
+
+    let timer1_base = REG_TIMER0_BASE + TIMER_STRIDE;
+    let mut timer1_cfg = hpet.mmio_read(timer1_base + REG_TIMER_CONFIG, 8, &mut ioapic);
+    timer1_cfg |= TIMER_CFG_INT_ENABLE | TIMER_CFG_32MODE;
+    timer1_cfg &= !(TIMER_CFG_INT_LEVEL | TIMER_CFG_PERIODIC);
+    hpet.mmio_write(timer1_base + REG_TIMER_CONFIG, 8, timer1_cfg, &mut ioapic);
+    ioapic.take_events();
+
+    hpet.mmio_write(timer1_base + REG_TIMER_COMPARATOR, 8, 0, &mut ioapic);
+    assert!(
+        ioapic.take_events().is_empty(),
+        "programming comparator 0 at counter 0x80000000 must not fire immediately"
+    );
+    assert_eq!(
+        hpet.mmio_read(REG_GENERAL_INT_STATUS, 8, &mut ioapic) & (1 << 1),
+        0
+    );
+
+    clock.advance_ns(0x7fff_ffff * 100);
+    hpet.poll(&mut ioapic);
+    assert!(
+        ioapic.take_events().is_empty(),
+        "timer1 must remain quiet through counter 0xffffffff"
+    );
+
+    clock.advance_ns(100);
+    hpet.poll(&mut ioapic);
+    assert_eq!(
+        ioapic.take_events(),
+        vec![GsiEvent::Raise(8), GsiEvent::Lower(8)],
+        "timer1 should pulse exactly when the low 32-bit main counter wraps to zero"
+    );
 }
 
 #[test]

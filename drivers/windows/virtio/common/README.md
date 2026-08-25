@@ -4,8 +4,7 @@ This directory contains a small, reusable **Virtio 1.0 split virtqueue** impleme
 
 See also:
 
-- [`docs/virtio/virtqueue-split-ring-win7.md`](../../../../docs/virtio/virtqueue-split-ring-win7.md) — split-ring virtqueue implementation guide (algorithms, ordering/barriers, EVENT_IDX, indirect).
-- [`docs/windows7-virtio-driver-contract.md`](../../../../docs/windows7-virtio-driver-contract.md) — Aero’s definitive virtio device/feature/transport contract.
+- [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md) — Aero’s definitive virtio device/feature/transport contract, including split-ring virtqueue implementation guidance (algorithms, ordering/barriers, EVENT_IDX, indirect).
 
 Highlights:
 

@@ -25,7 +25,7 @@ The controller is intentionally implemented against two small traits:
 
 See:
 
-- [`docs/20-storage-trait-consolidation.md`](../../docs/20-storage-trait-consolidation.md)
+- [`wiki/areas/storage.md`](wiki/areas/storage.md)
 
 ## Disk backend requirements
 
@@ -75,7 +75,7 @@ the platform does not attach an `MsiTrigger` sink), interrupts will not be deliv
 
 MSI-X table/PBA programming state is preserved across snapshot/restore.
 
-See also: [`docs/05-storage-subsystem.md`](../../docs/05-storage-subsystem.md) (NVMe section) for the
+See also: [`wiki/areas/storage.md`](wiki/areas/storage.md) (NVMe section) for the
 platform-level storage topology context.
 
 ## Best-effort semantics

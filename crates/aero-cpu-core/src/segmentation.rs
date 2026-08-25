@@ -295,7 +295,24 @@ impl CpuState {
         // Null selector handling (index==0).
         if selector_index(selector) == 0 {
             match seg {
-                Seg::CS | Seg::SS => return Err(Exception::gp(selector)),
+                Seg::CS => return Err(Exception::gp(selector)),
+                // In 64-bit long mode, loading SS with a null selector is architecturally
+                // allowed (SS base/limit are ignored in 64-bit operation), so real hardware
+                // does not fault — observed directly under QEMU/KVM at the Win7 kernel's
+                // long-mode entry (`mov ss,ax` with AX=0). In legacy protected mode it is
+                // #GP. `seg_base_reg` already forces SS base to 0 in long mode, and stack
+                // operations do not consult SS usability, so marking it unusable is correct.
+                Seg::SS => {
+                    if self.mode == CpuMode::Long {
+                        let reg = self.seg_reg_mut(seg);
+                        reg.selector = selector;
+                        reg.base = 0;
+                        reg.limit = 0;
+                        reg.access = SEG_ACCESS_UNUSABLE;
+                        return Ok(());
+                    }
+                    return Err(Exception::gp(selector));
+                }
                 Seg::DS | Seg::ES | Seg::FS | Seg::GS => {
                     let reg = self.seg_reg_mut(seg);
                     reg.selector = selector;
@@ -325,13 +342,34 @@ impl CpuState {
         }
 
         // Type + privilege checks depend on which segment register is being loaded.
-        match seg {
-            Seg::CS => self.validate_load_cs(selector, seg_desc, reason)?,
-            Seg::SS => self.validate_load_ss(selector, seg_desc, reason)?,
+        let check_result: Result<(), Exception> = match seg {
+            Seg::CS => self.validate_load_cs(selector, seg_desc, reason),
+            Seg::SS => self.validate_load_ss(selector, seg_desc, reason),
             Seg::DS | Seg::ES | Seg::FS | Seg::GS => {
-                self.validate_load_data_seg(selector, seg_desc, reason)?
+                self.validate_load_data_seg(selector, seg_desc, reason)
+            }
+        };
+        if std::env::var_os("AERO_SEG_DEBUG").is_some() {
+            match &check_result {
+                Ok(()) => eprintln!(
+                    "[seg] load {seg:?} sel={selector:#06x} ok (cpl={} base={:#x} limit={:#x} access={:#x})",
+                    self.cpl(),
+                    seg_desc.base,
+                    seg_desc.limit,
+                    seg_desc.attrs.encode_access_rights()
+                ),
+                Err(e) => eprintln!(
+                    "[seg] load {seg:?} sel={selector:#06x} FAIL {e:?} (cpl={} rpl={} dpl={} type={} reason={reason:?} gdtr_base={:#x} gdtr_limit={:#x})",
+                    self.cpl(),
+                    selector & 3,
+                    seg_desc.attrs.dpl,
+                    seg_desc.attrs.typ,
+                    self.tables.gdtr.base,
+                    self.tables.gdtr.limit,
+                ),
             }
         }
+        check_result?;
 
         // Commit: visible selector + hidden cache.
         let reg = self.seg_reg_mut(seg);
@@ -422,14 +460,16 @@ impl CpuState {
         }
 
         // Long-mode entry requires a 64-bit code segment to be loaded via far transfer.
-        if desc.attrs.long {
-            if self.cpu_mode() != CpuMode::Long && !self.long_mode_conditions_met() {
-                return Err(Exception::gp(selector));
-            }
-        } else if self.cpu_mode() == CpuMode::Long {
-            // Simplified model: once in long mode, don't allow returning to legacy CS.
+        if desc.attrs.long && self.cpu_mode() != CpuMode::Long && !self.long_mode_conditions_met() {
             return Err(Exception::gp(selector));
         }
+        // A far transfer to a *legacy* (L=0) code segment while in long mode is architecturally
+        // legal: it transitions the CPU to compatibility mode (IA-32e with CS.L=0). Real hardware
+        // and QEMU allow it — the Win7 boot path does a far return to a 32-bit code segment here
+        // (previously rejected by a "simplified model" shortcut that caused `GP(sel)` at 1.4B
+        // inst). `after_cs_load`→`update_mode` then models the state as Protected CPU semantics
+        // with EFER.LME still set, and the MMU keeps 4-level long-mode paging, which is exactly
+        // compatibility mode.
 
         Ok(())
     }

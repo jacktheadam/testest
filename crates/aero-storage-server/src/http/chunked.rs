@@ -20,7 +20,7 @@ use crate::{
 
 use super::images::ImagesState;
 
-// Keep defaults aligned with `docs/18-chunked-disk-image-format.md`.
+// Keep defaults aligned with `wiki/areas/storage.md`.
 const PUBLIC_CACHE_CONTROL_CHUNKS: &str = "public, max-age=31536000, immutable, no-transform";
 const PUBLIC_CACHE_CONTROL_MANIFEST: &str = "public, max-age=31536000, immutable, no-transform";
 
@@ -36,35 +36,35 @@ const MAX_CHUNK_NAME_LEN: usize = MAX_CHUNK_INDEX_WIDTH + 4 /* ".bin" */;
 pub fn router() -> Router<ImagesState> {
     Router::<ImagesState>::new()
         .route(
-            "/v1/images/:image_id/chunked/manifest",
+            "/v1/images/{image_id}/chunked/manifest",
             get(get_manifest)
                 .head(head_manifest)
                 .options(options_manifest),
         )
         .route(
-            "/v1/images/:image_id/chunked/manifest.json",
+            "/v1/images/{image_id}/chunked/manifest.json",
             get(get_manifest)
                 .head(head_manifest)
                 .options(options_manifest),
         )
         .route(
-            "/v1/images/:image_id/chunked/:version/manifest",
+            "/v1/images/{image_id}/chunked/{version}/manifest",
             get(get_manifest_version)
                 .head(head_manifest_version)
                 .options(options_manifest),
         )
         .route(
-            "/v1/images/:image_id/chunked/:version/manifest.json",
+            "/v1/images/{image_id}/chunked/{version}/manifest.json",
             get(get_manifest_version)
                 .head(head_manifest_version)
                 .options(options_manifest),
         )
         .route(
-            "/v1/images/:image_id/chunked/chunks/:chunk_name",
+            "/v1/images/{image_id}/chunked/chunks/{chunk_name}",
             get(get_chunk).head(head_chunk).options(options_chunk),
         )
         .route(
-            "/v1/images/:image_id/chunked/:version/chunks/:chunk_name",
+            "/v1/images/{image_id}/chunked/{version}/chunks/{chunk_name}",
             get(get_chunk_version)
                 .head(head_chunk_version)
                 .options(options_chunk),
@@ -99,7 +99,7 @@ pub(crate) async fn chunk_name_path_len_guard(
         return next.run(req).await;
     }
 
-    // Versioned routes: `/chunked/:version/...`
+    // Versioned routes: `/chunked/{version}/...`
     //
     // Guard the raw version segment length as well to avoid allocating attacker-controlled huge
     // values in `Path<String>` extraction.

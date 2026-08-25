@@ -13,26 +13,38 @@ impl fmt::Display for ValueId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Add,
+    Adc,
     Sub,
+    Sbb,
     And,
     Or,
     Xor,
     Shl,
     Shr,
     Sar,
+    Rol,
+    Ror,
+    Bswap,
+    Mul,
 }
 
 impl fmt::Display for BinOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             BinOp::Add => "add",
+            BinOp::Adc => "adc",
             BinOp::Sub => "sub",
+            BinOp::Sbb => "sbb",
             BinOp::And => "and",
             BinOp::Or => "or",
             BinOp::Xor => "xor",
             BinOp::Shl => "shl",
             BinOp::Shr => "shr",
             BinOp::Sar => "sar",
+            BinOp::Rol => "rol",
+            BinOp::Ror => "ror",
+            BinOp::Bswap => "bswap",
+            BinOp::Mul => "mul",
         })
     }
 }
@@ -704,5 +716,4 @@ impl IrBuilder {
     }
 }
 
-#[cfg(debug_assertions)]
 pub mod interp;

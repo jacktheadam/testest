@@ -90,7 +90,11 @@ fn verify_extracted_tree(ctx: &DepContext, iso_root: &Path, verbose: bool) -> Re
             .with_context(|| format!("BCD store policy check failed for {}", store.display()))?;
     }
 
-    let backend_kind = if cfg!(windows) && ctx.dism.is_some() && ctx.reg.is_some() && ctx.bcdedit.is_some() {
+    let backend_kind = if cfg!(windows)
+        && ctx.dism.is_some()
+        && ctx.reg.is_some()
+        && ctx.bcdedit.is_some()
+    {
         crate::cli::BackendKind::WindowsDism
     } else if ctx.wimlib_imagex.is_some() && ctx.hivexregedit.is_some() {
         crate::cli::BackendKind::CrossWimlib
@@ -104,13 +108,11 @@ fn verify_extracted_tree(ctx: &DepContext, iso_root: &Path, verbose: bool) -> Re
 
     let sources = iso_root.join("sources");
     let boot_wim = sources.join("boot.wim");
-    if boot_wim.is_file() {
-        if manifest.signing_mode == SigningMode::TestSigning {
-            if let Some(cert) = manifest.certificate.as_ref() {
-                backend
-                    .verify_cert_in_wim(&boot_wim, &[2], &cert.thumbprint_sha1)
-                    .context("boot.wim certificate verification failed")?;
-            }
+    if boot_wim.is_file() && manifest.signing_mode == SigningMode::TestSigning {
+        if let Some(cert) = manifest.certificate.as_ref() {
+            backend
+                .verify_cert_in_wim(&boot_wim, &[2], &cert.thumbprint_sha1)
+                .context("boot.wim certificate verification failed")?;
         }
     }
 
@@ -133,7 +135,12 @@ fn verify_extracted_tree(ctx: &DepContext, iso_root: &Path, verbose: bool) -> Re
     Ok(())
 }
 
-fn verify_bcd_store(ctx: &DepContext, store: &Path, mode: SigningMode, verbose: bool) -> Result<()> {
+fn verify_bcd_store(
+    ctx: &DepContext,
+    store: &Path,
+    mode: SigningMode,
+    verbose: bool,
+) -> Result<()> {
     if mode == SigningMode::None {
         return Ok(());
     }
@@ -145,7 +152,11 @@ fn verify_bcd_store(ctx: &DepContext, store: &Path, mode: SigningMode, verbose: 
 
         for id in identifiers {
             match run_capture(
-                Command::new(bcdedit).arg("/store").arg(store).arg("/enum").arg(id),
+                Command::new(bcdedit)
+                    .arg("/store")
+                    .arg(store)
+                    .arg("/enum")
+                    .arg(id),
                 verbose,
             ) {
                 Ok(out) => {
@@ -212,7 +223,10 @@ fn run_capture(cmd: &mut Command, verbose: bool) -> Result<String> {
         .output()
         .context("Failed to spawn external command")?;
     if !out.status.success() {
-        return Err(anyhow!("External command failed with status: {}", out.status));
+        return Err(anyhow!(
+            "External command failed with status: {}",
+            out.status
+        ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }

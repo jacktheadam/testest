@@ -92,7 +92,7 @@ impl XhciPciDevice {
         // Keep this in sync with:
         // - `crates/devices/src/pci/profile.rs` (`USB_XHCI_QEMU`),
         // - `web/src/io/devices/xhci.ts` (web runtime wrapper), and
-        // - `docs/usb-xhci.md` (guest-facing contract).
+        // - the USB and input area page (guest-facing contract).
         let mut config = profile::USB_XHCI_QEMU.build_config_space();
 
         // Backwards compatibility: older profiles may omit MSI. Ensure we always expose at least a

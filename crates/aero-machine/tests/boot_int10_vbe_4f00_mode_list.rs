@@ -83,7 +83,7 @@ fn boot_int10_vbe_4f00_mode_list_contains_required_modes() {
         modes.push(mode);
     }
 
-    // Required boot modes per docs/16-aerogpu-vga-vesa-compat.md.
+    // Required boot modes per wiki/areas/graphics.md.
     assert!(modes.contains(&0x115));
     assert!(modes.contains(&0x118));
     assert!(modes.contains(&0x160));

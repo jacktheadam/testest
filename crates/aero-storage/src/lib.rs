@@ -19,8 +19,7 @@
 //!
 //! // In production this could be an OPFS backend such as `aero_opfs::OpfsByteStorage` (wasm32).
 //! // IndexedDB-based storage is generally async and is not currently exposed as a sync
-//! // `aero_storage::StorageBackend` in this crate; see `docs/19-indexeddb-storage-story.md` and
-//! // `docs/20-storage-trait-consolidation.md`.
+//! // `aero_storage::StorageBackend` in this crate; see `wiki/areas/storage.md`.
 //! let backend = MemBackend::with_len(1024 * 1024).unwrap();
 //! let mut disk = DiskImage::open_auto(backend).unwrap();
 //!
@@ -56,8 +55,7 @@
 //!
 //! Note: IndexedDB-based storage is generally async and is not currently exposed as a
 //! synchronous [`StorageBackend`] in this crate. The async IndexedDB block store lives in
-//! `crates/st-idb`. See `docs/19-indexeddb-storage-story.md` and
-//! `docs/20-storage-trait-consolidation.md`.
+//! `crates/st-idb`. See `wiki/areas/storage.md`.
 //!
 //! ## Errors
 //!
@@ -74,6 +72,7 @@ mod error;
 mod formats;
 mod qcow2;
 mod sparse;
+mod sparse_v1;
 mod util;
 mod vhd;
 
@@ -89,6 +88,7 @@ pub use error::{DiskError, Result};
 pub use formats::{detect_format, DiskFormat, DiskImage};
 pub use qcow2::Qcow2Disk;
 pub use sparse::{AeroSparseConfig, AeroSparseDisk, AeroSparseHeader};
+pub use sparse_v1::{SparseDiskV1, SparseHeaderV1};
 pub use vhd::VhdDisk;
 
 #[cfg(test)]

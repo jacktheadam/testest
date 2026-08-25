@@ -14,7 +14,7 @@ pub const TOC_ENTRY_SIZE: u32 = 32;
 /// Trace container format version.
 ///
 /// Version history:
-/// - v1: Initial container format + toy packet stream (see docs/abi/gpu-trace-format.md).
+/// - v1: Initial container format + toy packet stream (see wiki/areas/graphics.md).
 /// - v2: Adds `RecordType::AerogpuSubmission` for raw `aerogpu_cmd.h` submissions (Win7 guest ABI).
 ///
 /// ## Compatibility policy

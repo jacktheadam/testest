@@ -243,6 +243,114 @@ fn tcp_invalid_ack_does_not_complete_handshake() {
 }
 
 #[test]
+fn tcp_proxy_data_larger_than_mss_is_segmented() {
+    // Regression test: data larger than MSS (1460 bytes) from the proxy must be
+    // segmented into multiple TCP segments, each fitting within Ethernet frame
+    // limits. Without segmentation, the entire payload is packed into one frame
+    // that exceeds the L2 encoder's 2048-byte limit and is silently dropped,
+    // but the send sequence is advanced past the undelivered data.
+    let mut stack = NetworkStack::new(StackConfig::default());
+    let guest_mac = MacAddr([0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee]);
+    dhcp_handshake(&mut stack, guest_mac);
+
+    let remote_ip = Ipv4Addr::new(93, 184, 216, 34);
+    let guest_port = 50000u16;
+    let conn_id = 1u32;
+
+    // Enable networking (default-deny until enabled).
+    stack.set_network_enabled(true);
+
+    // SYN
+    let syn = wrap_tcp_ipv4_eth(
+        guest_mac,
+        stack.config().our_mac,
+        stack.config().guest_ip,
+        remote_ip,
+        guest_port,
+        80,
+        1000,
+        0,
+        TcpFlags::SYN,
+        &[],
+    );
+    let actions = stack.process_outbound_ethernet(&syn, 1);
+    let syn_ack_frame = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::EmitFrame(f) => Some(f),
+            _ => None,
+        })
+        .expect("SYN-ACK frame");
+    let syn_ack = parse_tcp_from_frame(syn_ack_frame);
+    let guest_isn: u32 = 1000;
+
+    // Proxy connected
+    stack.handle_tcp_proxy_event(
+        TcpProxyEvent::Connected {
+            connection_id: conn_id,
+        },
+        2,
+    );
+
+    // ACK the SYN-ACK (complete handshake)
+    let ack = wrap_tcp_ipv4_eth(
+        guest_mac,
+        stack.config().our_mac,
+        stack.config().guest_ip,
+        remote_ip,
+        guest_port,
+        80,
+        guest_isn + 1,
+        syn_ack.seq_number() + 1,
+        TcpFlags::ACK,
+        &[],
+    );
+    stack.process_outbound_ethernet(&ack, 3);
+
+    // Send 4000 bytes of data from proxy to guest.
+    let large_data = vec![0xABu8; 4000];
+    let actions = stack.handle_tcp_proxy_event(
+        TcpProxyEvent::Data {
+            connection_id: conn_id,
+            data: large_data.clone(),
+        },
+        4,
+    );
+
+    // Should produce multiple EmitFrame actions (segments), each ≤ ~1460 bytes
+    // of TCP payload.
+    let frames: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::EmitFrame(f) => Some(f),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        frames.len() >= 3,
+        "4000 bytes should produce at least 3 segments, got {}",
+        frames.len()
+    );
+
+    // Verify total payload across all segments equals the original data.
+    let mut total_payload = 0usize;
+    for frame in &frames {
+        let seg = parse_tcp_from_frame(frame);
+        total_payload += seg.payload().len();
+        // Each segment's TCP payload should not exceed MSS (1460).
+        assert!(
+            seg.payload().len() <= 1460,
+            "segment payload {} exceeds MSS 1460",
+            seg.payload().len()
+        );
+    }
+    assert_eq!(
+        total_payload, 4000,
+        "total segmented payload must match input"
+    );
+}
+
+#[test]
 fn dns_aaaa_query_returns_notimp() {
     let mut stack = NetworkStack::new(StackConfig::default());
     let guest_mac = MacAddr([0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee]);

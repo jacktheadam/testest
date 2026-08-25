@@ -5,7 +5,7 @@
 # This script is intentionally POSIX-shell compatible (no bashisms) so it can be
 # run on most hosts.
 #
-# Requirements encoded here (see docs/windows-device-contract.md):
+# Requirements encoded here (see the Windows guest drivers area page):
 # - Always use contract-friendly virtio-pci flags:
 #     disable-legacy=on,x-pci-revision=0x01
 # - Keep PS/2 input enabled by default to avoid losing input during driver install.

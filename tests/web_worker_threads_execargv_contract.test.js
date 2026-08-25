@@ -116,7 +116,7 @@ function parseExecArgvStringLiterals(source, startIdx) {
 
 test("web worker_threads tests: execArgv using --experimental-strip-types must include --import", async () => {
   const repoRoot = process.cwd();
-  const roots = ["web/test", "web/src"];
+  const roots = ["apps/web/test", "apps/web/src"];
 
   /** @type {{ abs: string; rel: string }[]} */
   const files = [];

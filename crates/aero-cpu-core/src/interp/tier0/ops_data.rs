@@ -1,8 +1,8 @@
 use super::ExecOutcome;
 use crate::exception::{AssistReason, Exception};
 use crate::linear_mem::{
-    read_u16_wrapped, read_u32_wrapped, read_u64_wrapped, write_u16_wrapped, write_u32_wrapped,
-    write_u64_wrapped,
+    read_u16_wrapped, read_u32_wrapped, read_u64_wrapped, watch_read, write_u16_wrapped,
+    write_u32_wrapped, write_u64_wrapped,
 };
 use crate::mem::CpuBus;
 use crate::state::{mask_bits, CpuState};
@@ -13,9 +13,13 @@ pub fn handles_mnemonic(m: Mnemonic) -> bool {
         m,
         Mnemonic::Mov
             | Mnemonic::Lea
+            | Mnemonic::Les
+            | Mnemonic::Lds
             | Mnemonic::Xchg
             | Mnemonic::Movsx
             | Mnemonic::Movzx
+            | Mnemonic::Movsxd
+            | Mnemonic::Movnti
             | Mnemonic::Bswap
             | Mnemonic::Xadd
     ) || is_cmov(m)
@@ -59,6 +63,21 @@ pub fn exec<B: CpuBus>(
                 Ok(ExecOutcome::Continue)
             }
         }
+        Mnemonic::Movnti => {
+            // Non-temporal store. Architecturally this is a plain 32/64-bit
+            // store: the NT hint only guides cache behavior, and there are no
+            // alignment or ordering requirements to model.
+            //
+            // Regression witness: the Win7 x64 kernel's non-temporal memcpy
+            // loop (`movnti [rcx-8], r9` at 1,673,734,395 inst of the install
+            // boot) hit #UD right after the prefetch loop.
+            if instr.has_lock_prefix() {
+                return Err(Exception::InvalidOpcode);
+            }
+            let v = read_op(state, bus, instr, 1, next_ip)?;
+            write_op(state, bus, instr, 0, v, next_ip)?;
+            Ok(ExecOutcome::Continue)
+        }
         Mnemonic::Lea => {
             if instr.has_lock_prefix() {
                 return Err(Exception::InvalidOpcode);
@@ -66,6 +85,35 @@ pub fn exec<B: CpuBus>(
             let addr = calc_ea(state, instr, next_ip, false)?;
             write_op(state, bus, instr, 0, addr, next_ip)?;
             Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Les | Mnemonic::Lds => {
+            // LES/LDS r16/32, m16:16/32: load a far pointer from memory into (seg, reg).
+            if instr.has_lock_prefix() {
+                return Err(Exception::InvalidOpcode);
+            }
+            let seg = if instr.mnemonic() == Mnemonic::Les {
+                Register::ES
+            } else {
+                Register::DS
+            };
+            let bits = op_bits(state, instr, 0)?;
+            let addr = calc_ea(state, instr, next_ip, true)?;
+            let off = super::ops_data::read_mem(state, bus, addr, bits)?;
+            let sel =
+                super::ops_data::read_mem(state, bus, addr.wrapping_add((bits / 8) as u64), 16)?;
+            write_op(state, bus, instr, 0, off, next_ip)?;
+            if matches!(
+                state.mode,
+                crate::state::CpuMode::Real | crate::state::CpuMode::Vm86
+            ) {
+                // Real mode: the selector loads directly into the segment register (base = sel<<4).
+                state.write_reg(seg, sel);
+                Ok(ExecOutcome::Continue)
+            } else {
+                // Protected/long mode: segment loads require a descriptor-table lookup and can
+                // fault. Delegate to the assist layer.
+                Ok(ExecOutcome::Assist(AssistReason::Privileged))
+            }
         }
         Mnemonic::Xchg => {
             let lock = instr.has_lock_prefix();
@@ -102,17 +150,18 @@ pub fn exec<B: CpuBus>(
             }
             Ok(ExecOutcome::Continue)
         }
-        Mnemonic::Movsx | Mnemonic::Movzx => {
+        Mnemonic::Movsx | Mnemonic::Movzx | Mnemonic::Movsxd => {
             if instr.has_lock_prefix() {
                 return Err(Exception::InvalidOpcode);
             }
             let src_bits = op_bits(state, instr, 1)?;
             let dst_bits = op_bits(state, instr, 0)?;
             let src = read_op_sized(state, bus, instr, 1, src_bits, next_ip)?;
-            let v = if instr.mnemonic() == Mnemonic::Movsx {
-                sign_extend(src, src_bits, dst_bits)
-            } else {
+            // Movsx and Movsxd both sign-extend; only Movzx zero-extends.
+            let v = if instr.mnemonic() == Mnemonic::Movzx {
                 src & mask_bits(dst_bits)
+            } else {
+                sign_extend(src, src_bits, dst_bits)
             };
             write_op_sized(state, bus, instr, 0, v, dst_bits, next_ip)?;
             Ok(ExecOutcome::Continue)
@@ -325,9 +374,9 @@ pub(crate) fn op_bits(_state: &CpuState, instr: &Instruction, op: usize) -> Resu
 fn mem_bits(instr: &Instruction) -> Result<u32, Exception> {
     let bits = match instr.memory_size() {
         MemorySize::UInt8 | MemorySize::Int8 => 8,
-        MemorySize::UInt16 | MemorySize::Int16 => 16,
-        MemorySize::UInt32 | MemorySize::Int32 => 32,
-        MemorySize::UInt64 | MemorySize::Int64 => 64,
+        MemorySize::UInt16 | MemorySize::Int16 | MemorySize::WordOffset => 16,
+        MemorySize::UInt32 | MemorySize::Int32 | MemorySize::DwordOffset => 32,
+        MemorySize::UInt64 | MemorySize::Int64 | MemorySize::QwordOffset => 64,
         _ => return Err(Exception::InvalidOpcode),
     };
     Ok(bits)
@@ -421,9 +470,14 @@ pub(crate) fn calc_ea(
     // the raw displacement, so we normalize it back to disp32 when the base is
     // RIP. This keeps the address computation uniform and prevents double-
     // adding `next_ip` for RIP-relative memory operands.
-    let mut disp = instr.memory_displacement64() as i128;
+    //
+    // Compute in u64 with wrapping semantics (all values are masked to
+    // addr_bits at the end). The prior i128 arithmetic compiled to multi-word
+    // carry-propagation on x86-64; u64 is sufficient since the final mask
+    // produces the correct truncated result regardless of intermediate overflow.
+    let mut offset: u64 = instr.memory_displacement64();
     if base == Register::RIP {
-        disp -= next_ip as i128;
+        offset = offset.wrapping_sub(next_ip);
     }
 
     let addr_bits = if base == Register::RIP {
@@ -441,21 +495,20 @@ pub(crate) fn calc_ea(
         }
     };
 
-    let mut offset: i128 = disp;
     if base != Register::None {
         let base_val = if base == Register::RIP {
             next_ip
         } else {
             state.read_reg(base)
         };
-        offset += (base_val & mask_bits(addr_bits)) as i128;
+        offset = offset.wrapping_add(base_val & mask_bits(addr_bits));
     }
     if index != Register::None {
         let idx_val = state.read_reg(index) & mask_bits(addr_bits);
-        offset += (idx_val as i128) * (scale as i128);
+        offset = offset.wrapping_add(idx_val.wrapping_mul(scale));
     }
 
-    let addr = (offset as u64) & mask_bits(addr_bits);
+    let addr = offset & mask_bits(addr_bits);
     if include_seg {
         Ok(state.apply_a20(
             state
@@ -474,7 +527,11 @@ pub(crate) fn read_mem<B: CpuBus>(
     bits: u32,
 ) -> Result<u64, Exception> {
     match bits {
-        8 => Ok(bus.read_u8(state.apply_a20(addr))? as u64),
+        8 => {
+            let v = bus.read_u8(state.apply_a20(addr))?;
+            watch_read(state, addr, 1, u64::from(v));
+            Ok(u64::from(v))
+        }
         16 => Ok(read_u16_wrapped(state, bus, addr)? as u64),
         32 => Ok(read_u32_wrapped(state, bus, addr)? as u64),
         64 => Ok(read_u64_wrapped(state, bus, addr)?),

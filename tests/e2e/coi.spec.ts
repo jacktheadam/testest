@@ -46,7 +46,7 @@ async function assertCrossOriginIsolated(page: Page) {
 }
 
 test('dev server is cross-origin isolated (COOP/COEP)', async ({ page }) => {
-  const resp = await page.goto('/', { waitUntil: 'load' });
+  const resp = await page.goto('/apps/web/', { waitUntil: 'load' });
   expect(resp).toBeTruthy();
   assertResponseHeadersContain(resp!.headers(), crossOriginIsolationHeaders);
   assertResponseHeadersContain(resp!.headers(), baselineSecurityHeaders);
@@ -54,7 +54,7 @@ test('dev server is cross-origin isolated (COOP/COEP)', async ({ page }) => {
 });
 
 test('preview server is cross-origin isolated (COOP/COEP)', async ({ page }) => {
-  const resp = await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: 'load' });
+  const resp = await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: 'load' });
   expect(resp).toBeTruthy();
   assertResponseHeadersContain(resp!.headers(), crossOriginIsolationHeaders);
   assertResponseHeadersContain(resp!.headers(), baselineSecurityHeaders);

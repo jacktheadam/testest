@@ -25,6 +25,17 @@ pub fn handles_mnemonic(m: Mnemonic) -> bool {
             | Mnemonic::Fxch
             | Mnemonic::Fld1
             | Mnemonic::Fldz
+            | Mnemonic::Fldl2t
+            | Mnemonic::Fldl2e
+            | Mnemonic::Fldpi
+            | Mnemonic::Fldlg2
+            | Mnemonic::Fldln2
+            | Mnemonic::Fsqrt
+            | Mnemonic::Frndint
+            | Mnemonic::Fyl2x
+            | Mnemonic::Fyl2xp1
+            | Mnemonic::F2xm1
+            | Mnemonic::Fscale
             | Mnemonic::Fincstp
             | Mnemonic::Fdecstp
             | Mnemonic::Fld
@@ -109,6 +120,50 @@ pub fn exec<B: CpuBus>(
         }
         Mnemonic::Fldz => {
             x87.fldz().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fldl2t => {
+            x87.fldl2t().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fldl2e => {
+            x87.fldl2e().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fldpi => {
+            x87.fldpi().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fldlg2 => {
+            x87.fldlg2().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fldln2 => {
+            x87.fldln2().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fsqrt => {
+            x87.fsqrt().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Frndint => {
+            x87.frndint().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fyl2x => {
+            x87.fyl2x().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fyl2xp1 => {
+            x87.fyl2xp1().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::F2xm1 => {
+            x87.f2xm1().map_err(map_x87_fault)?;
+            Ok(ExecOutcome::Continue)
+        }
+        Mnemonic::Fscale => {
+            x87.fscale().map_err(map_x87_fault)?;
             Ok(ExecOutcome::Continue)
         }
         Mnemonic::Fxch => {

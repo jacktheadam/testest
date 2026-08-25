@@ -50,8 +50,9 @@ pub use backend::{
 pub use executor::{AeroGpuExecutor, AeroGpuExecutorConfig, AeroGpuFenceCompletionMode};
 pub use memory::MemoryBus;
 pub use pci::{
-    AeroGpuBar1VramMmio, AeroGpuDeviceConfig, AeroGpuLegacyVgaMmio, AeroGpuPciDevice,
-    LEGACY_VGA_PADDR_BASE, LEGACY_VGA_PADDR_END, LEGACY_VGA_VRAM_BYTES, VBE_LFB_OFFSET,
+    aerogpu_lfb_write_count, AeroGpuBar1VramMmio, AeroGpuDeviceConfig, AeroGpuLegacyVgaMmio,
+    AeroGpuPciDevice, LEGACY_VGA_PADDR_BASE, LEGACY_VGA_PADDR_END, LEGACY_VGA_VRAM_BYTES,
+    VBE_LFB_OFFSET,
 };
 pub use regs::{feature_bits, irq_bits, mmio, ring_control, AeroGpuRegs};
 pub use ring::{

@@ -6,13 +6,13 @@
   "description": "WebSocket multiplexed TCP proxy relay for Aero (browser Windows emulator)",
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=22.11.0 <23"
+    "node": ">=24.0.0 <25"
   },
   "scripts": {
     "check:node": "node ../../scripts/check-node-version.mjs",
-    "prestart": "npm run check:node",
+    "prestart": "pnpm run check:node",
     "start": "node src/cli.js",
-    "pretest": "npm run check:node",
+    "pretest": "pnpm run check:node",
     "test": "node --test"
   },
   "dependencies": {

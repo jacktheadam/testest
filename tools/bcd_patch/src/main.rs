@@ -20,6 +20,14 @@ struct PatchArgs {
     /// Enable/disable nointegritychecks (default: on).
     #[arg(long, value_enum)]
     nointegritychecks: Option<OnOff>,
+
+    /// Enable kernel debugging over COM1 (defaults to off).
+    ///
+    /// Unlike the signing flags this is not something you want on by default: it
+    /// changes how the guest boots. Turn it on when you need Windows to say what
+    /// it is doing — see kernel debugging over COM1 in the wiki's debugging area.
+    #[arg(long, value_enum)]
+    kernel_debug: Option<OnOff>,
 }
 
 impl PatchArgs {
@@ -27,6 +35,7 @@ impl PatchArgs {
         PatchOpts {
             testsigning: matches!(self.testsigning, None | Some(OnOff::On)),
             nointegritychecks: matches!(self.nointegritychecks, None | Some(OnOff::On)),
+            kernel_debug: matches!(self.kernel_debug, Some(OnOff::On)),
         }
     }
 }

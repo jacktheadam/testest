@@ -21,7 +21,12 @@ fn canonical_ids_and_class_codes() {
 
     assert_eq!(IDE_PIIX3.vendor_id, 0x8086);
     assert_eq!(IDE_PIIX3.device_id, 0x7010);
-    assert_eq!(IDE_PIIX3.class.as_u32(), 0x01018a);
+    // Programming interface 0x80, not 0x8a: legacy ATA with bus-master DMA and
+    // non-programmable channels. Advertising 0x8a made Windows treat the function
+    // as native-capable, size BAR0-3, leave them unassigned, and never add the
+    // hardwired 0x1F0/0x170 + IRQ14/15 resources — so the optical drive never
+    // enumerated. This assertion was left behind by that fix.
+    assert_eq!(IDE_PIIX3.class.as_u32(), 0x010180);
     assert_eq!(IDE_PIIX3.revision_id, 0);
     assert_eq!(IDE_PIIX3.header_type, 0x00);
     assert_eq!(IDE_PIIX3.subsystem_vendor_id, 0);
@@ -92,7 +97,7 @@ fn canonical_ids_and_class_codes() {
     assert_eq!(AEROGPU.device_id, 0x0001);
     assert_eq!(AEROGPU.class.as_u32(), 0x030000);
 
-    // BAR layout for AeroGPU (per `docs/16-aerogpu-vga-vesa-compat.md`):
+    // BAR layout for AeroGPU (per `wiki/areas/graphics.md`):
     // - BAR0: 64KiB non-prefetchable MMIO registers
     // - BAR1: prefetchable MMIO VRAM aperture
     assert_eq!(AEROGPU.bars.len(), 2);
@@ -223,7 +228,7 @@ const _: () = {
     // VBE uses a linear framebuffer inside BAR1, with a fixed offset to keep the first 256KiB
     // reserved for legacy VGA planar memory (4 × 64KiB planes).
     //
-    // See `docs/16-aerogpu-vga-vesa-compat.md` (VBE_LFB_OFFSET = 0x40000 /
+    // See `wiki/areas/graphics.md` (VBE_LFB_OFFSET = 0x40000 /
     // AEROGPU_PCI_BAR1_VBE_LFB_OFFSET_BYTES).
     const VBE_LFB_OFFSET: u64 = protocol_pci::AEROGPU_PCI_BAR1_VBE_LFB_OFFSET_BYTES as u64;
 

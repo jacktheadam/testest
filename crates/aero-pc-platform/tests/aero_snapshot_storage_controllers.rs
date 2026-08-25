@@ -366,13 +366,12 @@ fn aero_snapshot_roundtrip_preserves_ahci_inflight_dma_command_and_allows_resume
         let pin = profile::SATA_AHCI_ICH9
             .interrupt_pin
             .expect("profile should provide interrupt pin");
-        u8::try_from(
-            restored
-                .platform
-                .pci_intx
-                .gsi_for_intx(profile::SATA_AHCI_ICH9.bdf, pin),
-        )
-        .unwrap()
+        let gsi = restored
+            .platform
+            .pci_intx
+            .gsi_for_intx(profile::SATA_AHCI_ICH9.bdf, pin);
+        aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+            .expect("Q35 AHCI GSI should have a compatibility PIC route")
     };
     unmask_pic_irq(&mut restored.platform, expected_irq);
     assert!(

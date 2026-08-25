@@ -149,9 +149,11 @@ fn virtio_win_device_contract_only_overrides_service_names() -> anyhow::Result<(
     let packager_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = packager_root.join("..").join("..").join("..");
 
-    let base_contract = repo_root.join("docs").join("windows-device-contract.json");
+    let base_contract = repo_root
+        .join("protocol-vectors")
+        .join("windows-device-contract.json");
     let virtio_contract = repo_root
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract-virtio-win.json");
 
     let base_cmd = aero_packager::generate_guest_tools_devices_cmd_bytes(&base_contract)?;

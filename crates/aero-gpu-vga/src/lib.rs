@@ -33,7 +33,7 @@ pub use text_font::FONT8X8_CP437;
 #[cfg(feature = "integration-memory")]
 mod integration_memory;
 #[cfg(feature = "integration-memory")]
-pub use integration_memory::{VgaLegacyMmioHandler, VgaLfbMmioHandler};
+pub use integration_memory::{lfb_write_count, VgaLegacyMmioHandler, VgaLfbMmioHandler};
 
 #[cfg(feature = "integration-platform")]
 mod integration_platform;
@@ -282,6 +282,14 @@ pub struct VgaDevice {
     /// This advances via [`VgaDevice::tick`], which is wired to the machine's deterministic
     /// `tick_platform` path.
     vblank_time_ns: u64,
+    /// Whether reading Input Status 1 may advance the vblank clock.
+    ///
+    /// The read nudge exists so a guest retrace-wait loop makes progress inside
+    /// a single execution batch. A host reading the port to inspect state has no
+    /// such loop behind it, and must not perturb guest-visible timing — in
+    /// particular, reading the colour port and its mono alias back to back has
+    /// to observe one coherent state.
+    input_status1_read_nudge: bool,
 
     // DAC / palette.
     pel_mask: u8,
@@ -387,6 +395,7 @@ impl VgaDevice {
             attribute_ext: [0; 0x20],
             input_status1_vretrace: false,
             vblank_time_ns: 0,
+            input_status1_read_nudge: true,
             pel_mask: 0xFF,
             dac_write_index: 0,
             dac_write_subindex: 0,
@@ -419,6 +428,14 @@ impl VgaDevice {
     /// legacy guests to poll the VGA status register (`0x3DA`) for vertical retrace pacing.
     pub fn tick(&mut self, delta_ns: u64) {
         self.vblank_time_ns = self.vblank_time_ns.wrapping_add(delta_ns);
+    }
+
+    /// Enable or disable the Input Status 1 read nudge; returns the previous setting.
+    ///
+    /// Guest execution leaves this enabled so retrace-wait loops make progress.
+    /// A host inspecting the port should disable it for the duration of the read.
+    pub fn set_input_status1_read_nudge(&mut self, enabled: bool) -> bool {
+        std::mem::replace(&mut self.input_status1_read_nudge, enabled)
     }
 
     fn in_vblank(&self) -> bool {
@@ -1543,6 +1560,63 @@ impl VgaDevice {
         }
     }
 
+    fn refresh_vbe_virtual_height(&mut self) {
+        let bits_per_pixel = match self.vbe.bpp {
+            4 | 8 | 16 | 24 | 32 => usize::from(self.vbe.bpp),
+            15 => 16,
+            _ => {
+                self.vbe.virt_height = 0;
+                return;
+            }
+        };
+        let pitch = usize::from(self.vbe.virt_width)
+            .saturating_mul(bits_per_pixel)
+            .div_ceil(8);
+        if pitch == 0 {
+            self.vbe.virt_height = 0;
+            return;
+        }
+
+        let start = usize::try_from(self.config.lfb_offset)
+            .unwrap_or(usize::MAX)
+            .min(self.vram.len());
+        self.vbe.virt_height =
+            u16::try_from(self.vram.len().saturating_sub(start) / pitch).unwrap_or(u16::MAX);
+    }
+
+    fn write_vbe_enable(&mut self, value: u16) {
+        const ENABLED: u16 = 0x0001;
+        const NO_CLEAR_MEMORY: u16 = 0x0080;
+
+        let was_enabled = self.vbe.enabled();
+        let will_enable = (value & ENABLED) != 0;
+        if will_enable && !was_enabled {
+            self.vbe.virt_width = self.vbe.xres;
+            self.vbe.x_offset = 0;
+            self.vbe.y_offset = 0;
+            self.refresh_vbe_virtual_height();
+
+            if (value & NO_CLEAR_MEMORY) == 0 {
+                let bits_per_pixel = match self.vbe.bpp {
+                    4 | 8 | 16 | 24 | 32 => usize::from(self.vbe.bpp),
+                    15 => 16,
+                    _ => 0,
+                };
+                let clear_len = usize::from(self.vbe.yres)
+                    .saturating_mul(usize::from(self.vbe.virt_width))
+                    .saturating_mul(bits_per_pixel)
+                    .div_ceil(8);
+                let start = usize::try_from(self.config.lfb_offset)
+                    .unwrap_or(usize::MAX)
+                    .min(self.vram.len());
+                let end = start.saturating_add(clear_len).min(self.vram.len());
+                self.vram[start..end].fill(0);
+            }
+        }
+
+        self.vbe.enable = value;
+    }
+
     fn vbe_write_reg(&mut self, index: u16, value: u16) {
         match index {
             0x0001 => {
@@ -1558,12 +1632,15 @@ impl VgaDevice {
                 self.vbe_bytes_per_scan_line_override = 0;
             }
             0x0004 => {
-                self.vbe.enable = value;
+                self.write_vbe_enable(value);
                 self.vbe_bytes_per_scan_line_override = 0;
             }
             0x0005 => self.vbe.bank = value,
             0x0006 => {
                 self.vbe.virt_width = value;
+                if self.vbe.enabled() {
+                    self.refresh_vbe_virtual_height();
+                }
                 self.vbe_bytes_per_scan_line_override = 0;
             }
             0x0007 => {
@@ -1717,6 +1794,17 @@ impl VgaDevice {
             // Input status 1. Reading resets the attribute flip-flop.
             0x3DA | 0x3BA => {
                 self.attribute_flip_flop_data = false;
+                // Advance the vblank clock slightly on each read so a tight
+                // guest retrace-wait loop (`in al,0x3DA; test al,8; jnz/jz`)
+                // sees the bit toggle within bounded reads, even inside a
+                // single execution batch where tick() is not called between
+                // reads. Without this, the retrace bit can freeze at a fixed
+                // value for the entire batch, hanging the poll loop and making
+                // the display appear black while execution continues.
+                if self.input_status1_read_nudge {
+                    let nudge = Self::VBLANK_PERIOD_NS / 4;
+                    self.vblank_time_ns = self.vblank_time_ns.wrapping_add(nudge);
+                }
                 let in_vblank = self.in_vblank();
                 self.input_status1_vretrace = in_vblank;
                 let v = if in_vblank { 0x08 } else { 0x00 };
@@ -3298,6 +3386,46 @@ mod tests {
     }
 
     #[test]
+    fn vbe_enable_edge_resets_virtual_geometry_and_honors_no_clear_memory() {
+        let mut dev = VgaDevice::new();
+
+        vbe_write(&mut dev, 0x0001, 1024);
+        vbe_write(&mut dev, 0x0002, 768);
+        vbe_write(&mut dev, 0x0003, 32);
+        vbe_write(&mut dev, 0x0004, 0x0041);
+        vbe_write(&mut dev, 0x0006, 1024);
+        vbe_write(&mut dev, 0x0008, 7);
+        vbe_write(&mut dev, 0x0009, 11);
+        vbe_write(&mut dev, 0x0004, 0);
+
+        let start = VBE_FRAMEBUFFER_OFFSET;
+        let new_surface_len = 800usize * 600 * 4;
+        dev.vram[start..start + new_surface_len].fill(0xA5);
+        vbe_write(&mut dev, 0x0001, 800);
+        vbe_write(&mut dev, 0x0002, 600);
+        vbe_write(&mut dev, 0x0004, 0x0041);
+
+        assert_eq!(dev.vbe.virt_width, 800);
+        assert_eq!(dev.vbe.x_offset, 0);
+        assert_eq!(dev.vbe.y_offset, 0);
+        assert!(dev.vram[start..start + new_surface_len]
+            .iter()
+            .all(|&byte| byte == 0));
+
+        dev.vram[start] = 0x5A;
+        vbe_write(&mut dev, 0x0004, 0);
+        vbe_write(&mut dev, 0x0006, 1024);
+        vbe_write(&mut dev, 0x0008, 3);
+        vbe_write(&mut dev, 0x0009, 5);
+        vbe_write(&mut dev, 0x0004, 0x00C1);
+
+        assert_eq!(dev.vbe.virt_width, 800);
+        assert_eq!(dev.vbe.x_offset, 0);
+        assert_eq!(dev.vbe.y_offset, 0);
+        assert_eq!(dev.vram[start], 0x5A);
+    }
+
+    #[test]
     fn vbe_virtual_width_affects_stride_between_scanlines() {
         let mut dev = VgaDevice::new();
 
@@ -3305,8 +3433,8 @@ mod tests {
         vbe_write(&mut dev, 0x0001, 4); // xres
         vbe_write(&mut dev, 0x0002, 2); // yres
         vbe_write(&mut dev, 0x0003, 32); // bpp
-        vbe_write(&mut dev, 0x0006, 8); // virt_width
         vbe_write(&mut dev, 0x0004, 0x0041); // enable + lfb
+        vbe_write(&mut dev, 0x0006, 8); // virt_width
 
         // Seed the start of the first line (byte offset 0) with blue.
         vbe_write_bgrx32(&mut dev, 0, 0xFF, 0x00, 0x00);
@@ -3334,11 +3462,11 @@ mod tests {
         vbe_write(&mut dev, 0x0001, 2); // xres
         vbe_write(&mut dev, 0x0002, 2); // yres
         vbe_write(&mut dev, 0x0003, 16); // bpp
+        vbe_write(&mut dev, 0x0004, 0x0041); // enable + lfb
         vbe_write(&mut dev, 0x0006, 4); // virt_width
         vbe_write(&mut dev, 0x0007, 4); // virt_height
         vbe_write(&mut dev, 0x0008, 1); // x_offset
         vbe_write(&mut dev, 0x0009, 1); // y_offset
-        vbe_write(&mut dev, 0x0004, 0x0041); // enable + lfb
 
         let base = dev.lfb_base();
         // Pixel at (0,0): blue (0x001F).

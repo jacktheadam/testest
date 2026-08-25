@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub fn sha256_file(path: &Path) -> Result<String> {
-    let mut file =
-        File::open(path).with_context(|| format!("Failed to open for hashing: {}", path.display()))?;
+    let mut file = File::open(path)
+        .with_context(|| format!("Failed to open for hashing: {}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 1024 * 1024];
     loop {
@@ -51,9 +51,8 @@ pub fn sha256_dir(path: &Path) -> Result<String> {
         hasher.update(rel_str.as_bytes());
         hasher.update([0u8]);
 
-        let metadata = std::fs::metadata(&abs).with_context(|| {
-            format!("Failed to read metadata for hashing: {}", abs.display())
-        })?;
+        let metadata = std::fs::metadata(&abs)
+            .with_context(|| format!("Failed to read metadata for hashing: {}", abs.display()))?;
         let len = metadata.len();
         hasher.update(len.to_le_bytes());
 

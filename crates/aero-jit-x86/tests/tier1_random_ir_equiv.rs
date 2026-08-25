@@ -509,7 +509,7 @@ fn random_flagset(rng: &mut impl Rng) -> FlagSet {
     ];
     for bit in bits {
         // Bias towards non-empty sets.
-        if rng.gen_bool(0.4) {
+        if rng.random_bool(0.4) {
             set = set.union(bit);
         }
     }
@@ -521,7 +521,7 @@ fn random_guest_gpr_reg(rng: &mut impl Rng) -> GuestReg {
     let width = random_width(rng);
     let high8 = width == Width::W8
         && matches!(reg, Gpr::Rax | Gpr::Rcx | Gpr::Rdx | Gpr::Rbx)
-        && rng.gen_bool(0.25);
+        && rng.random_bool(0.25);
     GuestReg::Gpr { reg, width, high8 }
 }
 
@@ -566,7 +566,7 @@ fn random_ir_block(rng: &mut impl Rng, entry_rip: u64) -> IrBlock {
             if !ctx.can_add(1) {
                 break;
             }
-            if rng.gen_bool(0.8) {
+            if rng.random_bool(0.8) {
                 let reg = random_guest_gpr_reg(rng);
                 ctx.read_reg(reg);
             } else {
@@ -577,7 +577,7 @@ fn random_ir_block(rng: &mut impl Rng, entry_rip: u64) -> IrBlock {
             if !ctx.can_add(1) {
                 break;
             }
-            if rng.gen_bool(0.8) {
+            if rng.random_bool(0.8) {
                 let reg = random_guest_gpr_reg(rng);
                 let GuestReg::Gpr { width, .. } = reg else {
                     unreachable!()
@@ -597,7 +597,7 @@ fn random_ir_block(rng: &mut impl Rng, entry_rip: u64) -> IrBlock {
             let dst_w = match src_w {
                 Width::W8 => Width::W8,
                 Width::W16 => {
-                    if rng.gen_bool(0.5) {
+                    if rng.random_bool(0.5) {
                         Width::W8
                     } else {
                         Width::W16
@@ -784,7 +784,7 @@ fn random_cpu_state(rng: &mut impl Rng, entry_rip: u64) -> CpuState {
         *slot = rng.random();
     }
 
-    cpu.set_rflags(rng.gen::<u64>() | abi::RFLAGS_RESERVED1);
+    cpu.set_rflags(rng.random::<u64>() | abi::RFLAGS_RESERVED1);
 
     cpu
 }

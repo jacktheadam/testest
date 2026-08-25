@@ -15,7 +15,7 @@
  * Build-time switch: strict vs permissive BAR0 layout validation.
  *
  * When enabled (default), AeroVirtioValidateContractV1Bar0Layout enforces the
- * fixed offsets from docs/windows7-virtio-driver-contract.md (§1.4):
+ * fixed offsets from wiki/areas/drivers-windows.md (§1.4):
  *   - common @ 0x0000
  *   - notify @ 0x1000
  *   - isr    @ 0x2000

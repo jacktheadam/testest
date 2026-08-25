@@ -26,7 +26,7 @@ pub struct ManifestImage {
     /// `chunked/<image_id>/<chunked_version>/...` instead of `chunked/<image_id>/...`.
     ///
     /// This is intended to support the versioned/immutable layout described in
-    /// `docs/18-chunked-disk-image-format.md`.
+    /// `wiki/areas/storage.md`.
     #[serde(default)]
     pub chunked_version: Option<String>,
     #[serde(default = "default_public")]

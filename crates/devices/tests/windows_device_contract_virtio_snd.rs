@@ -47,7 +47,7 @@ fn assert_file_contains_case_insensitive(path: &std::path::Path, needle: &str) {
 
 #[test]
 fn virtio_snd_pci_ids_match_windows_device_contract() {
-    let contract_path = repo_root().join("docs/windows-device-contract.json");
+    let contract_path = repo_root().join("protocol-vectors/windows-device-contract.json");
     let contract_text = fs::read_to_string(&contract_path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", contract_path.display()));
     // Be tolerant of UTF-8 BOMs produced by some editors/tools.

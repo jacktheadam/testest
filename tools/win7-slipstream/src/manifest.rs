@@ -100,7 +100,10 @@ mod tests {
             backend: BackendKind::CrossWimlib,
             unattend: UnattendMode::DriversOnly,
             certificate: None,
-            patched_paths: vec![PatchedPath::new_file("boot/BCD"), PatchedPath::new_dir("AERO")],
+            patched_paths: vec![
+                PatchedPath::new_file("boot/BCD"),
+                PatchedPath::new_dir("AERO"),
+            ],
         };
         let json = m.to_json_pretty().unwrap();
         assert!(json.contains("\"input_iso_sha256\""));

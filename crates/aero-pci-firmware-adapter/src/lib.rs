@@ -161,7 +161,7 @@ mod tests {
 
     struct TestMemory {
         a20_enabled: bool,
-        inner: PhysicalMemoryBus,
+        inner: PhysicalMemoryBus<memory::DenseMemory>,
     }
 
     impl TestMemory {
@@ -169,7 +169,7 @@ mod tests {
             let ram = DenseMemory::new(size).expect("guest RAM allocation failed");
             Self {
                 a20_enabled: false,
-                inner: PhysicalMemoryBus::new(Box::new(ram)),
+                inner: PhysicalMemoryBus::new(ram),
             }
         }
 

@@ -893,8 +893,8 @@ fn restore_device_states_falls_back_to_legacy_apic_when_platform_interrupts_snap
         ints.set_mode(PlatformInterruptMode::Apic);
         // Active-low, level-triggered, masked.
         let low = vector | (1 << 13) | (1 << 15) | (1 << 16);
-        program_ioapic_entry(&mut ints, 10, low, 0);
-        ints.raise_irq(InterruptInput::Gsi(10));
+        program_ioapic_entry(&mut ints, 20, low, 0);
+        ints.raise_irq(InterruptInput::Gsi(20));
         assert_eq!(ints.get_pending(), None);
     }
 
@@ -925,7 +925,7 @@ fn restore_device_states_falls_back_to_legacy_apic_when_platform_interrupts_snap
     {
         let mut ints = interrupts.borrow_mut();
         let low = vector | (1 << 13) | (1 << 15); // active-low, level-triggered, unmasked
-        program_ioapic_entry(&mut ints, 10, low, 0);
+        program_ioapic_entry(&mut ints, 20, low, 0);
     }
 
     assert_eq!(interrupts.borrow().get_pending(), Some(vector as u8));
@@ -945,12 +945,12 @@ fn restore_device_states_does_not_sync_pci_intx_when_intx_snapshot_is_invalid() 
         ints.set_mode(PlatformInterruptMode::Apic);
         // Active-low, level-triggered, masked.
         let low = vector | (1 << 13) | (1 << 15) | (1 << 16);
-        program_ioapic_entry(&mut ints, 10, low, 0);
-        ints.raise_irq(InterruptInput::Gsi(10));
+        program_ioapic_entry(&mut ints, 20, low, 0);
+        ints.raise_irq(InterruptInput::Gsi(20));
         assert_eq!(ints.get_pending(), None);
     }
 
-    // Snapshot the interrupt controller with GSI10 asserted.
+    // Snapshot the interrupt controller with Q35 PCI GSI20 asserted.
     let apic_state = snapshot::io_snapshot_bridge::device_state_from_io_snapshot(
         snapshot::DeviceId::APIC,
         &*interrupts.borrow(),
@@ -980,7 +980,7 @@ fn restore_device_states_does_not_sync_pci_intx_when_intx_snapshot_is_invalid() 
     {
         let mut ints = interrupts.borrow_mut();
         let low = vector | (1 << 13) | (1 << 15); // active-low, level-triggered, unmasked
-        program_ioapic_entry(&mut ints, 10, low, 0);
+        program_ioapic_entry(&mut ints, 20, low, 0);
     }
 
     assert_eq!(interrupts.borrow().get_pending(), Some(vector as u8));
@@ -1251,26 +1251,27 @@ fn snapshot_restore_syncs_pci_intx_levels_into_interrupt_controller() {
     let mut src = Machine::new(pc_machine_config()).unwrap();
     let interrupts = src.platform_interrupts().unwrap();
     let pci_intx = src.pci_intx_router().unwrap();
+    let bdf = PciBdf::new(0, 0, 0);
+    let pin = PciInterruptPin::IntA;
+    let gsi = pci_intx.borrow().gsi_for_intx(bdf, pin);
 
-    // Route IOAPIC GSI10 -> vector 0x51, active-low, level-triggered, masked.
+    // Route the endpoint's derived GSI -> vector 0x51, active-low, level-triggered, masked.
     {
         let mut ints = interrupts.borrow_mut();
         ints.set_mode(PlatformInterruptMode::Apic);
         let low = 0x51u32 | (1 << 13) | (1 << 15) | (1 << 16);
-        program_ioapic_entry(&mut ints, 10, low, 0);
+        program_ioapic_entry(&mut ints, gsi, low, 0);
     }
 
-    // Assert a PCI INTx line that routes to GSI10 (device 0, INTA#).
+    // Assert the PCI INTx line whose route was programmed above.
     {
         let mut ints = interrupts.borrow_mut();
-        pci_intx
-            .borrow_mut()
-            .assert_intx(PciBdf::new(0, 0, 0), PciInterruptPin::IntA, &mut *ints);
+        pci_intx.borrow_mut().assert_intx(bdf, pin, &mut *ints);
     }
 
     // Corrupt the sink state to simulate a snapshot taken at an inconsistent point: the router
     // thinks the line is asserted, but the platform interrupt controller has it deasserted.
-    interrupts.borrow_mut().lower_irq(InterruptInput::Gsi(10));
+    interrupts.borrow_mut().lower_irq(InterruptInput::Gsi(gsi));
 
     let snap = src.take_snapshot_full().unwrap();
 
@@ -1285,7 +1286,7 @@ fn snapshot_restore_syncs_pci_intx_levels_into_interrupt_controller() {
     {
         let mut ints = interrupts.borrow_mut();
         let low = 0x51u32 | (1 << 13) | (1 << 15);
-        program_ioapic_entry(&mut ints, 10, low, 0);
+        program_ioapic_entry(&mut ints, gsi, low, 0);
     }
 
     assert_eq!(interrupts.borrow().get_pending(), Some(0x51));
@@ -1296,26 +1297,27 @@ fn snapshot_restore_is_independent_of_devices_section_order() {
     let mut src = Machine::new(pc_machine_config()).unwrap();
     let interrupts = src.platform_interrupts().unwrap();
     let pci_intx = src.pci_intx_router().unwrap();
+    let bdf = PciBdf::new(0, 0, 0);
+    let pin = PciInterruptPin::IntA;
+    let gsi = pci_intx.borrow().gsi_for_intx(bdf, pin);
 
-    // Route IOAPIC GSI10 -> vector 0x52, active-low, level-triggered, masked.
+    // Route the endpoint's derived GSI -> vector 0x52, active-low, level-triggered, masked.
     {
         let mut ints = interrupts.borrow_mut();
         ints.set_mode(PlatformInterruptMode::Apic);
         let low = 0x52u32 | (1 << 13) | (1 << 15) | (1 << 16);
-        program_ioapic_entry(&mut ints, 10, low, 0);
+        program_ioapic_entry(&mut ints, gsi, low, 0);
     }
 
-    // Assert a PCI INTx line that routes to GSI10 (device 0, INTA#).
+    // Assert the PCI INTx line whose route was programmed above.
     {
         let mut ints = interrupts.borrow_mut();
-        pci_intx
-            .borrow_mut()
-            .assert_intx(PciBdf::new(0, 0, 0), PciInterruptPin::IntA, &mut *ints);
+        pci_intx.borrow_mut().assert_intx(bdf, pin, &mut *ints);
     }
 
     // Corrupt the sink state to ensure restore must call `sync_levels_to_sink` even if
     // snapshot device ordering changes.
-    interrupts.borrow_mut().lower_irq(InterruptInput::Gsi(10));
+    interrupts.borrow_mut().lower_irq(InterruptInput::Gsi(gsi));
 
     let snap = src.take_snapshot_full().unwrap();
     let snap = reverse_devices_section(&snap);
@@ -1331,7 +1333,7 @@ fn snapshot_restore_is_independent_of_devices_section_order() {
     {
         let mut ints = interrupts.borrow_mut();
         let low = 0x52u32 | (1 << 13) | (1 << 15);
-        program_ioapic_entry(&mut ints, 10, low, 0);
+        program_ioapic_entry(&mut ints, gsi, low, 0);
     }
 
     assert_eq!(interrupts.borrow().get_pending(), Some(0x52));

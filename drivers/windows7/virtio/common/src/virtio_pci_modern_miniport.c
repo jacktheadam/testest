@@ -758,7 +758,7 @@ VirtioPciNotifyQueue(_Inout_ VIRTIO_PCI_DEVICE *Dev, _In_ USHORT QueueIndex)
 
     /*
      * Ensure all prior ring writes are visible before writing the notify doorbell.
-     * See docs/virtio/virtqueue-split-ring-win7.md for the publish/notify ordering.
+     * See wiki/areas/drivers-windows.md for the publish/notify ordering.
      */
     KeMemoryBarrier();
     WRITE_REGISTER_USHORT((volatile USHORT *)notifyAddr, QueueIndex);

@@ -21,7 +21,7 @@ pub fn router() -> Router<AppState> {
             get(list_images).head(head_images).options(options_images),
         )
         .route(
-            "/v1/images/:id/meta",
+            "/v1/images/{id}/meta",
             get(get_image_meta)
                 .head(head_image_meta)
                 .options(options_image_meta),
@@ -41,7 +41,7 @@ pub(crate) async fn image_id_path_len_guard(
         return next.run(req).await;
     };
 
-    // Only enforce on `/v1/images/:id/meta`.
+    // Only enforce on `/v1/images/{id}/meta`.
     if rest.contains('/') {
         return next.run(req).await;
     }
@@ -340,7 +340,7 @@ mod tests {
         let store = std::sync::Arc::new(crate::store::LocalFsImageStore::new("."));
         let state = AppState::new(store);
         let app = Router::new()
-            .route("/v1/images/:id/meta", get(|| async { StatusCode::OK }))
+            .route("/v1/images/{id}/meta", get(|| async { StatusCode::OK }))
             .with_state(state.clone())
             .route_layer(axum::middleware::from_fn_with_state(
                 state,

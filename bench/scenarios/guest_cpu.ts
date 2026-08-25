@@ -21,8 +21,8 @@ export const guestCpuScenario: Scenario = {
     }
 
     const server = await createServer({
-      root: path.resolve("web"),
-      configFile: path.resolve("web/vite.config.ts"),
+      root: path.resolve("apps/web"),
+      configFile: path.resolve("apps/web/vite.config.ts"),
       server: { port: 0 },
     });
 

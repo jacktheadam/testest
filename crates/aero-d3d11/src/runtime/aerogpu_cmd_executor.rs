@@ -2016,16 +2016,16 @@ impl AerogpuD3d11Executor {
         let empty_bg_entries: [BindGroupCacheEntry<'_>; 0] = [];
         let empty_bind_group =
             bind_group_cache.get_or_create(&device, &empty_bgl, &empty_bg_entries);
-        let empty_bind_groups_before_vertex_pulling: Vec<Arc<wgpu::BindGroup>> =
-            (0..VERTEX_PULLING_GROUP)
-                .map(|_| {
-                    Arc::new(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("aerogpu_cmd empty bind group"),
-                        layout: empty_bgl.layout.as_ref(),
-                        entries: &[],
-                    }))
-                })
-                .collect();
+        let empty_bind_groups_before_vertex_pulling: Vec<Arc<wgpu::BindGroup>> = (0
+            ..VERTEX_PULLING_GROUP)
+            .map(|_| {
+                Arc::new(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("aerogpu_cmd empty bind group"),
+                    layout: empty_bgl.layout.as_ref(),
+                    entries: &[],
+                }))
+            })
+            .collect();
 
         Self {
             caps,
@@ -4623,10 +4623,6 @@ impl AerogpuD3d11Executor {
                 gs_input_reg_count
             ));
             out.push_str(&format!(
-                "const GS_INPUT_VERTS_PER_PRIM: u32 = {}u;\n",
-                VERTS_PER_PRIM
-            ));
-            out.push_str(&format!(
                 "const TEMP_REG_COUNT: u32 = {}u;\n\n",
                 temp_reg_count
             ));
@@ -6236,10 +6232,6 @@ impl AerogpuD3d11Executor {
             out.push_str(&format!(
                 "const GS_INPUT_REG_COUNT: u32 = {}u;\n",
                 gs_input_reg_count
-            ));
-            out.push_str(&format!(
-                "const GS_INPUT_VERTS_PER_PRIM: u32 = {}u;\n",
-                VERTS_PER_PRIM
             ));
             out.push_str(&format!(
                 "const TEMP_REG_COUNT: u32 = {}u;\n\n",

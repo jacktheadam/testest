@@ -170,7 +170,7 @@ fn el_torito_validation_checksum(entry: &[u8; 32]) -> u16 {
 #[allow(dead_code)]
 struct TestBus {
     a20_enabled: bool,
-    inner: PhysicalMemoryBus,
+    inner: PhysicalMemoryBus<memory::DenseMemory>,
 }
 
 #[allow(dead_code)]
@@ -179,7 +179,7 @@ impl TestBus {
         let ram = DenseMemory::new(size).expect("guest RAM allocation failed");
         Self {
             a20_enabled: false,
-            inner: PhysicalMemoryBus::new(Box::new(ram)),
+            inner: PhysicalMemoryBus::new(ram),
         }
     }
 

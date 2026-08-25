@@ -222,6 +222,26 @@ fn sign_extend_imm(width: Width, imm: u64) -> u64 {
     width.sign_extend(width.truncate(imm))
 }
 
+fn group2_shift_op(group: u8, what: &'static str) -> Result<ShiftOp, DecodeError> {
+    match group {
+        0 => Ok(ShiftOp::Rol),
+        1 => Ok(ShiftOp::Ror),
+        4 => Ok(ShiftOp::Shl),
+        5 => Ok(ShiftOp::Shr),
+        7 => Ok(ShiftOp::Sar),
+        _ => Err(DecodeError {
+            message: match what {
+                "0xC0" => "unsupported 0xC0 group",
+                "0xC1" => "unsupported 0xC1 group",
+                "0xD0" => "unsupported 0xD0 group",
+                "0xD2" => "unsupported 0xD2 group",
+                "0xD3" => "unsupported 0xD3 group",
+                _ => "unsupported 0xD1 group",
+            },
+        }),
+    }
+}
+
 fn decode_modrm_operand(
     bytes: &[u8],
     offset: &mut usize,
@@ -612,26 +632,56 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
             let dst = decode_reg_from_modrm(modrm, rex.present, width)?;
             InstKind::Lea { dst, addr, width }
         }
-        0x01 | 0x03 | 0x21 | 0x23 | 0x09 | 0x0b | 0x31 | 0x33 | 0x29 | 0x2b | 0x39 | 0x3b
-        | 0x85 => {
+        0x00 | 0x01 | 0x02 | 0x03 | 0x08 | 0x09 | 0x0a | 0x0b | 0x10 | 0x11 | 0x12 | 0x13
+        | 0x18 | 0x19 | 0x1a | 0x1b | 0x20 | 0x21 | 0x22 | 0x23 | 0x28 | 0x29 | 0x2a | 0x2b
+        | 0x30 | 0x31 | 0x32 | 0x33 | 0x38 | 0x39 | 0x3a | 0x3b | 0x84 | 0x85 => {
+            // Even opcodes in this group are the 8-bit forms. WinSetup's LZX
+            // bitstream refill is `sub dil, cl` / `test dil, dil` (0x2A / 0x84).
+            let w = if matches!(
+                opcode1,
+                0x00 | 0x02
+                    | 0x08
+                    | 0x0a
+                    | 0x10
+                    | 0x12
+                    | 0x18
+                    | 0x1a
+                    | 0x20
+                    | 0x22
+                    | 0x28
+                    | 0x2a
+                    | 0x30
+                    | 0x32
+                    | 0x38
+                    | 0x3a
+                    | 0x84
+            ) {
+                Width::W8
+            } else {
+                width
+            };
             let (rm_op, modrm) =
-                decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, width)?;
-            let reg_op = Operand::Reg(decode_reg_from_modrm(modrm, rex.present, width)?);
+                decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, w)?;
+            let reg_op = Operand::Reg(decode_reg_from_modrm(modrm, rex.present, w)?);
 
             let (op, is_cmp, is_test, dst, src) = match opcode1 {
-                0x01 => (AluOp::Add, false, false, rm_op, reg_op),
-                0x03 => (AluOp::Add, false, false, reg_op, rm_op),
-                0x21 => (AluOp::And, false, false, rm_op, reg_op),
-                0x23 => (AluOp::And, false, false, reg_op, rm_op),
-                0x09 => (AluOp::Or, false, false, rm_op, reg_op),
-                0x0b => (AluOp::Or, false, false, reg_op, rm_op),
-                0x31 => (AluOp::Xor, false, false, rm_op, reg_op),
-                0x33 => (AluOp::Xor, false, false, reg_op, rm_op),
-                0x29 => (AluOp::Sub, false, false, rm_op, reg_op),
-                0x2b => (AluOp::Sub, false, false, reg_op, rm_op),
-                0x39 => (AluOp::Sub, true, false, rm_op, reg_op),
-                0x3b => (AluOp::Sub, true, false, reg_op, rm_op),
-                0x85 => (AluOp::And, false, true, rm_op, reg_op),
+                0x00 | 0x01 => (AluOp::Add, false, false, rm_op, reg_op),
+                0x02 | 0x03 => (AluOp::Add, false, false, reg_op, rm_op),
+                0x10 | 0x11 => (AluOp::Adc, false, false, rm_op, reg_op),
+                0x12 | 0x13 => (AluOp::Adc, false, false, reg_op, rm_op),
+                0x18 | 0x19 => (AluOp::Sbb, false, false, rm_op, reg_op),
+                0x1a | 0x1b => (AluOp::Sbb, false, false, reg_op, rm_op),
+                0x20 | 0x21 => (AluOp::And, false, false, rm_op, reg_op),
+                0x22 | 0x23 => (AluOp::And, false, false, reg_op, rm_op),
+                0x08 | 0x09 => (AluOp::Or, false, false, rm_op, reg_op),
+                0x0a | 0x0b => (AluOp::Or, false, false, reg_op, rm_op),
+                0x30 | 0x31 => (AluOp::Xor, false, false, rm_op, reg_op),
+                0x32 | 0x33 => (AluOp::Xor, false, false, reg_op, rm_op),
+                0x28 | 0x29 => (AluOp::Sub, false, false, rm_op, reg_op),
+                0x2a | 0x2b => (AluOp::Sub, false, false, reg_op, rm_op),
+                0x38 | 0x39 => (AluOp::Sub, true, false, rm_op, reg_op),
+                0x3a | 0x3b => (AluOp::Sub, true, false, reg_op, rm_op),
+                0x84 | 0x85 => (AluOp::And, false, true, rm_op, reg_op),
                 _ => unreachable!(),
             };
 
@@ -639,20 +689,20 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
                 InstKind::Cmp {
                     lhs: dst,
                     rhs: src,
-                    width,
+                    width: w,
                 }
             } else if is_test {
                 InstKind::Test {
                     lhs: dst,
                     rhs: src,
-                    width,
+                    width: w,
                 }
             } else {
                 InstKind::Alu {
                     op,
                     dst,
                     src,
-                    width,
+                    width: w,
                 }
             }
         }
@@ -710,11 +760,49 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
                 }
             }
         }
-        0x81 | 0x83 => {
+        0x69 | 0x6b => {
+            // IMUL r, r/m, imm16/32 (0x69) or imm8 (0x6B). Destination is the
+            // ModRM.reg field; the r/m operand is the multiplicand.
+            let (src, modrm) =
+                decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, width)?;
+            let dst = decode_reg_from_modrm(modrm, rex.present, width)?;
+            let imm = if opcode1 == 0x6b {
+                let imm8 = read_u8(bytes, offset)? as i8 as i64 as u64;
+                offset += 1;
+                width.truncate(imm8)
+            } else if width == Width::W16 {
+                let imm16 = read_le(bytes, offset, 2)? as u16;
+                offset += 2;
+                imm16 as u64
+            } else {
+                let imm32 = read_le(bytes, offset, 4)? as u32;
+                offset += 4;
+                if width == Width::W64 {
+                    sign_extend_imm(Width::W32, imm32 as u64)
+                } else {
+                    imm32 as u64
+                }
+            };
+            InstKind::Imul3 {
+                dst,
+                src,
+                imm,
+                width,
+            }
+        }
+        0x80 | 0x81 | 0x83 => {
+            // 0x80 is the 8-bit r/m8,imm8 group (WinSetup expand scans
+            // `cmp byte [rdx], 0xe8` and bitstream refill uses `add dil, 0x10`).
+            // 0x83 sign-extends imm8; 0x81 uses imm16/imm32.
+            let width = if opcode1 == 0x80 { Width::W8 } else { width };
             let (dst, modrm) =
                 decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, width)?;
             let group = modrm.reg & 0x7;
-            let imm = if opcode1 == 0x83 {
+            let imm = if opcode1 == 0x80 {
+                let imm8 = read_u8(bytes, offset)?;
+                offset += 1;
+                imm8 as u64
+            } else if opcode1 == 0x83 {
                 let imm8 = read_u8(bytes, offset)? as i8 as i64 as u64;
                 offset += 1;
                 width.truncate(imm8)
@@ -745,6 +833,18 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
                     src: Operand::Imm(imm),
                     width,
                 },
+                2 => InstKind::Alu {
+                    op: AluOp::Adc,
+                    dst,
+                    src: Operand::Imm(imm),
+                    width,
+                },
+                3 => InstKind::Alu {
+                    op: AluOp::Sbb,
+                    dst,
+                    src: Operand::Imm(imm),
+                    width,
+                },
                 4 => InstKind::Alu {
                     op: AluOp::And,
                     dst,
@@ -770,7 +870,7 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
                 },
                 _ => {
                     return Err(DecodeError {
-                        message: "unsupported 0x81/0x83 group",
+                        message: "unsupported 0x80/0x81/0x83 group",
                     })
                 }
             }
@@ -778,19 +878,8 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
         0xd1 => {
             let (dst, modrm) =
                 decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, width)?;
-            let group = modrm.reg & 0x7;
-            let op = match group {
-                4 => ShiftOp::Shl,
-                5 => ShiftOp::Shr,
-                7 => ShiftOp::Sar,
-                _ => {
-                    return Err(DecodeError {
-                        message: "unsupported 0xD1 group",
-                    })
-                }
-            };
             InstKind::Shift {
-                op,
+                op: group2_shift_op(modrm.reg & 0x7, "0xD1")?,
                 dst,
                 count: 1,
                 width,
@@ -799,38 +888,35 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
         0xd0 => {
             let (dst, modrm) =
                 decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, Width::W8)?;
-            let group = modrm.reg & 0x7;
-            let op = match group {
-                4 => ShiftOp::Shl,
-                5 => ShiftOp::Shr,
-                7 => ShiftOp::Sar,
-                _ => {
-                    return Err(DecodeError {
-                        message: "unsupported 0xD0 group",
-                    })
-                }
-            };
             InstKind::Shift {
-                op,
+                op: group2_shift_op(modrm.reg & 0x7, "0xD0")?,
                 dst,
                 count: 1,
                 width: Width::W8,
             }
         }
+        0xd2 => {
+            let (dst, modrm) =
+                decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, Width::W8)?;
+            InstKind::ShiftCl {
+                op: group2_shift_op(modrm.reg & 0x7, "0xD2")?,
+                dst,
+                width: Width::W8,
+            }
+        }
+        0xd3 => {
+            let (dst, modrm) =
+                decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, width)?;
+            InstKind::ShiftCl {
+                op: group2_shift_op(modrm.reg & 0x7, "0xD3")?,
+                dst,
+                width,
+            }
+        }
         0xc1 => {
             let (dst, modrm) =
                 decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, width)?;
-            let group = modrm.reg & 0x7;
-            let op = match group {
-                4 => ShiftOp::Shl,
-                5 => ShiftOp::Shr,
-                7 => ShiftOp::Sar,
-                _ => {
-                    return Err(DecodeError {
-                        message: "unsupported 0xC1 group",
-                    })
-                }
-            };
+            let op = group2_shift_op(modrm.reg & 0x7, "0xC1")?;
             let imm8 = read_u8(bytes, offset)?;
             offset += 1;
             InstKind::Shift {
@@ -843,17 +929,7 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
         0xc0 => {
             let (dst, modrm) =
                 decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, Width::W8)?;
-            let group = modrm.reg & 0x7;
-            let op = match group {
-                4 => ShiftOp::Shl,
-                5 => ShiftOp::Shr,
-                7 => ShiftOp::Sar,
-                _ => {
-                    return Err(DecodeError {
-                        message: "unsupported 0xC0 group",
-                    })
-                }
-            };
+            let op = group2_shift_op(modrm.reg & 0x7, "0xC0")?;
             let imm8 = read_u8(bytes, offset)?;
             offset += 1;
             InstKind::Shift {
@@ -861,6 +937,38 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
                 dst,
                 count: imm8,
                 width: Width::W8,
+            }
+        }
+        0xf6 => {
+            let (dst, modrm) =
+                decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, Width::W8)?;
+            match modrm.reg & 0x7 {
+                2 => InstKind::Not {
+                    dst,
+                    width: Width::W8,
+                },
+                3 => InstKind::Neg {
+                    dst,
+                    width: Width::W8,
+                },
+                _ => {
+                    return Err(DecodeError {
+                        message: "unsupported 0xF6 group",
+                    })
+                }
+            }
+        }
+        0xf7 => {
+            let (dst, modrm) =
+                decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, width)?;
+            match modrm.reg & 0x7 {
+                2 => InstKind::Not { dst, width },
+                3 => InstKind::Neg { dst, width },
+                _ => {
+                    return Err(DecodeError {
+                        message: "unsupported 0xF7 group",
+                    })
+                }
             }
         }
         0xff => {
@@ -1140,6 +1248,34 @@ fn decode_one_inner(rip: u64, bytes: &[u8], bitness: u32) -> Result<DecodedInst,
                         dst,
                         src,
                         width,
+                    }
+                }
+                0xaf => {
+                    // IMUL r, r/m  (two-operand). Destination is ModRM.reg.
+                    let (src, modrm) =
+                        decode_modrm_operand(bytes, &mut offset, bitness, rex, rex.present, width)?;
+                    let dst = Operand::Reg(decode_reg_from_modrm(modrm, rex.present, width)?);
+                    InstKind::Alu {
+                        op: AluOp::Imul,
+                        dst,
+                        src,
+                        width,
+                    }
+                }
+                0xc8..=0xcf => {
+                    // BSWAP r32/r64. 16-bit operand size is undefined.
+                    if width == Width::W16 {
+                        InstKind::Invalid
+                    } else {
+                        let reg_code = (opcode2 - 0xc8) | if rex.b { 8 } else { 0 };
+                        InstKind::Bswap {
+                            dst: Reg {
+                                gpr: decode_gpr(reg_code)?,
+                                width,
+                                high8: false,
+                            },
+                            width,
+                        }
                     }
                 }
                 _ => {

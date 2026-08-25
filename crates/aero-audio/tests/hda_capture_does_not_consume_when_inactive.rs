@@ -66,7 +66,7 @@ fn hda_capture_does_not_consume_capture_source_when_stream_inactive() {
         sd.lvi = 0;
         sd.fmt = fmt_raw;
         // SRST=1, stream number 2, RUN=0.
-        sd.ctl = (1 << 0) | (2 << 20);
+        sd.ctl = 2 << 20;
     }
 
     let mut capture = CountingCaptureSource::default();
@@ -78,7 +78,7 @@ fn hda_capture_does_not_consume_capture_source_when_stream_inactive() {
 
     // 2) Stream active: once RUN is set and the stream tag matches the codec, samples should be
     // consumed.
-    hda.stream_mut(1).ctl = (1 << 0) | (1 << 1) | (2 << 20);
+    hda.stream_mut(1).ctl = (1 << 1) | (2 << 20);
     hda.process_with_capture(&mut mem, frames, &mut capture);
     assert!(capture.read_calls > 0);
     assert!(capture.samples_read > 0);

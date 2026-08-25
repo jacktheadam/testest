@@ -13,12 +13,12 @@ function extractAeroEnvVarsFromFile(relPath) {
   return new Set(matches);
 }
 
-test("docs/env-vars.md documents env vars used by agent helper scripts", () => {
-  const docsPath = path.join(repoRoot, "docs", "env-vars.md");
+test("wiki/areas/testing.md documents env vars used by agent helper scripts", () => {
+  const docsPath = path.join(repoRoot, "wiki", "areas", "testing.md");
   const docs = fs.readFileSync(docsPath, "utf8");
 
   // `scripts/agent-env.sh` and `scripts/safe-run.sh` are used heavily in agent sandboxes. We want
-  // the canonical env var reference (`docs/env-vars.md`) to stay in sync with the knobs those
+  // the canonical env var reference (`wiki/areas/testing.md`) to stay in sync with the knobs those
   // scripts actually parse, so future additions don't silently go undocumented.
   const required = new Set([
     ...extractAeroEnvVarsFromFile("scripts/agent-env.sh"),
@@ -51,7 +51,7 @@ test("docs/env-vars.md documents env vars used by agent helper scripts", () => {
   assert.deepEqual(
     missing,
     [],
-    `docs/env-vars.md is missing entries for env vars used by agent helper scripts:\n${missing.join("\n")}`,
+    `wiki/areas/testing.md is missing entries for env vars used by agent helper scripts:\n${missing.join("\n")}`,
   );
 });
 

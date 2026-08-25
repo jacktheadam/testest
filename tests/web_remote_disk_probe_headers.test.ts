@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
 
-import { probeRemoteDisk } from "../web/src/platform/remote_disk";
+import { probeRemoteDisk } from "../apps/web/src/platform/remote_disk";
 
 import { sendEmpty, sendText } from "./helpers/http_test_response.js";
 

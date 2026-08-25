@@ -15,8 +15,7 @@
 //! traits used by the Rust disk/controller stack.
 //!
 //! See:
-//! - `docs/19-indexeddb-storage-story.md`
-//! - `docs/20-storage-trait-consolidation.md`
+//! - `wiki/areas/storage.md`
 //!
 //! Main types:
 //!

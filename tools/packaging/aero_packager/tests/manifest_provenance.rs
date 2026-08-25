@@ -109,8 +109,12 @@ fn provenance_hashes_are_stable_for_json_key_order_and_whitespace_changes() -> a
         source_date_epoch: 0,
     };
     let outputs1 = aero_packager::package_guest_tools(&config1)?;
-    let manifest1: aero_packager::Manifest = serde_json::from_slice(&fs::read(&outputs1.manifest_path)?)?;
-    let prov1 = manifest1.provenance.as_ref().expect("provenance should be present");
+    let manifest1: aero_packager::Manifest =
+        serde_json::from_slice(&fs::read(&outputs1.manifest_path)?)?;
+    let prov1 = manifest1
+        .provenance
+        .as_ref()
+        .expect("provenance should be present");
 
     // Rewrite both JSON inputs with different formatting and key order.
     let spec2 = reverse_object_key_order(spec);
@@ -128,8 +132,12 @@ fn provenance_hashes_are_stable_for_json_key_order_and_whitespace_changes() -> a
         ..config1.clone()
     };
     let outputs2 = aero_packager::package_guest_tools(&config2)?;
-    let manifest2: aero_packager::Manifest = serde_json::from_slice(&fs::read(&outputs2.manifest_path)?)?;
-    let prov2 = manifest2.provenance.as_ref().expect("provenance should be present");
+    let manifest2: aero_packager::Manifest =
+        serde_json::from_slice(&fs::read(&outputs2.manifest_path)?)?;
+    let prov2 = manifest2
+        .provenance
+        .as_ref()
+        .expect("provenance should be present");
 
     // Hashes should be stable for the same logical JSON.
     assert_eq!(prov1.packaging_spec_sha256, prov2.packaging_spec_sha256);

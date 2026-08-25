@@ -14,7 +14,7 @@ const (
 	dataChannelLabelUDP = "udp"
 
 	// dataChannelLabelL2 is the DataChannel label used for the Option C L2 tunnel
-	// (raw Ethernet frames). See `docs/l2-tunnel-protocol.md`.
+	// (raw Ethernet frames). See `wiki/areas/networking.md`.
 	dataChannelLabelL2 = l2tunnel.DataChannelLabel
 )
 

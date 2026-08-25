@@ -1,6 +1,6 @@
 //! Minimal EHCI (USB 2.0) host controller model.
 //!
-//! Design notes + emulator contracts: see `docs/usb-ehci.md`.
+//! Design notes + emulator contracts: see the USB and input area page.
 //!
 //! This is intentionally a *bring-up* implementation: it models the capability/operational MMIO
 //! registers and an EHCI root hub with per-port state machines. Minimal schedule engines are
@@ -186,8 +186,14 @@ impl EhciController {
         // - No 64-bit addressing (bit 0 = 0).
         // - Programmable Frame List Flag (bit 1 = 1).
         // - Asynchronous Schedule Park Capability (bit 2 = 1).
-        // - EECP points at the USB Legacy Support extended capability.
-        0x0000_0006 | ((EECP_OFFSET as u32) << HCCPARAMS_EECP_SHIFT)
+        // - EECP = 0: the USB Legacy Support extended capability would normally
+        //   be read from PCI config space at this offset, but Aero serves it
+        //   from MMIO instead. Advertising a non-zero EECP makes Win7's
+        //   usbehci.sys read config offset 0x40 (which returns 0 = list
+        //   terminator) and skip the BIOS-ownership handoff. With EECP=0 the
+        //   driver correctly concludes there is no legacy-support capability.
+        //   Aero never enforces BIOS SMI ownership, so this is safe.
+        0x0000_0006
     }
 
     fn reset_regs(&mut self) {

@@ -33,8 +33,8 @@ const MAX_PENDING_REPORTS: usize = 128;
 ///
 /// The 8-byte packed layout is kept in sync with the browser-side packing helpers
 /// (`web/src/input/gamepad.ts`) via shared fixtures:
-/// - `docs/fixtures/hid_gamepad_report_vectors.json` (in-range packing/layout)
-/// - `docs/fixtures/hid_gamepad_report_clamping_vectors.json` (clamping/masking semantics)
+/// - `protocol-vectors/hid_gamepad_report_vectors.json` (in-range packing/layout)
+/// - `protocol-vectors/hid_gamepad_report_clamping_vectors.json` (clamping/masking semantics)
 pub struct GamepadReport {
     pub buttons: u16,
     /// Hat switch value (low 4 bits). `8` is used as the null/centered state.

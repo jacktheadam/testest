@@ -67,7 +67,7 @@ fn hda_capture_telemetry_tracks_drops_and_underruns() {
         sd.lvi = 0;
         sd.fmt = fmt_raw;
         // SRST | RUN | stream number 2.
-        sd.ctl = (1 << 0) | (1 << 1) | (2 << 20);
+        sd.ctl = (1 << 1) | (2 << 20);
     }
 
     assert_eq!(hda.capture_telemetry(), HdaCaptureTelemetry::default());

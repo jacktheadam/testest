@@ -414,7 +414,7 @@ static NTSTATUS VirtioStatusQTrySubmit(_Inout_ PVIRTIO_STATUSQ Q)
      * after publishing new available entries to keep behavior deterministic and
      * avoid relying on suppression bits that are out of scope for the contract.
      *
-     * See docs/virtio/virtqueue-split-ring-win7.md and virtio-snd's split queue
+     * See wiki/areas/drivers-windows.md and virtio-snd's split queue
      * implementation for the same rationale.
      */
     shouldNotify = (Q->Vq->num_added != 0);

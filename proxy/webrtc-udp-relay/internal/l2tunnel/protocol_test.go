@@ -159,7 +159,7 @@ func TestEncodeStructuredErrorPayload_Truncation(t *testing.T) {
 }
 
 func TestStructuredErrorCodes_Stable(t *testing.T) {
-	// These codes are part of the on-the-wire contract (see docs/l2-tunnel-protocol.md).
+	// These codes are part of the on-the-wire contract (see wiki/areas/networking.md).
 	if errorCodeProtocolError != 1 {
 		t.Fatalf("errorCodeProtocolError=%d, want 1", errorCodeProtocolError)
 	}

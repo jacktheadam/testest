@@ -65,7 +65,9 @@ fn boot_int10_vbe_scanline_bytes_and_display_start_affect_scanout_base() {
     // Pick a scanline length that differs from the mode's default pitch (1024*4) so we can
     // observe that the scanout path respects `INT 10h AX=4F06` rather than assuming a tightly
     // packed `width * bytes_per_pixel` stride.
-    let bytes_per_scan_line = 4101u16;
+    // Bochs exposes pitch as a whole-pixel virtual width; use an exactly representable non-default
+    // pitch, matching SeaBIOS' 4F06 behavior.
+    let bytes_per_scan_line = 4100u16;
     let x_off = 1u16;
     let y_off = 4u16; // ensure stride mismatch changes base by >=4 bytes (no overlap between pixels)
 
@@ -95,8 +97,8 @@ fn boot_int10_vbe_scanline_bytes_and_display_start_affect_scanout_base() {
     let bytes_per_pixel = 4u64;
     let base = m.vbe_lfb_base();
 
-    // INT 10h AX=4F06 BL=2 sets the logical scan line length in bytes. The BIOS preserves
-    // byte-granular pitches but clamps them to at least the mode's natural pitch (1024*4).
+    // INT 10h AX=4F06 BL=2 sets the logical scan line length in bytes. This request is exactly
+    // representable by the Bochs virtual-width register and exceeds the natural 1024*4 pitch.
     let effective_bytes_per_scan_line =
         u64::from(bytes_per_scan_line).max(1024u64 * bytes_per_pixel);
 

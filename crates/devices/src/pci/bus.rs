@@ -650,7 +650,14 @@ impl PciConfigMechanism1 {
                 let function = ((self.addr >> 8) & 0x07) as u8;
                 let reg = (self.addr & 0xFC) as u16;
                 let offset = reg + (port - CONFIG_DATA_PORT);
-                pci.read_config(PciBdf::new(bus, device, function), offset, size)
+                let bdf = PciBdf::new(bus, device, function);
+                let value = pci.read_config(bdf, offset, size);
+                if log_stdvga_pci_config() && bdf == PciBdf::new(0, 7, 0) {
+                    eprintln!(
+                        "AERO_LOG_STDVGA_PCI: read bdf={bdf:?} offset={offset:#04x} size={size} value={value:#010x}"
+                    );
+                }
+                value
             }
             _ => all_ones(size),
         }
@@ -678,11 +685,24 @@ impl PciConfigMechanism1 {
                 let function = ((self.addr >> 8) & 0x07) as u8;
                 let reg = (self.addr & 0xFC) as u16;
                 let offset = reg + (port - CONFIG_DATA_PORT);
-                pci.write_config(PciBdf::new(bus, device, function), offset, size, value);
+                let bdf = PciBdf::new(bus, device, function);
+                if log_stdvga_pci_config() && bdf == PciBdf::new(0, 7, 0) {
+                    eprintln!(
+                        "AERO_LOG_STDVGA_PCI: write bdf={bdf:?} offset={offset:#04x} size={size} value={value:#010x}"
+                    );
+                }
+                pci.write_config(bdf, offset, size, value);
             }
             _ => {}
         }
     }
+}
+
+fn log_stdvga_pci_config() -> bool {
+    use std::sync::OnceLock;
+
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("AERO_LOG_STDVGA_PCI").is_some())
 }
 
 impl IoSnapshot for PciConfigMechanism1 {

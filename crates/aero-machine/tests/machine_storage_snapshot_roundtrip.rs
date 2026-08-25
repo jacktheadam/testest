@@ -593,7 +593,7 @@ fn machine_storage_snapshot_roundtrip_preserves_controllers_and_allows_backend_r
     let snapshot = src.take_snapshot_full().unwrap();
 
     // Canonical snapshot encoding: store storage controller(s) under a single DISK_CONTROLLER entry
-    // using the DSKC wrapper (per docs/16-snapshots.md). This avoids `(id, version, flags)`
+    // using the DSKC wrapper (per the platform and firmware area page). This avoids `(id, version, flags)`
     // collisions when multiple controllers share the same io-snapshot version.
     {
         let mut r = io::Cursor::new(snapshot.as_slice());

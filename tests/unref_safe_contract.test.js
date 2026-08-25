@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { unrefBestEffort } from "../src/unref_safe.js";
-import unrefSafeCjs from "../src/unref_safe.cjs";
-import { unrefBestEffort as unrefBestEffortWeb } from "../web/src/unrefSafe.ts";
+import { unrefBestEffort } from "../packages/transport-safety/src/unref_safe.js";
+import unrefSafeCjs from "../packages/transport-safety/src/unref_safe.cjs";
+import { unrefBestEffort as unrefBestEffortWeb } from "../apps/web/src/unrefSafe.ts";
 
 const implementations = [
   { name: "esm", unrefBestEffort },
   { name: "cjs", unrefBestEffort: unrefSafeCjs.unrefBestEffort },
-  { name: "web", unrefBestEffort: unrefBestEffortWeb },
+  { name: "apps/web", unrefBestEffort: unrefBestEffortWeb },
 ];
 
 for (const impl of implementations) {

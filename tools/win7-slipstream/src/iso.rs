@@ -42,31 +42,27 @@ impl IsoExtractor {
 
     pub fn extract(&self, input_iso: &Path, dest_dir: &Path, verbose: bool) -> Result<()> {
         match &self.kind {
-            IsoExtractorKind::SevenZip { exe } => {
-                run(
-                    Command::new(exe)
-                        .arg("x")
-                        .arg("-y")
-                        .arg(format!("-o{}", dest_dir.display()))
-                        .arg(input_iso),
-                    verbose,
-                )
-                .context("7z extraction failed")
-            }
-            IsoExtractorKind::Xorriso { exe } => {
-                run(
-                    Command::new(exe)
-                        .arg("-osirrox")
-                        .arg("on")
-                        .arg("-indev")
-                        .arg(input_iso)
-                        .arg("-extract")
-                        .arg("/")
-                        .arg(dest_dir),
-                    verbose,
-                )
-                .context("xorriso extraction failed")
-            }
+            IsoExtractorKind::SevenZip { exe } => run(
+                Command::new(exe)
+                    .arg("x")
+                    .arg("-y")
+                    .arg(format!("-o{}", dest_dir.display()))
+                    .arg(input_iso),
+                verbose,
+            )
+            .context("7z extraction failed"),
+            IsoExtractorKind::Xorriso { exe } => run(
+                Command::new(exe)
+                    .arg("-osirrox")
+                    .arg("on")
+                    .arg("-indev")
+                    .arg(input_iso)
+                    .arg("-extract")
+                    .arg("/")
+                    .arg(dest_dir),
+                verbose,
+            )
+            .context("xorriso extraction failed"),
             IsoExtractorKind::PowerShellMount { exe } => {
                 let script = r#"
 param([string]$Iso,[string]$Dest)
@@ -174,7 +170,13 @@ impl IsoBuilder {
         ))
     }
 
-    pub fn build(&self, input_iso: &Path, iso_root: &Path, output_iso: &Path, verbose: bool) -> Result<()> {
+    pub fn build(
+        &self,
+        input_iso: &Path,
+        iso_root: &Path,
+        output_iso: &Path,
+        verbose: bool,
+    ) -> Result<()> {
         let volume_id = self
             .read_volume_id(input_iso, verbose)
             .unwrap_or_else(|| "WIN7_AERO".to_string());
@@ -200,9 +202,7 @@ impl IsoBuilder {
                 .join("boot")
                 .join("efisys_noprompt.bin"),
         ];
-        let uefi_boot = uefi_boot_candidates
-            .into_iter()
-            .find(|p| p.is_file());
+        let uefi_boot = uefi_boot_candidates.into_iter().find(|p| p.is_file());
 
         match &self.kind {
             IsoBuilderKind::Xorriso { exe } => {

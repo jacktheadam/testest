@@ -136,7 +136,7 @@ NTSTATUS VirtioPciInterruptsProgramMsixVectors(
  *     is enabled MSI-X is **exclusive**. `VIRTIO_PCI_MSI_NO_VECTOR` disables MSI-X delivery for
  *     that source and suppresses interrupts (no MSI-X message and no INTx fallback). To use legacy
  *     INTx + ISR semantics, MSI-X must be disabled at the PCI layer (see
- *     docs/windows7-virtio-driver-contract.md §1.8.4).
+ *     wiki/areas/drivers-windows.md).
  *   - Synchronize with in-flight DPCs (ConfigLock + per-queue locks).
  *
  * Callers must still ensure their device/queue state is otherwise quiesced.

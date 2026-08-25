@@ -13,7 +13,7 @@ test("IO-worker HDA PCI audio does not fast-forward after worker snapshot restor
   page.setDefaultTimeout(120_000);
 
   // We only need an origin context for the OPFS capability probe; avoid waiting for full page load.
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: "domcontentloaded" });
 
   const snapshotSupport = await probeOpfsSyncAccessHandle(page);
 

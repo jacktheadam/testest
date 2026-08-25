@@ -91,7 +91,10 @@ fn update_shift_flags(
     result: u64,
     flags: FlagSet,
 ) {
-    debug_assert!(matches!(op, ShiftOp::Shl | ShiftOp::Shr | ShiftOp::Sar));
+    debug_assert!(matches!(
+        op,
+        ShiftOp::Shl | ShiftOp::Shr | ShiftOp::Sar | ShiftOp::Rol | ShiftOp::Ror
+    ));
 
     // x86 shifts do not update any flags when the (masked) shift count is 0.
     if shift_amt == 0 {
@@ -120,6 +123,8 @@ fn update_shift_flags(
         let cf = match op {
             ShiftOp::Shl => ((lhs >> (width.bits() - shift_amt)) & 1) != 0,
             ShiftOp::Shr | ShiftOp::Sar => ((lhs >> (shift_amt - 1)) & 1) != 0,
+            ShiftOp::Rol => (result & 1) != 0,
+            ShiftOp::Ror => (result & sign_bit) != 0,
         };
         write_flag(cpu, Flag::Cf, cf);
     }
@@ -133,6 +138,11 @@ fn update_shift_flags(
             ShiftOp::Shr => (lhs & sign_bit) != 0,
             // For SAR count==1: OF = 0.
             ShiftOp::Sar => false,
+            ShiftOp::Rol => ((result & sign_bit) != 0) ^ ((result & 1) != 0),
+            ShiftOp::Ror => {
+                let msb2 = (result & (sign_bit >> 1)) != 0;
+                ((result & sign_bit) != 0) ^ msb2
+            }
         };
         write_flag(cpu, Flag::Of, of);
     }
@@ -244,8 +254,22 @@ fn exec_x86_block<B: Tier1Bus>(insts: &[DecodedInst], cpu: &mut CpuState, bus: &
                         let res = width.truncate(l.wrapping_add(r));
                         (res, Some(compute_add_flags(*width, l, r, res)))
                     }
+                    AluOp::Adc => {
+                        let cin = cpu.get_flag(aero_cpu_core::state::FLAG_CF) as u64;
+                        let wide = (l as u128) + (r as u128) + (cin as u128);
+                        let res = width.truncate(wide as u64);
+                        (res, Some(compute_add_flags(*width, l, r, res)))
+                    }
                     AluOp::Sub => {
                         let res = width.truncate(l.wrapping_sub(r));
+                        (res, Some(compute_sub_flags(*width, l, r, res)))
+                    }
+                    AluOp::Sbb => {
+                        let bin = cpu.get_flag(aero_cpu_core::state::FLAG_CF) as u64;
+                        let wide = (l as u128)
+                            .wrapping_sub(r as u128)
+                            .wrapping_sub(bin as u128);
+                        let res = width.truncate(wide as u64);
                         (res, Some(compute_sub_flags(*width, l, r, res)))
                     }
                     AluOp::And => {
@@ -285,10 +309,49 @@ fn exec_x86_block<B: Tier1Bus>(insts: &[DecodedInst], cpu: &mut CpuState, bus: &
                         let res = width.truncate((signed >> amt) as u64);
                         (res, None)
                     }
+                    AluOp::Imul => {
+                        let res = width.truncate(l.wrapping_mul(r));
+                        (res, None)
+                    }
                 };
                 if let Some(flags) = flags {
                     write_flagset(cpu, FlagSet::ALU, flags);
                 }
+                write_op(inst, cpu, bus, dst, *width, res);
+                cpu.rip = next;
+            }
+            InstKind::ShiftCl { op, dst, width } => {
+                let l = read_op(inst, cpu, bus, dst, *width);
+                let cl = read_gpr_part(cpu, Gpr::Rcx, Width::W8, false) as u32;
+                let shift_mask: u32 = if *width == Width::W64 { 63 } else { 31 };
+                let amt = cl & shift_mask;
+                let bits = width.bits();
+                let rot = amt % bits;
+                let res = match op {
+                    ShiftOp::Shl => width.truncate(l << amt),
+                    ShiftOp::Shr => width.truncate(l >> amt),
+                    ShiftOp::Sar => {
+                        let signed = width.sign_extend(l) as i64;
+                        width.truncate((signed >> amt) as u64)
+                    }
+                    ShiftOp::Rol if rot == 0 => width.truncate(l),
+                    ShiftOp::Rol => {
+                        width.truncate((l << rot) | (width.truncate(l) >> (bits - rot)))
+                    }
+                    ShiftOp::Ror if rot == 0 => width.truncate(l),
+                    ShiftOp::Ror => {
+                        width.truncate((width.truncate(l) >> rot) | (l << (bits - rot)))
+                    }
+                };
+                update_shift_flags(
+                    cpu,
+                    *width,
+                    *op,
+                    l,
+                    amt,
+                    res,
+                    FlagSet::ALU.without(FlagSet::AF),
+                );
                 write_op(inst, cpu, bus, dst, *width, res);
                 cpu.rip = next;
             }
@@ -303,12 +366,22 @@ fn exec_x86_block<B: Tier1Bus>(insts: &[DecodedInst], cpu: &mut CpuState, bus: &
                 // shifts (matching the Tier-1 IR interpreter semantics).
                 let shift_mask: u32 = if *width == Width::W64 { 63 } else { 31 };
                 let amt = (*count as u32) & shift_mask;
+                let bits = width.bits();
+                let rot = amt % bits;
                 let res = match op {
                     ShiftOp::Shl => width.truncate(l << amt),
                     ShiftOp::Shr => width.truncate(l >> amt),
                     ShiftOp::Sar => {
                         let signed = width.sign_extend(l) as i64;
                         width.truncate((signed >> amt) as u64)
+                    }
+                    ShiftOp::Rol if rot == 0 => width.truncate(l),
+                    ShiftOp::Rol => {
+                        width.truncate((l << rot) | (width.truncate(l) >> (bits - rot)))
+                    }
+                    ShiftOp::Ror if rot == 0 => width.truncate(l),
+                    ShiftOp::Ror => {
+                        width.truncate((width.truncate(l) >> rot) | (l << (bits - rot)))
                     }
                 };
                 update_shift_flags(
@@ -351,6 +424,41 @@ fn exec_x86_block<B: Tier1Bus>(insts: &[DecodedInst], cpu: &mut CpuState, bus: &
                 let flags = compute_sub_flags(*width, l, 1, res);
                 write_flagset(cpu, FlagSet::ALU.without(FlagSet::CF), flags);
                 write_op(inst, cpu, bus, dst, *width, res);
+                cpu.rip = next;
+            }
+            InstKind::Not { dst, width } => {
+                let l = read_op(inst, cpu, bus, dst, *width);
+                write_op(inst, cpu, bus, dst, *width, width.truncate(!l));
+                cpu.rip = next;
+            }
+            InstKind::Neg { dst, width } => {
+                let l = read_op(inst, cpu, bus, dst, *width);
+                let res = width.truncate(0u64.wrapping_sub(l));
+                write_flagset(cpu, FlagSet::ALU, compute_sub_flags(*width, 0, l, res));
+                write_op(inst, cpu, bus, dst, *width, res);
+                cpu.rip = next;
+            }
+            InstKind::Imul3 {
+                dst,
+                src,
+                imm,
+                width,
+            } => {
+                let l = read_op(inst, cpu, bus, src, *width);
+                let res = width.truncate(l.wrapping_mul(*imm));
+                write_op(inst, cpu, bus, &Operand::Reg(*dst), *width, res);
+                cpu.rip = next;
+            }
+            InstKind::Bswap { dst, width } => {
+                let dst_op = Operand::Reg(*dst);
+                let l = read_op(inst, cpu, bus, &dst_op, *width);
+                let res = match *width {
+                    Width::W64 => l.swap_bytes(),
+                    Width::W32 => (l as u32).swap_bytes() as u64,
+                    Width::W16 => (l as u16).swap_bytes() as u64,
+                    Width::W8 => l & 0xff,
+                };
+                write_op(inst, cpu, bus, &dst_op, *width, res);
                 cpu.rip = next;
             }
             InstKind::Push { src } => {

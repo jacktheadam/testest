@@ -10,8 +10,19 @@ pub fn ldmxcsr(sse: &mut SseState, src: &[u8; 4]) -> Result<(), FxStateError> {
     sse.set_mxcsr(u32::from_le_bytes(*src))
 }
 
-/// Implements the legacy (32-bit) `FXSAVE m512byte` memory image.
-pub fn fxsave_legacy(fpu: &FpuState, sse: &SseState, dst: &mut [u8; FXSAVE_AREA_SIZE]) {
+/// Implements the legacy (non-REX.W) `FXSAVE m512byte` memory image.
+///
+/// Per Intel SDM Vol 1 Table 10-9, the XMM register count depends on CPU
+/// mode, not on REX.W: 8 in 32-bit protected mode, **16 in IA-32e (64-bit)
+/// mode**. The REX.W form (`FXSAVE64` — see [`fxsave64`]) additionally
+/// widens FIP/FDP to 8 bytes. Passing `long_mode=true` here saves XMM0–XMM15
+/// (offsets 160–415); the 4-byte FIP/FDP + selector format is preserved.
+pub fn fxsave_legacy(
+    fpu: &FpuState,
+    sse: &SseState,
+    long_mode: bool,
+    dst: &mut [u8; FXSAVE_AREA_SIZE],
+) {
     let mut out = [0u8; FXSAVE_AREA_SIZE];
 
     // 0x00..0x20: x87 environment + MXCSR.
@@ -41,8 +52,9 @@ pub fn fxsave_legacy(fpu: &FpuState, sse: &SseState, dst: &mut [u8; FXSAVE_AREA_
         out[start..start + 16].copy_from_slice(&canonicalize_st(*reg).to_le_bytes());
     }
 
-    // 0xA0..0x120: XMM0-7 register image.
-    for i in 0..8 {
+    // 0xA0..0x1A0: XMM register image. 8 XMM in 32-bit mode, 16 in IA-32e.
+    let xmm_count = if long_mode { 16 } else { 8 };
+    for i in 0..xmm_count {
         let start = 160 + i * 16;
         out[start..start + 16].copy_from_slice(&sse.xmm[i].to_le_bytes());
     }
@@ -82,10 +94,13 @@ pub fn fxsave64(fpu: &FpuState, sse: &SseState, dst: &mut [u8; FXSAVE_AREA_SIZE]
     *dst = out;
 }
 
-/// Implements the legacy (32-bit) `FXRSTOR m512byte` memory image.
+/// Implements the legacy (non-REX.W) `FXRSTOR m512byte` memory image.
+///
+/// XMM count mirrors [`fxsave_legacy`]: 16 in IA-32e mode, 8 otherwise.
 pub fn fxrstor_legacy(
     fpu: &mut FpuState,
     sse: &mut SseState,
+    long_mode: bool,
     src: &[u8; FXSAVE_AREA_SIZE],
 ) -> Result<(), FxStateError> {
     // Intel SDM: if MXCSR is invalid (reserved bits set), `FXRSTOR` raises
@@ -116,7 +131,8 @@ pub fn fxrstor_legacy(
         new_fpu.st[i] = canonicalize_st(read_u128(src, start));
     }
 
-    for i in 0..8 {
+    let xmm_count = if long_mode { 16 } else { 8 };
+    for i in 0..xmm_count {
         let start = 160 + i * 16;
         new_sse.xmm[i] = read_u128(src, start);
     }

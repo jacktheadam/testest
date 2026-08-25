@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Canonical PCI INTx swizzle + PIRQ[A-D] -> GSI routing helpers.
+//! Canonical PCI INTx swizzle + PIRQ -> GSI routing helpers.
 //!
 //! Aero models PCI INTx routing using the conventional deterministic swizzle used by QEMU and
 //! PC-compatible firmware:
@@ -13,14 +13,30 @@
 //! - `device` is the PCI slot device number (0-31)
 //! - `pin_index` is 0..3 for INTA..INTD
 //!
-//! The resulting PIRQ index (0..3 for A..D) is then mapped to a platform Global System Interrupt
-//! (GSI) via the caller-provided `pirq_to_gsi` table.
+//! The resulting PIRQ index is then mapped to a platform Global System Interrupt (GSI) via the
+//! caller-provided `pirq_to_gsi` table.
 
-/// Default PC-compatible PIRQ[A-D] -> GSI mapping.
+/// Default Q35 APIC-mode PIRQ routing for Aero's root-bus device window.
 ///
-/// This matches the common legacy routing used by QEMU-style PC platforms where PCI INTx ends up on
-/// IRQ/GSI 10-13.
-pub const DEFAULT_PIRQ_TO_GSI: [u32; 4] = [10, 11, 12, 13];
+/// QEMU's ICH9 maps the PIRQ E-H group used by root-bus slots 0-23 to dedicated IOAPIC GSIs
+/// 20-23. Keeping PCI INTx out of the ISA range is required: in particular, GSI12 belongs to the
+/// legacy PS/2 mouse and is advertised as edge-triggered, active-high, and exclusive.
+pub const DEFAULT_PIRQ_TO_GSI: [u32; 4] = [20, 21, 22, 23];
+
+/// Translate Aero's Q35 APIC PCI window to its compatibility PIC routing.
+///
+/// The legacy view is used only while the platform is in PIC mode. ACPI exposes the dedicated
+/// GSI identity to an APIC-aware OS, so these compatibility IRQs do not participate in Windows'
+/// APIC resource assignment.
+#[inline]
+pub const fn q35_legacy_pic_irq_for_gsi(gsi: u32) -> Option<u8> {
+    if gsi >= 20 && gsi <= 23 {
+        Some((gsi - 20) as u8 + 10)
+    } else {
+        None
+    }
+}
+
 /// Computes the PIRQ index (0 = A, 1 = B, 2 = C, 3 = D) for a device/pin pair.
 #[inline]
 pub const fn pirq_index(device: u8, pin_index: u8) -> u8 {
@@ -74,15 +90,34 @@ mod tests {
     fn gsi_and_irq_line_helpers_follow_pirq_map() {
         let map = DEFAULT_PIRQ_TO_GSI;
 
-        assert_eq!(gsi_for_intx(map, 0, 0), 10);
-        assert_eq!(gsi_for_intx(map, 1, 0), 11);
-        assert_eq!(gsi_for_intx(map, 2, 3), 11);
+        assert_eq!(gsi_for_intx(map, 0, 0), 20);
+        assert_eq!(gsi_for_intx(map, 1, 0), 21);
+        assert_eq!(gsi_for_intx(map, 2, 3), 21);
 
         // interrupt_pin_cfg: 1=INTA, 4=INTD.
-        assert_eq!(irq_line_for_intx(map, 1, 1), 11);
-        assert_eq!(irq_line_for_intx(map, 2, 4), 11);
+        assert_eq!(irq_line_for_intx(map, 1, 1), 21);
+        assert_eq!(irq_line_for_intx(map, 2, 4), 21);
 
         // interrupt_pin_cfg=0 => 0xFF sentinel.
         assert_eq!(irq_line_for_intx(map, 2, 0), 0xFF);
+    }
+
+    #[test]
+    fn default_q35_routes_use_dedicated_apic_gsis() {
+        assert_eq!(DEFAULT_PIRQ_TO_GSI, [20, 21, 22, 23]);
+        assert!(
+            DEFAULT_PIRQ_TO_GSI.iter().all(|gsi| !matches!(gsi, 1 | 12)),
+            "PCI INTx must not overlap the fixed PS/2 keyboard/mouse IRQs"
+        );
+    }
+
+    #[test]
+    fn q35_apic_window_has_a_legacy_pic_compatibility_view() {
+        assert_eq!(q35_legacy_pic_irq_for_gsi(20), Some(10));
+        assert_eq!(q35_legacy_pic_irq_for_gsi(21), Some(11));
+        assert_eq!(q35_legacy_pic_irq_for_gsi(22), Some(12));
+        assert_eq!(q35_legacy_pic_irq_for_gsi(23), Some(13));
+        assert_eq!(q35_legacy_pic_irq_for_gsi(12), None);
+        assert_eq!(q35_legacy_pic_irq_for_gsi(24), None);
     }
 }

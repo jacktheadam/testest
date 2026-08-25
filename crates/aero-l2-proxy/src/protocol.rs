@@ -2,7 +2,7 @@
 //!
 //! The canonical wire framing is implemented in `crates/aero-l2-protocol`. This module contains
 //! additional conventions used by the production proxy for `L2_TUNNEL_TYPE_ERROR` messages, as
-//! defined in `docs/l2-tunnel-protocol.md`.
+//! defined in `wiki/areas/networking.md`.
 
 /// Protocol-level error codes carried inside `L2_TUNNEL_TYPE_ERROR` payloads.
 ///

@@ -1,8 +1,9 @@
 [package]
 name = "aero-gpu"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
+publish = false
 
 [lib]
 # `cargo bench -p aero-gpu` is used for Criterion microbenches; avoid also compiling/running the
@@ -33,7 +34,7 @@ blake3 = "1.5.0"
 aero-d3d9 = { path = "../aero-d3d9" }
 aero-dxbc = { path = "../aero-dxbc" }
 aero-shared = { path = "../aero-shared" }
-aero-protocol = { path = "../../emulator/protocol" }
+aero-protocol = { path = "../aero-protocol" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"

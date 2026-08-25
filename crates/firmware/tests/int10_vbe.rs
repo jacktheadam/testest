@@ -49,16 +49,20 @@ fn int10_vbe_controller_and_mode_info() {
     let mut bios = Bios::new(CmosRtc::new(DateTime::new(2026, 1, 1, 0, 0, 0)));
     let mut cpu = CpuState::default();
 
-    // ModeInfoBlock::ModeAttributes flags we rely on for bootloader/Windows compatibility.
+    // ModeInfoBlock::ModeAttributes (VBE 3.0) required for bootloader/Windows bootvid.
     const MODE_ATTR_SUPPORTED: u16 = 1 << 0;
-    const MODE_ATTR_COLOR: u16 = 1 << 2;
-    const MODE_ATTR_GRAPHICS: u16 = 1 << 3;
-    const MODE_ATTR_WINDOWED: u16 = 1 << 5;
+    const MODE_ATTR_OPTIONAL_INFO: u16 = 1 << 1;
+    const MODE_ATTR_BIOS_OUTPUT: u16 = 1 << 2;
+    const MODE_ATTR_COLOR: u16 = 1 << 3;
+    const MODE_ATTR_GRAPHICS: u16 = 1 << 4;
+    const MODE_ATTR_NOT_VGA_COMPATIBLE: u16 = 1 << 5;
     const MODE_ATTR_LFB: u16 = 1 << 7;
     const REQUIRED_MODE_ATTRS: u16 = MODE_ATTR_SUPPORTED
+        | MODE_ATTR_OPTIONAL_INFO
+        | MODE_ATTR_BIOS_OUTPUT
         | MODE_ATTR_COLOR
         | MODE_ATTR_GRAPHICS
-        | MODE_ATTR_WINDOWED
+        | MODE_ATTR_NOT_VGA_COMPATIBLE
         | MODE_ATTR_LFB;
 
     // 4F00: controller info.
@@ -85,6 +89,7 @@ fn int10_vbe_controller_and_mode_info() {
         }
         modes.push(m);
     }
+    assert!(modes.contains(&0x111)); // 640×480×16 — preferred by Windows bootvid
     assert!(modes.contains(&0x115));
     assert!(modes.contains(&0x118));
     assert!(modes.contains(&0x160));
@@ -103,6 +108,15 @@ fn int10_vbe_controller_and_mode_info() {
         mem.read_bytes(mode_addr, &mut info);
         let attrs = read_u16(&info, 0);
         assert_eq!(attrs & REQUIRED_MODE_ATTRS, REQUIRED_MODE_ATTRS);
+        // Bit 4 must be graphics (VBE 3.0). The pre-fix layout left this clear so Windows
+        // never selected a graphics mode.
+        assert_ne!(
+            attrs & MODE_ATTR_GRAPHICS,
+            0,
+            "mode {mode:#x} missing graphics bit"
+        );
+        // Must not look like the old wrong attribute word (0x00AD: graphics bit clear).
+        assert_ne!(attrs, 0x00AD);
         assert_eq!(read_u16(&info, 18), width); // XResolution
         assert_eq!(read_u16(&info, 20), height); // YResolution
         assert_eq!(read_u16(&info, 16), width * 4); // BytesPerScanLine

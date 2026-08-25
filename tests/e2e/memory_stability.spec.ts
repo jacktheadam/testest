@@ -4,7 +4,7 @@ import { run as runMemoryStability } from '../../bench/scenarios/memory_stabilit
 
 test('memory_stability (informational)', async ({ page }, testInfo) => {
   const baseUrl = testInfo.project.use.baseURL ?? 'http://127.0.0.1:5173';
-  const result = await runMemoryStability(page, `${baseUrl}/`);
+  const result = await runMemoryStability(page, `${baseUrl}/apps/web/`);
 
   await testInfo.attach('memory_stability.json', {
     body: Buffer.from(JSON.stringify(result, null, 2)),

@@ -117,17 +117,15 @@ async function hasTypeScriptUnderSrc(rel) {
 test("module boundaries: repo-root tests must not import TS sources from CJS workspaces", async () => {
   const roots = [
     "tests",
-    "backend/aero-gateway/test",
+    "services/gateway/test",
     "bench",
-    "net-proxy/src/test",
-    "server/test",
-    "services/image-gateway/test",
+    "services/net-proxy/src/test",
     "tools/net-proxy-server/test",
     "tools/perf/tests",
     "tools/range-harness/test",
     "packages/aero-stats/test",
-    "web/test",
-    "emulator/protocol/tests",
+    "apps/web/test",
+    "crates/aero-protocol/tests",
   ].map((p) => path.join(repoRoot, p));
 
   const all = [];
@@ -198,14 +196,14 @@ test("module boundaries: repo-root tests must not import TS sources from CJS wor
 });
 
 test("module boundaries: src import scan matches slash and backslash separators", () => {
-  const tsRe = buildWorkspaceSrcImportRegex("backend/aero-gateway", "ts|tsx|mts|cts");
-  assert.ok(tsRe.test("import x from '../backend/aero-gateway/src/index.ts';"));
+  const tsRe = buildWorkspaceSrcImportRegex("services/gateway", "ts|tsx|mts|cts");
+  assert.ok(tsRe.test("import x from '../services/gateway/src/index.ts';"));
   tsRe.lastIndex = 0;
-  assert.ok(tsRe.test("import x from '..\\\\backend\\\\aero-gateway\\\\src\\\\index.ts';"));
+  assert.ok(tsRe.test("import x from '..\\\\services\\\\gateway\\\\src\\\\index.ts';"));
 
-  const jsRe = buildWorkspaceSrcImportRegex("net-proxy", "js");
-  assert.ok(jsRe.test("const p = '../net-proxy/src/text.js';"));
+  const jsRe = buildWorkspaceSrcImportRegex("services/net-proxy", "js");
+  assert.ok(jsRe.test("const p = '../services/net-proxy/src/text.js';"));
   jsRe.lastIndex = 0;
-  assert.ok(jsRe.test("const p = '..\\\\net-proxy\\\\src\\\\text.js';"));
+  assert.ok(jsRe.test("const p = '..\\\\services\\\\net-proxy\\\\src\\\\text.js';"));
 });
 

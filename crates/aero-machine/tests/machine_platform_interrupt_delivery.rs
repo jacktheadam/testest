@@ -392,7 +392,7 @@ fn machine_run_slice_polls_platform_pic_and_delivers_interrupt() {
 #[test]
 fn machine_run_slice_polls_platform_ioapic_and_delivers_interrupt() {
     let vector = 0x60u8;
-    let gsi = 10u32;
+    let gsi = 20u32;
     let flag_addr = 0x0501u16;
     let flag_value = 0xA5u8;
 
@@ -409,7 +409,7 @@ fn machine_run_slice_polls_platform_ioapic_and_delivers_interrupt() {
         let mut ints = interrupts.borrow_mut();
         ints.set_mode(PlatformInterruptMode::Apic);
 
-        // Route GSI10 -> vector 0x60, edge-triggered, active-low (PCI INTx wiring).
+        // Route Q35 PCI GSI20 -> vector 0x60, edge-triggered, active-low.
         let low = u32::from(vector) | (1 << 13); // polarity_low, edge-triggered
         program_ioapic_entry(&mut ints, gsi, low, 0);
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SpaceSavingTopK } from '../src/perf/space_saving_topk.js';
+import { SpaceSavingTopK } from '../apps/web/src/perf/space_saving_topk.js';
 
 test('SpaceSavingTopK keeps bounded memory', () => {
   const k = 3;

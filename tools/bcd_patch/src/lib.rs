@@ -5,6 +5,7 @@
 //! (Linux/macOS CI) without `bcdedit.exe`.
 
 pub mod constants;
+pub mod inplace;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -16,10 +17,13 @@ use regf::{DataType, HiveBuilder, KeyTreeNode, KeyTreeValue, RegistryHive};
 use uuid::Uuid;
 
 use crate::constants::{
+    DEBUGGER_DEFAULT_BAUDRATE, DEBUGGER_DEFAULT_PORT, DEBUGGER_TYPE_SERIAL,
     ELEM_ALLOW_PRERELEASE_SIGNATURES, ELEM_APPLICATION_PATH, ELEM_BOOTMGR_DEFAULT_OBJECT,
-    ELEM_BOOTMGR_DISPLAY_ORDER, ELEM_DISABLE_INTEGRITY_CHECKS, OBJ_BOOTLOADERSETTINGS, OBJ_BOOTMGR,
-    OBJ_GLOBALSETTINGS, OBJ_RESUMELOADERSETTINGS,
+    ELEM_BOOTMGR_DISPLAY_ORDER, ELEM_DEBUGGER_ENABLED, ELEM_DEBUGGER_SERIAL_BAUDRATE,
+    ELEM_DEBUGGER_SERIAL_PORT, ELEM_DEBUGGER_TYPE, ELEM_DISABLE_INTEGRITY_CHECKS,
+    OBJ_BOOTLOADERSETTINGS, OBJ_BOOTMGR, OBJ_GLOBALSETTINGS, OBJ_RESUMELOADERSETTINGS,
 };
+use crate::inplace::InPlaceHive;
 
 pub(crate) const BCD_KEY_OBJECTS: &str = "Objects";
 pub(crate) const BCD_KEY_ELEMENTS: &str = "Elements";
@@ -32,6 +36,12 @@ pub struct PatchOpts {
     pub testsigning: bool,
     /// Enable/disable the `nointegritychecks` BCD flag.
     pub nointegritychecks: bool,
+    /// Enable/disable kernel debugging over COM1.
+    ///
+    /// This is what makes a stuck boot describe itself: with it set, Windows
+    /// reports which driver it is initialising and, on a bugcheck, the stop code
+    /// and its parameters — over a port the runner already captures.
+    pub kernel_debug: bool,
 }
 
 impl Default for PatchOpts {
@@ -39,6 +49,7 @@ impl Default for PatchOpts {
         Self {
             testsigning: true,
             nointegritychecks: true,
+            kernel_debug: false,
         }
     }
 }
@@ -333,6 +344,38 @@ fn select_target_objects(hive: &RegistryHive) -> Result<HashSet<String>> {
     Ok(targets)
 }
 
+/// Write this tool's elements onto one BCD object, editing the hive in place.
+///
+/// Not currently reached: `patch_bcd_store_inner` still uses the rebuild path.
+/// Kept alongside [`inplace`] so the two halves of that approach stay together
+/// for whoever finishes it — see the module docs for why it is parked.
+#[allow(dead_code)]
+fn patch_object_in_place(hive: &mut InPlaceHive, object_name: &str, opts: PatchOpts) -> Result<()> {
+    let base = format!("{BCD_KEY_OBJECTS}\\{object_name}\\{BCD_KEY_ELEMENTS}");
+
+    let set_bool = |hive: &mut InPlaceHive, element: u32, value: bool| -> Result<()> {
+        let key = hive.ensure_path(&format!("{base}\\{}", element_key_name(element)))?;
+        hive.set_binary_value(key, BCD_VALUE_ELEMENT, &bcd_encode_boolean(element, value))
+    };
+
+    set_bool(hive, ELEM_DISABLE_INTEGRITY_CHECKS, opts.nointegritychecks)?;
+    set_bool(hive, ELEM_ALLOW_PRERELEASE_SIGNATURES, opts.testsigning)?;
+
+    if opts.kernel_debug {
+        set_bool(hive, ELEM_DEBUGGER_ENABLED, true)?;
+        for (element, value) in [
+            (ELEM_DEBUGGER_TYPE, DEBUGGER_TYPE_SERIAL),
+            (ELEM_DEBUGGER_SERIAL_PORT, DEBUGGER_DEFAULT_PORT),
+            (ELEM_DEBUGGER_SERIAL_BAUDRATE, DEBUGGER_DEFAULT_BAUDRATE),
+        ] {
+            let key = hive.ensure_path(&format!("{base}\\{}", element_key_name(element)))?;
+            hive.set_binary_value(key, BCD_VALUE_ELEMENT, &bcd_encode_integer(element, value))?;
+        }
+    }
+
+    Ok(())
+}
+
 fn patch_object(tree: &mut KeyTreeNode, object_name: &str, opts: PatchOpts) -> Result<()> {
     let base = format!("{BCD_KEY_OBJECTS}\\{object_name}\\{BCD_KEY_ELEMENTS}");
 
@@ -358,6 +401,30 @@ fn patch_object(tree: &mut KeyTreeNode, object_name: &str, opts: PatchOpts) -> R
         BCD_VALUE_ELEMENT,
         &bcd_encode_boolean(ELEM_ALLOW_PRERELEASE_SIGNATURES, opts.testsigning),
     )?;
+
+    // Only written when asked for. Leaving the transport elements behind on a
+    // store where debugging is off would be harmless but misleading to anyone
+    // reading the store with `bcdedit /enum`.
+    if opts.kernel_debug {
+        set_binary_value(
+            tree,
+            &format!("{base}\\{}", element_key_name(ELEM_DEBUGGER_ENABLED)),
+            BCD_VALUE_ELEMENT,
+            &bcd_encode_boolean(ELEM_DEBUGGER_ENABLED, true),
+        )?;
+        for (element, value) in [
+            (ELEM_DEBUGGER_TYPE, DEBUGGER_TYPE_SERIAL),
+            (ELEM_DEBUGGER_SERIAL_PORT, DEBUGGER_DEFAULT_PORT),
+            (ELEM_DEBUGGER_SERIAL_BAUDRATE, DEBUGGER_DEFAULT_BAUDRATE),
+        ] {
+            set_binary_value(
+                tree,
+                &format!("{base}\\{}", element_key_name(element)),
+                BCD_VALUE_ELEMENT,
+                &bcd_encode_integer(element, value),
+            )?;
+        }
+    }
 
     Ok(())
 }
@@ -530,6 +597,15 @@ fn bcd_encode_boolean(element_type: u32, value: bool) -> Vec<u8> {
     out.extend_from_slice(&element_type.to_le_bytes());
     out.extend_from_slice(&4u32.to_le_bytes());
     out.extend_from_slice(&(if value { 1u32 } else { 0u32 }).to_le_bytes());
+    out
+}
+
+/// BCD integer elements use the same header as booleans with an 8-byte payload.
+fn bcd_encode_integer(element_type: u32, value: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(16);
+    out.extend_from_slice(&element_type.to_le_bytes());
+    out.extend_from_slice(&8u32.to_le_bytes());
+    out.extend_from_slice(&value.to_le_bytes());
     out
 }
 

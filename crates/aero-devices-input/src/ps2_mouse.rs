@@ -95,6 +95,10 @@ impl Ps2Mouse {
         !self.out.is_empty()
     }
 
+    pub fn reporting_enabled(&self) -> bool {
+        self.reporting_enabled
+    }
+
     pub fn pop_output(&mut self) -> Option<u8> {
         self.out.pop_front()
     }

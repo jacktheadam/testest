@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 use aero_devices_input::{I8042Controller, IrqSink, SystemControlSink};
 use aero_platform::chipset::A20GateHandle;
@@ -95,6 +96,12 @@ impl PortIoDevice for I8042Port {
         }
         debug_assert_eq!(port, self.port);
         let byte = self.inner.borrow_mut().read_port(self.port);
+        if i8042_trace_enabled() {
+            eprintln!(
+                "AERO_I8042_TRACE: in{size} port={:#04x} -> {byte:#04x}",
+                self.port
+            );
+        }
         match size {
             1 => byte as u32,
             2 => u16::from_le_bytes([byte, byte]) as u32,
@@ -108,6 +115,13 @@ impl PortIoDevice for I8042Port {
             return;
         }
         debug_assert_eq!(port, self.port);
+        if i8042_trace_enabled() {
+            eprintln!(
+                "AERO_I8042_TRACE: out{size} port={:#04x} <- {:#04x}",
+                self.port,
+                value & 0xff
+            );
+        }
         self.inner
             .borrow_mut()
             .write_port(self.port, (value & 0xFF) as u8);
@@ -118,6 +132,11 @@ impl PortIoDevice for I8042Port {
         // times (once per port mapping) as the operation is idempotent.
         self.inner.borrow_mut().reset();
     }
+}
+
+fn i8042_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("AERO_I8042_TRACE").is_some())
 }
 
 /// Convenience helper to register the i8042 controller ports on an [`IoPortBus`].

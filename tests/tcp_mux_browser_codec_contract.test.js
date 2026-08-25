@@ -5,7 +5,7 @@ import {
   decodeTcpMuxErrorPayload,
   MAX_TCP_MUX_ERROR_MESSAGE_BYTES,
   TcpMuxErrorCode,
-} from "../web/src/net/tcpMuxProxy.ts";
+} from "../apps/web/src/net/tcpMuxProxy.ts";
 
 test("tcp-mux browser codec: ERROR rejects invalid UTF-8 message", () => {
   const invalidUtf8 = new Uint8Array([0xc0, 0xaf]);

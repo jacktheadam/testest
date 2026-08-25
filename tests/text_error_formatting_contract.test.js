@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatOneLineError } from "../src/text.js";
+import { formatOneLineError } from "../packages/transport-safety/src/text.js";
 
 test("text: formatOneLineError returns single-line, byte-bounded messages", () => {
   assert.equal(formatOneLineError(new Error("a\tb\nc"), 512), "a b c");

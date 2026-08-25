@@ -354,7 +354,10 @@ fn pc_platform_nvme_admin_identify_produces_completion_and_intx() {
     // Enable Memory Space + Bus Mastering so the platform allows DMA processing.
     write_cfg_u16(&mut pc, bdf.bus, bdf.device, bdf.function, 0x04, 0x0006);
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask the routed NVMe INTx IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {
@@ -710,7 +713,10 @@ fn pc_platform_respects_pci_interrupt_disable_bit_for_nvme_intx() {
     // Enable Memory Space + Bus Mastering so the platform allows DMA processing.
     write_cfg_u16(&mut pc, bdf.bus, bdf.device, bdf.function, 0x04, 0x0006);
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask the routed NVMe INTx IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {
@@ -807,7 +813,10 @@ fn pc_platform_resyncs_nvme_pci_command_before_polling_intx_level() {
     // Enable Memory Space + Bus Mastering so the platform allows DMA processing.
     write_cfg_u16(&mut pc, bdf.bus, bdf.device, bdf.function, 0x04, 0x0006);
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask the routed NVMe INTx IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {
@@ -896,7 +905,10 @@ fn pc_platform_gates_nvme_dma_on_pci_bus_master_enable() {
     let mut pc = PcPlatform::new_with_nvme(2 * 1024 * 1024);
     let bdf = NVME_CONTROLLER.bdf;
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Program PIC offsets and unmask the routed IRQ (and cascade).
     {

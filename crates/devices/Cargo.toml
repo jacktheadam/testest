@@ -1,8 +1,9 @@
 [package]
 name = "aero-devices"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
+publish = false
 
 [lib]
 name = "aero_devices"
@@ -29,6 +30,6 @@ memory = { path = "../memory" }
 [dev-dependencies]
 aero-acpi = { path = "../aero-acpi" }
 aero-cpu-core = { path = "../aero-cpu-core" }
-aero-protocol = { path = "../../emulator/protocol" }
+aero-protocol = { path = "../aero-protocol" }
 aero-snapshot = { path = "../aero-snapshot", features = ["io-snapshot"] }
 serde_json = "1"

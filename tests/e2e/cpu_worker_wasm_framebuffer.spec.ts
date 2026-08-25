@@ -3,14 +3,14 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const THREADED_WASM_BINARY_RELEASE = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm_bg.wasm", import.meta.url),
 );
-const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
+const THREADED_WASM_JS_RELEASE = fileURLToPath(new URL("../../apps/web/src/wasm/pkg-threaded/aero_wasm.js", import.meta.url));
 const THREADED_WASM_BINARY_DEV = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm_bg.wasm", import.meta.url),
 );
 const THREADED_WASM_JS_DEV = fileURLToPath(
-  new URL("../../web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url),
+  new URL("../../apps/web/src/wasm/pkg-threaded-dev/aero_wasm.js", import.meta.url),
 );
 const HAS_THREADED_WASM_BUNDLE =
   (existsSync(THREADED_WASM_BINARY_RELEASE) && existsSync(THREADED_WASM_JS_RELEASE)) ||
@@ -37,7 +37,7 @@ test("cpu worker wasm demo: publishes shared framebuffer frames from WASM", asyn
     }
     test.skip(true, message);
   }
-  await page.goto("/web/cpu-worker-wasm-framebuffer-smoke.html", { waitUntil: "load" });
+  await page.goto("/apps/web/cpu-worker-wasm-framebuffer-smoke.html", { waitUntil: "load" });
 
   const support = await page.evaluate(() => {
     let wasmThreads = false;

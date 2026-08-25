@@ -2,8 +2,8 @@ use aero_d3d11::binding_model::{BINDING_BASE_TEXTURE, BINDING_BASE_UAV};
 use aero_d3d11::DxbcFile;
 use aero_d3d11::{
     translate_sm4_module_to_wgsl, BindingKind, BufferKind, BufferRef, DstOperand, OperandModifier,
-    RegFile, RegisterRef, ShaderModel, ShaderSignatures, ShaderStage, ShaderTranslateError, Sm4Decl,
-    Sm4Inst, Sm4Module, SrcKind, SrcOperand, Swizzle, UavRef, WriteMask,
+    RegFile, RegisterRef, ShaderModel, ShaderSignatures, ShaderStage, ShaderTranslateError,
+    Sm4Decl, Sm4Inst, Sm4Module, SrcKind, SrcOperand, Swizzle, UavRef, WriteMask,
 };
 use aero_dxbc::test_utils as dxbc_test_utils;
 
@@ -120,9 +120,7 @@ fn translates_structured_buffer_address_math() {
         .expect("expected reflection binding for t0 SRV buffer");
     assert_eq!(srv_binding.group, 2);
     assert_eq!(srv_binding.binding, BINDING_BASE_TEXTURE);
-    assert!(srv_binding
-        .visibility
-        .contains(wgpu::ShaderStages::COMPUTE));
+    assert!(srv_binding.visibility.contains(wgpu::ShaderStages::COMPUTE));
 
     let uav_binding = translated
         .reflection
@@ -132,9 +130,7 @@ fn translates_structured_buffer_address_math() {
         .expect("expected reflection binding for u0 UAV buffer");
     assert_eq!(uav_binding.group, 2);
     assert_eq!(uav_binding.binding, BINDING_BASE_UAV);
-    assert!(uav_binding
-        .visibility
-        .contains(wgpu::ShaderStages::COMPUTE));
+    assert!(uav_binding.visibility.contains(wgpu::ShaderStages::COMPUTE));
 }
 
 #[test]

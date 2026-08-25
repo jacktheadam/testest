@@ -7,7 +7,7 @@ import {
   HEADER_U32_LEN as MIC_HEADER_U32_LEN,
   READ_POS_INDEX as MIC_READ_POS_INDEX,
   WRITE_POS_INDEX as MIC_WRITE_POS_INDEX,
-} from "../../web/src/audio/mic_ring.js";
+} from "../../apps/web/src/audio/mic_ring.js";
 
 const PREVIEW_ORIGIN = process.env.AERO_PLAYWRIGHT_PREVIEW_ORIGIN ?? "http://127.0.0.1:4173";
 
@@ -24,7 +24,7 @@ test("HDA capture stream DMA-writes microphone PCM into guest RAM (synthetic mic
   const captureStreamRateHz = 48_000;
   const capacitySamples = 16_384;
 
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: "load" });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: "load" });
 
   await page.waitForFunction(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -285,3 +285,41 @@ fn tier0_fistp_int64_writes_qword() {
     let out = bus.read_u64(0x108).unwrap() as i64;
     assert_eq!(out, 12345);
 }
+
+/// Win7 `msvcrt` pow/log: `fyl2x` (`D9 F1`) was `#UD` inside `unregmp2`.
+#[test]
+fn tier0_fyl2x_and_f2xm1_execute() {
+    // fld1 ; fld dword [0x100]=8.0 ; fyl2x ; fstp dword [0x104] ; hlt
+    // 1 * log2(8) = 3
+    let code = [
+        0xD9, 0xE8, // fld1
+        0xD9, 0x05, 0x00, 0x01, 0x00, 0x00, // fld dword ptr [0x100]
+        0xD9, 0xF1, // fyl2x
+        0xD9, 0x1D, 0x04, 0x01, 0x00, 0x00, // fstp dword ptr [0x104]
+        0xF4, // hlt
+    ];
+    let mut bus = FlatTestBus::new(0x2000);
+    bus.load(0, &code);
+    bus.load(0x100, &8.0f32.to_bits().to_le_bytes());
+    let mut state = CpuState::new(CpuMode::Bit32);
+    state.set_rip(0);
+    run_to_halt(&mut state, &mut bus, 200);
+    let out = f32::from_bits(bus.read_u32(0x104).unwrap());
+    assert_eq!(out, 3.0);
+
+    // fld dword 1.0 ; f2xm1 ; fstp dword ; hlt  →  2^1 - 1 = 1
+    let code = [
+        0xD9, 0x05, 0x00, 0x01, 0x00, 0x00, // fld dword ptr [0x100]
+        0xD9, 0xF0, // f2xm1
+        0xD9, 0x1D, 0x04, 0x01, 0x00, 0x00, // fstp dword ptr [0x104]
+        0xF4,
+    ];
+    let mut bus = FlatTestBus::new(0x2000);
+    bus.load(0, &code);
+    bus.load(0x100, &1.0f32.to_bits().to_le_bytes());
+    let mut state = CpuState::new(CpuMode::Bit32);
+    state.set_rip(0);
+    run_to_halt(&mut state, &mut bus, 200);
+    let out = f32::from_bits(bus.read_u32(0x104).unwrap());
+    assert_eq!(out, 1.0);
+}

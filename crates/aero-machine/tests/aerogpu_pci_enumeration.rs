@@ -64,7 +64,7 @@ fn aerogpu_enumerates_at_canonical_bdf_with_bars_in_pci_mmio_window() {
     assert_eq!(class.prog_if, 0x00, "AeroGPU programming interface drifted");
 
     // Interrupt Line/Pin should match the default PCI INTx router swizzle:
-    // PIRQ = (pin + device_number) mod 4, then PIRQ[A-D] -> GSI[10-13].
+    // PIRQ = (pin + device_number) mod 4, then the Q35 root group -> GSI[20-23].
     let router = PciIntxRouter::new(PciIntxRouterConfig::default());
     let expected_gsi = router.gsi_for_intx(bdf, PciInterruptPin::IntA);
     assert_eq!(
@@ -76,8 +76,12 @@ fn aerogpu_enumerates_at_canonical_bdf_with_bars_in_pci_mmio_window() {
         "AeroGPU PCI Interrupt Pin drifted (expected INTA#)"
     );
 
-    // PCI BIOS POST should have enabled memory decoding (AeroGPU exposes only MMIO BARs).
-    assert_eq!(command & 0x1, 0, "AeroGPU should not enable PCI I/O decode");
+    // PCI BIOS POST should enable fixed legacy VGA I/O decode in addition to the MMIO BARs.
+    assert_ne!(
+        command & 0x1,
+        0,
+        "VGA-compatible AeroGPU should enable PCI I/O decode"
+    );
     assert_ne!(
         command & 0x2,
         0,

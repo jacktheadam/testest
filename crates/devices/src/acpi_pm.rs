@@ -340,6 +340,9 @@ impl<C: Clock> AcpiPmIo<C> {
     }
 
     fn pm_timer_value(&self) -> u32 {
+        // PM_TMR is a pure sample of the shared platform clock. Reads must not
+        // advance a private timebase: Windows calibrates TSC against this
+        // counter, so any read-side shortcut makes the clocks disagree.
         let elapsed_ns = self.clock.now_ns().wrapping_sub(self.timer_base_ns) as u128;
         let ticks = elapsed_ns.saturating_mul(PM_TIMER_FREQUENCY_HZ) / NS_PER_SEC;
         (ticks as u32) & PM_TIMER_MASK_24BIT

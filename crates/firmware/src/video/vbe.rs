@@ -123,6 +123,38 @@ impl VbeDevice {
                 rsvd_mask_size: 0,
                 rsvd_field_position: 0,
             },
+            // 15/16bpp modes (VESA standard). Windows bootvid strongly prefers 640×480×16
+            // (mode 0x111) for early progress/setup; without these the guest stays in text mode.
+            VbeMode {
+                mode: 0x110,
+                width: 640,
+                height: 480,
+                bpp: 15,
+                memory_model: 0x06, // direct color
+                red_mask_size: 5,
+                red_field_position: 10,
+                green_mask_size: 5,
+                green_field_position: 5,
+                blue_mask_size: 5,
+                blue_field_position: 0,
+                rsvd_mask_size: 1,
+                rsvd_field_position: 15,
+            },
+            VbeMode {
+                mode: 0x111,
+                width: 640,
+                height: 480,
+                bpp: 16,
+                memory_model: 0x06, // direct color
+                red_mask_size: 5,
+                red_field_position: 11,
+                green_mask_size: 6,
+                green_field_position: 5,
+                blue_mask_size: 5,
+                blue_field_position: 0,
+                rsvd_mask_size: 0,
+                rsvd_field_position: 0,
+            },
             VbeMode {
                 mode: 0x112,
                 width: 640,
@@ -139,6 +171,36 @@ impl VbeDevice {
                 rsvd_field_position: 24,
             },
             VbeMode {
+                mode: 0x113,
+                width: 800,
+                height: 600,
+                bpp: 15,
+                memory_model: 0x06, // direct color
+                red_mask_size: 5,
+                red_field_position: 10,
+                green_mask_size: 5,
+                green_field_position: 5,
+                blue_mask_size: 5,
+                blue_field_position: 0,
+                rsvd_mask_size: 1,
+                rsvd_field_position: 15,
+            },
+            VbeMode {
+                mode: 0x114,
+                width: 800,
+                height: 600,
+                bpp: 16,
+                memory_model: 0x06, // direct color
+                red_mask_size: 5,
+                red_field_position: 11,
+                green_mask_size: 6,
+                green_field_position: 5,
+                blue_mask_size: 5,
+                blue_field_position: 0,
+                rsvd_mask_size: 0,
+                rsvd_field_position: 0,
+            },
+            VbeMode {
                 mode: 0x115,
                 width: 800,
                 height: 600,
@@ -152,6 +214,36 @@ impl VbeDevice {
                 blue_field_position: 0,
                 rsvd_mask_size: 8,
                 rsvd_field_position: 24,
+            },
+            VbeMode {
+                mode: 0x116,
+                width: 1024,
+                height: 768,
+                bpp: 15,
+                memory_model: 0x06, // direct color
+                red_mask_size: 5,
+                red_field_position: 10,
+                green_mask_size: 5,
+                green_field_position: 5,
+                blue_mask_size: 5,
+                blue_field_position: 0,
+                rsvd_mask_size: 1,
+                rsvd_field_position: 15,
+            },
+            VbeMode {
+                mode: 0x117,
+                width: 1024,
+                height: 768,
+                bpp: 16,
+                memory_model: 0x06, // direct color
+                red_mask_size: 5,
+                red_field_position: 11,
+                green_mask_size: 6,
+                green_field_position: 5,
+                blue_mask_size: 5,
+                blue_field_position: 0,
+                rsvd_mask_size: 0,
+                rsvd_field_position: 0,
             },
             VbeMode {
                 mode: 0x118,
@@ -275,43 +367,47 @@ impl VbeDevice {
         mem.write_bytes(dest, &buf);
     }
 
-    pub fn write_mode_info(&self, mem: &mut impl MemoryBus, mode: u16, dest: u64) -> bool {
+    pub(crate) fn mode_info_block(&self, mode: u16) -> Option<[u8; 256]> {
         // VBE function 4F01 passes a 14-bit mode number; callers sometimes preserve the "mode set"
         // flag bits (e.g. bit14 = LFB requested) when querying mode info. Mask off the high bits so
         // we accept both `0x0118` and `0x4118`.
         let mode_id = mode & 0x3FFF;
-        let mode = match self.find_mode(mode_id) {
-            Some(mode) => mode,
-            None => return false,
-        };
+        let mode = self.find_mode(mode_id)?;
 
         let mut buf = [0u8; 256];
 
-        // VBE ModeInfoBlock::ModeAttributes (VBE 2.0+).
+        // VBE ModeInfoBlock::ModeAttributes (VBE 2.0 / 3.0).
         //
-        // The Windows boot stack (bootmgr/winload/bootvid) is sensitive to these flags; in
-        // particular it expects the LFB-available bit when `PhysBasePtr` is non-zero.
+        // The Windows boot stack (bootmgr/winload/bootvid) is sensitive to these flags; it will
+        // only select a mode when bit 4 (graphics) and bit 7 (LFB) are set. An earlier layout
+        // mistake placed "color"/"graphics" one bit low so bit4 stayed clear — guests enumerated
+        // every mode via 4F01 but never issued a graphics 4F02, leaving the display in text mode.
         //
-        // Bit meanings used here follow the VBE 2.0+ "ModeAttributes" layout as used throughout
-        // the project (and in the canonical `aero-gpu-vga` device model):
-        // - bit 0: mode supported
-        // - bit 2: color mode
-        // - bit 3: graphics mode
-        // - bit 5: windowed/banked framebuffer available (WinA/WinB fields valid)
+        // VBE 3.0 ModeAttributes:
+        // - bit 0: mode supported by hardware
+        // - bit 1: optional info available
+        // - bit 2: BIOS output functions supported
+        // - bit 3: color (1) / monochrome (0)
+        // - bit 4: graphics (1) / text (0)
+        // - bit 5: not VGA-compatible (1)
+        // - bit 6: no banked/windowed mode available (1) — inverted sense
         // - bit 7: linear framebuffer available (PhysBasePtr valid)
         const MODE_ATTR_SUPPORTED: u16 = 1 << 0;
-        const MODE_ATTR_COLOR: u16 = 1 << 2;
-        const MODE_ATTR_GRAPHICS: u16 = 1 << 3;
-        const MODE_ATTR_WINDOWED: u16 = 1 << 5;
+        const MODE_ATTR_OPTIONAL_INFO: u16 = 1 << 1;
+        const MODE_ATTR_BIOS_OUTPUT: u16 = 1 << 2;
+        const MODE_ATTR_COLOR: u16 = 1 << 3;
+        const MODE_ATTR_GRAPHICS: u16 = 1 << 4;
+        const MODE_ATTR_NOT_VGA_COMPATIBLE: u16 = 1 << 5;
+        // bit 6 left clear: banked window A is advertised below (A000:0000).
         const MODE_ATTR_LFB: u16 = 1 << 7;
 
-        let mut mode_attributes: u16 = MODE_ATTR_SUPPORTED | MODE_ATTR_COLOR | MODE_ATTR_GRAPHICS;
-
-        // Banked window A is advertised below (A000:0000), so set the "windowed available" bit.
-        mode_attributes |= MODE_ATTR_WINDOWED;
-
-        // All advertised modes expose a linear framebuffer at `PhysBasePtr`.
-        mode_attributes |= MODE_ATTR_LFB;
+        let mode_attributes: u16 = MODE_ATTR_SUPPORTED
+            | MODE_ATTR_OPTIONAL_INFO
+            | MODE_ATTR_BIOS_OUTPUT
+            | MODE_ATTR_COLOR
+            | MODE_ATTR_GRAPHICS
+            | MODE_ATTR_NOT_VGA_COMPATIBLE
+            | MODE_ATTR_LFB;
         buf[0..2].copy_from_slice(&mode_attributes.to_le_bytes());
 
         // Windowing (banked framebuffer).
@@ -382,6 +478,13 @@ impl VbeDevice {
         buf[61] = mode.rsvd_field_position; // LinReservedFieldPosition
         buf[62..66].copy_from_slice(&0u32.to_le_bytes()); // MaxPixelClock
 
+        Some(buf)
+    }
+
+    pub fn write_mode_info(&self, mem: &mut impl MemoryBus, mode: u16, dest: u64) -> bool {
+        let Some(buf) = self.mode_info_block(mode) else {
+            return false;
+        };
         mem.write_bytes(dest, &buf);
         true
     }

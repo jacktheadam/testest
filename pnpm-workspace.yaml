@@ -1,0 +1,23 @@
+packages:
+  - "services/gateway"
+  - "bench"
+  - "services/net-proxy"
+  - "packages/*"
+  - "proxy/webrtc-udp-relay/e2e"
+  - "tools/disk-streaming-browser-e2e"
+  - "tools/net-proxy-server"
+  - "tools/perf"
+  - "tools/range-harness"
+  - "apps/web"
+
+allowBuilds:
+  esbuild: true
+  wasm-pack: true
+
+# Native/browser-built dependencies that are allowed to run install scripts
+# (pnpm 11 blocks lifecycle scripts by default).
+onlyBuiltDependencies:
+  - esbuild
+  - "@swc/core"
+  - msgpackr-extract
+  - msgpackr

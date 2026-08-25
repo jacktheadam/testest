@@ -354,7 +354,10 @@ fn pc_platform_gates_ahci_dma_on_pci_bus_master_enable() {
     pc.attach_ahci_disk_port0(Box::new(disk)).unwrap();
 
     let bdf = SATA_AHCI_ICH9.bdf;
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(
+        pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA),
+    )
+    .expect("Q35 AHCI GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {
@@ -511,7 +514,10 @@ fn pc_platform_ahci_dma_and_intx_routing_work() {
     pc.attach_ahci_disk_port0(Box::new(disk)).unwrap();
 
     let bdf = SATA_AHCI_ICH9.bdf;
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(
+        pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA),
+    )
+    .expect("Q35 AHCI GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {
@@ -663,7 +669,10 @@ fn pc_platform_resyncs_ahci_pci_command_before_polling_intx_level() {
     let mut pc = PcPlatform::new_with_ahci(2 * 1024 * 1024);
     let bdf = SATA_AHCI_ICH9.bdf;
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(
+        pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA),
+    )
+    .expect("Q35 AHCI GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe INTx via the legacy PIC.
     {

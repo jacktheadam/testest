@@ -23,8 +23,7 @@ devices:
 
 See:
 
-- [`docs/windows/virtio-pci-modern-wdm.md`](../../../../docs/windows/virtio-pci-modern-wdm.md) (WDM)
-- [`docs/windows/win7-miniport-virtio-pci-modern.md`](../../../../docs/windows/win7-miniport-virtio-pci-modern.md) (NDIS/StorPort)
+- [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md#shared-transport-and-virtqueue-code) (WDM and NDIS/StorPort transports)
 
 This directory also provides shared helpers often used alongside either
 transport:
@@ -38,7 +37,7 @@ transport:
 
 The binding device/driver contract lives at:
 
-- [`docs/windows7-virtio-driver-contract.md`](../../../../docs/windows7-virtio-driver-contract.md)
+- [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md#the-aero-w7-virtio-device-contract-v1)
 
 Contract v1 requires the virtio-pci **modern** transport:
 
@@ -77,9 +76,7 @@ is retained only for compatibility/testing with transitional/QEMU devices.
 
 ## Docs
 
-- [`docs/windows7-virtio-driver-contract.md`](../../../../docs/windows7-virtio-driver-contract.md)
-- [`docs/windows/virtio-pci-modern-wdm.md`](../../../../docs/windows/virtio-pci-modern-wdm.md)
-- [`docs/windows/win7-miniport-virtio-pci-modern.md`](../../../../docs/windows/win7-miniport-virtio-pci-modern.md)
+- [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md) — definitive virtio device/driver contract plus WDM and Win7 miniport transport notes
 
 ## Contents of this directory
 
@@ -182,7 +179,7 @@ instead (handled by the modern transport helpers).
 
 For Aero contract v1 devices, follow the definitive contract document:
 
-- [`docs/windows7-virtio-driver-contract.md`](../../../../docs/windows7-virtio-driver-contract.md)
+- [`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md#the-aero-w7-virtio-device-contract-v1)
 
 For the optional legacy/transitional transport, the device-model must:
 

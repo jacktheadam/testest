@@ -127,7 +127,7 @@ impl DeviceId {
     /// - the active audio device (in WASM builds that omit HDA), or
     /// - an additional enumerated PCI function alongside HDA.
     ///
-    /// See `docs/16-snapshots.md` and `web/src/workers/vm_snapshot_wasm.ts` for the stable mapping
+    /// See the platform and firmware area page and `web/src/workers/vm_snapshot_wasm.ts` for the stable mapping
     /// to the string kind `audio.virtio_snd`.
     pub const VIRTIO_SND: DeviceId = DeviceId(22);
     /// Guest-visible virtio-net (virtio-pci) NIC device state.
@@ -147,7 +147,7 @@ impl DeviceId {
     pub const VIRTIO_INPUT: DeviceId = DeviceId(24);
     /// AeroGPU PCI device state (BAR0 regs + VRAM + scanout handoff latch).
     ///
-    /// See `docs/16-snapshots.md` and `web/src/workers/vm_snapshot_wasm.ts` for the stable mapping
+    /// See the platform and firmware area page and `web/src/workers/vm_snapshot_wasm.ts` for the stable mapping
     /// to the string kind `gpu.aerogpu`.
     pub const AEROGPU: DeviceId = DeviceId(25);
     /// Guest-visible virtio-input (virtio-pci) keyboard function state (PCI `00:0A.0`).
@@ -161,7 +161,7 @@ impl DeviceId {
     /// snapshots to ensure deterministic restore (and to avoid restoring older snapshots with
     /// stale VRAM contents from a later run).
     ///
-    /// See `docs/16-snapshots.md` and `web/src/workers/vm_snapshot_wasm.ts` for the stable mapping
+    /// See the platform and firmware area page and `web/src/workers/vm_snapshot_wasm.ts` for the stable mapping
     /// to the string kind `gpu.vram`.
     pub const GPU_VRAM: DeviceId = DeviceId(28);
     /// Guest-visible virtio-input (virtio-pci) tablet function state (PCI `00:0A.2`).

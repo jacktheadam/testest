@@ -16,7 +16,7 @@ async function readText(relPath) {
 
 function collectMarkdownFiles({ repoRoot }) {
   const out = ["README.md", "bench/README.md"];
-  return Promise.all([Promise.resolve(out), listFilesRecursive(path.join(repoRoot, "docs")).then((xs) => xs.map((x) => `docs/${x}`))]).then(
+  return Promise.all([Promise.resolve(out), listFilesRecursive(path.join(repoRoot, "wiki")).then((xs) => xs.map((x) => `wiki/${x}`))]).then(
     ([a, b]) => a.concat(b.filter((p) => p.endsWith(".md"))),
   );
 }

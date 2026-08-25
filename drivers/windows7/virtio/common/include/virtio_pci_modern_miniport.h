@@ -6,7 +6,7 @@
  * This module is intentionally KMDF/WDF-free: callers provide a BAR0 MMIO
  * mapping and a snapshot of PCI config space (typically 256 bytes).
  *
- * Contract: docs/windows7-virtio-driver-contract.md (modern-only, BAR0 MMIO).
+ * Contract: wiki/areas/drivers-windows.md (modern-only, BAR0 MMIO).
  */
 
 #pragma once

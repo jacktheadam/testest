@@ -5,16 +5,16 @@ import { fileURLToPath } from "node:url";
 
 const thisDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(dirname(dirname(thisDir)));
-const threadedWasmBinaryRelease = join(repoRoot, "web", "src", "wasm", "pkg-threaded", "aero_wasm_bg.wasm");
-const threadedWasmJsRelease = join(repoRoot, "web", "src", "wasm", "pkg-threaded", "aero_wasm.js");
-const threadedWasmBinaryDev = join(repoRoot, "web", "src", "wasm", "pkg-threaded-dev", "aero_wasm_bg.wasm");
-const threadedWasmJsDev = join(repoRoot, "web", "src", "wasm", "pkg-threaded-dev", "aero_wasm.js");
+const threadedWasmBinaryRelease = join(repoRoot, "apps/web", "src", "wasm", "pkg-threaded", "aero_wasm_bg.wasm");
+const threadedWasmJsRelease = join(repoRoot, "apps/web", "src", "wasm", "pkg-threaded", "aero_wasm.js");
+const threadedWasmBinaryDev = join(repoRoot, "apps/web", "src", "wasm", "pkg-threaded-dev", "aero_wasm_bg.wasm");
+const threadedWasmJsDev = join(repoRoot, "apps/web", "src", "wasm", "pkg-threaded-dev", "aero_wasm.js");
 const hasThreadedWasmBundle =
   (existsSync(threadedWasmBinaryRelease) && existsSync(threadedWasmJsRelease)) ||
   (existsSync(threadedWasmBinaryDev) && existsSync(threadedWasmJsDev));
 
 test("worker audio fills the shared ring buffer (no postMessage audio copies)", async ({ page }) => {
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
 
   // Runtime worker audio depends on the threaded WASM bundle being built into
   // `web/src/wasm/pkg-threaded`. When running Playwright in environments that
@@ -65,9 +65,9 @@ test("worker audio fills the shared ring buffer (no postMessage audio copies)", 
      <button id="start">Start audio</button>
      <pre id="log"></pre>
      <script type="module">
-        import { WorkerCoordinator } from "/web/src/runtime/coordinator.ts";
-        import { createAudioOutput } from "/web/src/platform/audio.ts";
-        import { formatOneLineUtf8 } from "/web/src/text.ts";
+        import { WorkerCoordinator } from "/apps/web/src/runtime/coordinator.ts";
+        import { createAudioOutput } from "/apps/web/src/platform/audio.ts";
+        import { formatOneLineUtf8 } from "/packages/transport-safety/src/text.js";
 
         const log = document.getElementById("log");
         const MAX_ERROR_BYTES = 512;

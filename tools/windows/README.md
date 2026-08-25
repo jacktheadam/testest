@@ -12,7 +12,7 @@ Patches extracted Windows 7 install media to support **test-signed drivers** by:
 - Updating the offline `BCD-Template` inside each selected `install.wim` image
 
 For BCD hive internals (element IDs, well-known object GUIDs, and how to locate OS loader
-entries offline), see: `docs/win7-bcd-offline-patching.md`.
+entries offline), see: `wiki/areas/drivers-windows.md`.
 - (Optional) Patching the nested WinRE image (`Windows\System32\Recovery\winre.wim`) inside each `install.wim` index
 
 ### Prerequisites

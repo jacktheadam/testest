@@ -8,7 +8,7 @@ This repo supports two ways of delivering disk image bytes to browsers:
 This tool can validate both:
 
 - `--mode range` (default): HTTP Range endpoint checks (existing behavior)
-- `--mode chunked`: chunked disk image format conformance (see `docs/18-chunked-disk-image-format.md`)
+- `--mode chunked`: chunked disk image format conformance (see `wiki/areas/storage.md`)
 
 ## Range mode (`--mode range`)
 
@@ -74,41 +74,15 @@ Defaults:
 
 ## Usage
 
-### Self-test against the repo dev server (`server/range_server.js`)
+### Self-tests against a local server (temporarily broken — rewiring tracked)
 
-For a quick local sanity check (no MinIO/S3 required), run:
-
-```bash
-python3 tools/disk-streaming-conformance/selftest_range_server.py
-```
-
-This starts `server/range_server.js` on a random local port with a temporary test file, then runs the conformance suite in `--strict` mode against it.
-
-### Self-test against the repo dev server (private / Authorization required)
-
-To validate private Range streaming (unauthenticated requests denied + `Authorization` triggers preflight), run:
-
-```bash
-python3 tools/disk-streaming-conformance/selftest_range_server_private.py
-```
-
-### Self-test against the repo dev chunk server (`server/chunk_server.js`)
-
-For a quick local sanity check of chunked mode, run:
-
-```bash
-python3 tools/disk-streaming-conformance/selftest_chunk_server.py
-```
-
-This starts `server/chunk_server.js` on a random local port with a temporary `manifest.json` + `chunks/*.bin`, then runs the conformance suite in `--mode chunked --strict` against it.
-
-### Self-test against the repo dev chunk server (private / Authorization required)
-
-To validate private chunked streaming (unauthenticated requests denied + `Authorization` triggers preflight), run:
-
-```bash
-python3 tools/disk-streaming-conformance/selftest_chunk_server_private.py
-```
+The four `selftest_*.py` helpers used to spawn the legacy dev servers from the
+old `server/` tree (a plain Range server and a chunked-format server). Those
+were purged with the legacy `server/` tree (see the cleanup doctrine in the
+wiki), so the selftests currently fail with "server not found". Rewiring them
+to `tools/disk-gateway` (Range + auth) and a small static chunk server is
+tracked as a tools-pass task in the cleanup plan. The main runner
+(`conformance.py`) and the `tools/disk-gateway`-based checks are unaffected.
 
 ### Public image
 
@@ -317,14 +291,14 @@ python3 tools/disk-streaming-conformance/conformance.py \
   --expect-corp 'same-site'
 ```
 
-## Running against the reference `server/disk-gateway`
+## Running against the reference `tools/disk-gateway`
 
-The repo includes a reference implementation at `server/disk-gateway` which is intended to pass all checks.
+The repo includes a reference implementation at `tools/disk-gateway` which is intended to pass all checks.
 
 ### Public image
 
 ```bash
-cd server/disk-gateway
+cd tools/disk-gateway
 
 export DISK_GATEWAY_TOKEN_SECRET='dev-secret-change-me'
 export DISK_GATEWAY_CORS_ALLOWED_ORIGINS='*'
@@ -346,7 +320,7 @@ python3 tools/disk-streaming-conformance/conformance.py
 ### Private image
 
 ```bash
-cd server/disk-gateway
+cd tools/disk-gateway
 
 export DISK_GATEWAY_TOKEN_SECRET='dev-secret-change-me'
 export DISK_GATEWAY_CORS_ALLOWED_ORIGINS='*'
@@ -370,62 +344,10 @@ ORIGIN='https://example.com' \
 python3 tools/disk-streaming-conformance/conformance.py
 ```
 
-## Running against `services/image-gateway` (local dev + MinIO)
+## Running against the former hosted image service (retired)
 
-Start MinIO (creates the `aero-images` bucket by default):
+The production S3/CloudFront reference service (`services/image-gateway`) was
+purged with the cleanup (2026-07-23): deployment reference implementations are
+out of scope. The disk-bytes protocol knowledge lives in the wiki's storage
+area page; use `tools/disk-gateway` for local conformance runs.
 
-```bash
-cd services/image-gateway
-docker compose -f docker-compose.minio.yml up -d
-```
-
-In another terminal, start the gateway pointed at MinIO (disable auth for this local conformance run):
-
-```bash
-# From the repo root (npm workspaces)
-npm ci
-
-export AUTH_MODE=none
-export CORS_ALLOW_ORIGIN='*'
-
-export S3_BUCKET='aero-images'
-export AWS_REGION='us-east-1'
-export AWS_ACCESS_KEY_ID='minioadmin'
-export AWS_SECRET_ACCESS_KEY='minioadmin'
-export S3_ENDPOINT='http://127.0.0.1:9000'
-export S3_FORCE_PATH_STYLE='true'
-
-npm -w services/image-gateway run dev
-```
-
-Create a small image via the API, upload a single part, and complete the upload (example uses `jq`):
-
-```bash
-API='http://127.0.0.1:3000'
-
-IMG="$(curl -sS -X POST "$API/v1/images")"
-IMAGE_ID="$(echo "$IMG" | jq -r .imageId)"
-UPLOAD_ID="$(echo "$IMG" | jq -r .uploadId)"
-
-UPLOAD_URL="$(curl -sS -X POST "$API/v1/images/$IMAGE_ID/upload-url" \
-  -H 'content-type: application/json' \
-  -d "{\"uploadId\":\"$UPLOAD_ID\",\"partNumber\":1}" \
-  | jq -r .url)"
-
-truncate -s 1M part.bin
-ETAG="$(curl -sS -D - -o /dev/null -X PUT --upload-file part.bin "$UPLOAD_URL" \
-  | awk -F': ' 'tolower($1)=="etag" {print $2}' | tr -d '\r\"')"
-
-curl -sS -X POST "$API/v1/images/$IMAGE_ID/complete" \
-  -H 'content-type: application/json' \
-  -d "{\"uploadId\":\"$UPLOAD_ID\",\"parts\":[{\"partNumber\":1,\"etag\":\"$ETAG\"}]}" \
-  > /dev/null
-```
-
-Now run conformance against the Range proxy endpoint:
-
-```bash
-BASE_URL="$API/v1/images/$IMAGE_ID/range" \
-ORIGIN='https://example.com' \
-python3 ../../tools/disk-streaming-conformance/conformance.py
-```

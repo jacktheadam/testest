@@ -5,7 +5,7 @@ import { FileArtifactWriter } from './artifacts.ts';
 import { DefaultMilestoneClient } from './milestones.ts';
 import { checkScenarioRequirements } from './requirements.ts';
 import { NullEmulatorDriver } from './null_emulator.ts';
-import { formatOneLineError } from '../../src/text.js';
+import { formatOneLineError } from '../../packages/transport-safety/src/text.js';
 import {
   MetricsRecorder,
   ScenarioSkippedError,

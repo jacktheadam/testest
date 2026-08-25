@@ -512,11 +512,17 @@ fn snapshot_restore_accepts_legacy_nvmp_1_0_pci_payload() {
 
     let expected_pci_state = dev.config().snapshot_state();
 
-    // Serialize a legacy NVMP 1.0 snapshot.
+    // Serialize a legacy NVMP 1.0 snapshot. The legacy restore path writes the status field
+    // back verbatim (no RW1C semantics), so the payload must carry the *architectural* status
+    // value — i.e. what is readable after config-space write semantics are applied, not the raw
+    // value that was written.
     let bar0 = expected_pci_state.bar_base[0];
     let bar0_probe = expected_pci_state.bar_probe[0];
     let command = dev.config().command();
-    let status = 0x1234u16;
+    let status = u16::from_le_bytes([
+        expected_pci_state.bytes[0x06],
+        expected_pci_state.bytes[0x07],
+    ]);
     let interrupt_line = 0x5au8;
 
     let mut w = SnapshotWriter::new(*b"NVMP", SnapshotVersion::new(1, 0));

@@ -499,9 +499,27 @@ fn parse_prefixes(mode: DecodeMode, bytes: &[u8]) -> Result<(Prefixes, usize), P
             }
 
             // REX (64-bit mode only). Must appear after legacy prefixes.
+            // Per SDM Vol 2: REX is only effective as the last prefix before the
+            // opcode. If a legacy prefix follows, REX is discarded. Clearing
+            // p.rex here ensures the metadata stays consistent with iced's
+            // decoded instruction.
             0x40..=0x4F if mode == DecodeMode::Bits64 => {
                 p.rex = Rex::new(b);
                 i += 1;
+            }
+
+            // Any other prefix byte (LOCK, REP, segment override, operand/
+            // address-size override) discards a preceding REX per SDM Vol 2:
+            // REX is only effective as the last prefix before the opcode.
+            // Clearing here ensures the metadata stays consistent with iced's
+            // decoded instruction. (This runs as part of the fallthrough into
+            // the specific prefix handlers below — they set i += 1 and loop.)
+            _ if matches!(
+                b,
+                0xF0 | 0xF2 | 0xF3 | 0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 | 0x66 | 0x67
+            ) =>
+            {
+                p.rex = None;
             }
 
             _ => break,

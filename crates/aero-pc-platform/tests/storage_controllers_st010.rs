@@ -35,12 +35,14 @@ fn st010_ahci_read_dma_ext_and_intx_routing() {
     pc.attach_ahci_disk_port0(Box::new(disk)).unwrap();
 
     let bdf = profile::SATA_AHCI_ICH9.bdf;
-    let expected_irq = {
-        let pin = profile::SATA_AHCI_ICH9
-            .interrupt_pin
-            .expect("profile should provide interrupt pin");
-        u8::try_from(pc.pci_intx.gsi_for_intx(bdf, pin)).unwrap()
-    };
+    let pin = profile::SATA_AHCI_ICH9
+        .interrupt_pin
+        .expect("profile should provide interrupt pin");
+    let expected_gsi = pc.pci_intx.gsi_for_intx(bdf, pin);
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, pin)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // PCI enumeration.
     let id = pci_cfg_read_u32(&mut pc, bdf, 0x00);
@@ -57,7 +59,7 @@ fn st010_ahci_read_dma_ext_and_intx_routing() {
     assert_eq!(bar5.base % profile::AHCI_ABAR_SIZE, 0);
 
     // Interrupt Line should match the router-selected GSI.
-    assert_eq!(pci_cfg_read_u8(&mut pc, bdf, 0x3C), expected_irq);
+    assert_eq!(pci_cfg_read_u8(&mut pc, bdf, 0x3C), expected_gsi as u8);
 
     // Observe INTx via the legacy PIC (unmask cascade + routed IRQ).
     unmask_pic_irq(&mut pc, expected_irq);
@@ -170,12 +172,14 @@ fn st010_nvme_admin_identify_and_intx_routing() {
     );
 
     let bdf = profile::NVME_CONTROLLER.bdf;
-    let expected_irq = {
-        let pin = profile::NVME_CONTROLLER
-            .interrupt_pin
-            .expect("profile should provide interrupt pin");
-        u8::try_from(pc.pci_intx.gsi_for_intx(bdf, pin)).unwrap()
-    };
+    let pin = profile::NVME_CONTROLLER
+        .interrupt_pin
+        .expect("profile should provide interrupt pin");
+    let expected_gsi = pc.pci_intx.gsi_for_intx(bdf, pin);
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, pin)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // PCI enumeration.
     let id = pci_cfg_read_u32(&mut pc, bdf, 0x00);
@@ -192,7 +196,7 @@ fn st010_nvme_admin_identify_and_intx_routing() {
     assert_eq!(bar0.base % profile::NVME_BAR0_SIZE, 0);
 
     // Interrupt Line should match router-selected GSI.
-    assert_eq!(pci_cfg_read_u8(&mut pc, bdf, 0x3C), expected_irq);
+    assert_eq!(pci_cfg_read_u8(&mut pc, bdf, 0x3C), expected_gsi as u8);
     unmask_pic_irq(&mut pc, expected_irq);
 
     // Enable bus mastering (DMA).
@@ -254,12 +258,14 @@ fn st010_virtio_blk_read_write_and_intx_routing() {
     );
 
     let bdf = profile::VIRTIO_BLK.bdf;
-    let expected_irq = {
-        let pin = profile::VIRTIO_BLK
-            .interrupt_pin
-            .expect("profile should provide interrupt pin");
-        u8::try_from(pc.pci_intx.gsi_for_intx(bdf, pin)).unwrap()
-    };
+    let pin = profile::VIRTIO_BLK
+        .interrupt_pin
+        .expect("profile should provide interrupt pin");
+    let expected_gsi = pc.pci_intx.gsi_for_intx(bdf, pin);
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, pin)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // PCI enumeration.
     let id = pci_cfg_read_u32(&mut pc, bdf, 0x00);
@@ -276,7 +282,7 @@ fn st010_virtio_blk_read_write_and_intx_routing() {
     assert_eq!(bar0.base % profile::VIRTIO_BAR0_SIZE, 0);
 
     // Interrupt Line should match router-selected GSI.
-    assert_eq!(pci_cfg_read_u8(&mut pc, bdf, 0x3C), expected_irq);
+    assert_eq!(pci_cfg_read_u8(&mut pc, bdf, 0x3C), expected_gsi as u8);
     unmask_pic_irq(&mut pc, expected_irq);
 
     // Enable bus mastering for DMA and MMIO decoding.
@@ -755,7 +761,9 @@ fn st010_ahci_snapshot_roundtrip_preserves_intx_level() {
         let pin = profile::SATA_AHCI_ICH9
             .interrupt_pin
             .expect("profile should provide interrupt pin");
-        u8::try_from(pc.pci_intx.gsi_for_intx(bdf, pin)).unwrap()
+        pc.pci_intx
+            .legacy_pic_irq_for_intx(bdf, pin)
+            .expect("Q35 PCI GSI should have a compatibility PIC route")
     };
     let bar5 = pci_read_bar(&mut pc, bdf, profile::AHCI_ABAR_BAR_INDEX);
 
@@ -905,7 +913,9 @@ fn st010_nvme_snapshot_roundtrip_preserves_intx_level() {
         let pin = profile::NVME_CONTROLLER
             .interrupt_pin
             .expect("profile should provide interrupt pin");
-        u8::try_from(pc.pci_intx.gsi_for_intx(bdf, pin)).unwrap()
+        pc.pci_intx
+            .legacy_pic_irq_for_intx(bdf, pin)
+            .expect("Q35 PCI GSI should have a compatibility PIC route")
     };
     let bar0 = pci_read_bar(&mut pc, bdf, 0);
     assert_eq!(bar0.kind, BarKind::Mem64);

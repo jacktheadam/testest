@@ -2,7 +2,6 @@
 name = "memory-fuzz"
 version = "0.0.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
 publish = false
 
 [package.metadata]
@@ -46,7 +45,7 @@ net = ["dep:aero-net-stack"]
 e1000 = ["mem", "dep:aero-net-e1000"]
 firmware = ["mem", "dep:firmware"]
 ci-smoke = [
-    # Match `.github/workflows/fuzz.yml` (smoke suite).
+    # Smoke-suite feature set (fast subset for quick fuzz validation).
     "storage-devices",
     "firmware",
     "audio",
@@ -144,7 +143,7 @@ path = "../crates/aero-shared"
 optional = true
 
 [dependencies.aero-protocol]
-path = "../emulator/protocol"
+path = "../crates/aero-protocol"
 optional = true
 
 [dependencies.firmware]

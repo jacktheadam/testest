@@ -203,56 +203,167 @@ fn pci_bar_probing_and_programming_matches_piix3_profile() {
         .unwrap_or(0);
     assert_eq!(read_u8(&mut dev, 0x3d), expected_pin);
 
-    assert_eq!(
-        dev.config().bar_definition(0),
-        Some(PciBarDefinition::Io { size: 8 })
-    );
-    assert_eq!(
-        dev.config().bar_definition(1),
-        Some(PciBarDefinition::Io { size: 4 })
-    );
-    assert_eq!(
-        dev.config().bar_definition(2),
-        Some(PciBarDefinition::Io { size: 8 })
-    );
-    assert_eq!(
-        dev.config().bar_definition(3),
-        Some(PciBarDefinition::Io { size: 4 })
-    );
+    assert_eq!(dev.config().bar_definition(0), None);
+    assert_eq!(dev.config().bar_definition(1), None);
+    assert_eq!(dev.config().bar_definition(2), None);
+    assert_eq!(dev.config().bar_definition(3), None);
     assert_eq!(
         dev.config().bar_definition(4),
         Some(PciBarDefinition::Io { size: 16 })
     );
 
-    // BAR0 (8-byte I/O).
-    dev.config_mut().write(0x10, 4, 0xffff_ffff);
-    assert_eq!(read_u32(&mut dev, 0x10), io_probe_mask(8));
-    dev.config_mut().write(0x10, 4, 0x0000_1f03);
-    assert_eq!(read_u32(&mut dev, 0x10), 0x0000_1f01);
+    // BAR0–3 are unimplemented: sizing probes and programmed bases stay zero.
+    for off in [0x10u16, 0x14, 0x18, 0x1c] {
+        dev.config_mut().write(off, 4, 0xffff_ffff);
+        assert_eq!(read_u32(&mut dev, off), 0, "unimplemented BAR at {off:#x}");
+        dev.config_mut().write(off, 4, 0x0000_1f03);
+        assert_eq!(read_u32(&mut dev, off), 0, "unimplemented BAR stays 0");
+    }
 
-    // BAR1 (4-byte I/O).
-    dev.config_mut().write(0x14, 4, 0xffff_ffff);
-    assert_eq!(read_u32(&mut dev, 0x14), io_probe_mask(4));
-    dev.config_mut().write(0x14, 4, 0x0000_3f07);
-    assert_eq!(read_u32(&mut dev, 0x14), 0x0000_3f05);
-
-    // BAR2 (8-byte I/O).
-    dev.config_mut().write(0x18, 4, 0xffff_ffff);
-    assert_eq!(read_u32(&mut dev, 0x18), io_probe_mask(8));
-    dev.config_mut().write(0x18, 4, 0x0000_1703);
-    assert_eq!(read_u32(&mut dev, 0x18), 0x0000_1701);
-
-    // BAR3 (4-byte I/O).
-    dev.config_mut().write(0x1c, 4, 0xffff_ffff);
-    assert_eq!(read_u32(&mut dev, 0x1c), io_probe_mask(4));
-    dev.config_mut().write(0x1c, 4, 0x0000_3707);
-    assert_eq!(read_u32(&mut dev, 0x1c), 0x0000_3705);
-
-    // BAR4 (16-byte I/O).
+    // BAR4 (16-byte I/O) is the only PCI BAR (BMIDE).
     dev.config_mut().write(0x20, 4, 0xffff_ffff);
     assert_eq!(read_u32(&mut dev, 0x20), io_probe_mask(16));
     dev.config_mut().write(0x20, 4, 0x0000_c123);
     assert_eq!(read_u32(&mut dev, 0x20), 0x0000_c121);
+}
+
+/// Win7 `pci.sys` + `intelide` only add the hardwired 0x1F0/0x170 + IRQ14/15
+/// resources when the function looks like QEMU's PIIX3: prog-if 0x80 and no
+/// native command-block BARs. This test is that guest probe sequence, not a
+/// BAR-layout checklist: SRST on the secondary channel must publish the ATAPI
+/// signature and IDENTIFY PACKET must return CD-ROM identify data.
+#[test]
+fn win7_intelide_probe_finds_secondary_atapi_without_native_command_bars() {
+    assert_eq!(IDE_PIIX3.class.prog_if, 0x80);
+
+    let ide = Rc::new(RefCell::new(Piix3IdePciDevice::new()));
+    {
+        let mut dev = ide.borrow_mut();
+        assert_eq!(read_u8(&mut *dev, 0x09), 0x80);
+        // intelide.sys treats IDETIM bit 15 as "channel present."
+        assert_eq!(read_u16(&mut *dev, 0x40) & 0x8000, 0x8000, "primary IDETIM decode");
+        assert_eq!(read_u16(&mut *dev, 0x42) & 0x8000, 0x8000, "secondary IDETIM decode");
+        for off in [0x10u16, 0x14, 0x18, 0x1c] {
+            assert_eq!(read_u32(&mut *dev, off), 0);
+        }
+        dev.controller.attach_secondary_master_atapi(
+            aero_devices_storage::atapi::AtapiCdrom::new(Some(Box::new(MemIso::new(4)))),
+        );
+        dev.config_mut().set_command(0x0005); // IO + bus master, as Win7 programs 7010
+    }
+
+    let mut io = IoPortBus::new();
+    register_piix3_ide_ports(&mut io, ide.clone());
+
+    // Secondary master select, then SRST assert/deassert — the intelide/atapi
+    // signature probe. Command blocks must respond at the ISA ports even though
+    // they are not PCI BARs.
+    io.write(SECONDARY_PORTS.cmd_base + 6, 1, 0xA0);
+    io.write(SECONDARY_PORTS.ctrl_base, 1, 0x04);
+    io.write(SECONDARY_PORTS.ctrl_base, 1, 0x00);
+
+    let lba_mid = io.read(SECONDARY_PORTS.cmd_base + 4, 1) as u8;
+    let lba_high = io.read(SECONDARY_PORTS.cmd_base + 5, 1) as u8;
+    assert_eq!(
+        (lba_mid, lba_high),
+        (0x14, 0xEB),
+        "SRST must publish the ATAPI signature on the hardwired secondary ports"
+    );
+
+    // EXECUTE DEVICE DIAGNOSTIC (0x90) — atapi.sys classifies PACKET vs ATA here.
+    let _ = io.read(SECONDARY_PORTS.cmd_base + 7, 1);
+    io.write(SECONDARY_PORTS.cmd_base + 7, 1, 0x90);
+    let diag_status = io.read(SECONDARY_PORTS.ctrl_base, 1) as u8;
+    assert_eq!(diag_status & 0x01, 0, "0x90 must not set ERR");
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 1, 1) as u8, 0x01);
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 4, 1) as u8, 0x14);
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 5, 1) as u8, 0xEB);
+
+    // DEVICE RESET (0x08) must succeed on ATAPI (not ABRT) and keep 14EB.
+    let _ = io.read(SECONDARY_PORTS.cmd_base + 7, 1); // ack any prior IRQ
+    io.write(SECONDARY_PORTS.cmd_base + 7, 1, 0x08);
+    let rst_status = io.read(SECONDARY_PORTS.ctrl_base, 1) as u8; // alt status, no ack
+    assert_eq!(rst_status & 0x01, 0, "DEVICE RESET must not set ERR/ABRT");
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 4, 1) as u8, 0x14);
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 5, 1) as u8, 0xEB);
+
+    // IDENTIFY PACKET DEVICE (0xA1) — next step after 14EB.
+    io.write(SECONDARY_PORTS.cmd_base + 7, 1, 0xA1);
+    let status = io.read(SECONDARY_PORTS.cmd_base + 7, 1) as u8;
+    assert_ne!(status & 0x08, 0, "IDENTIFY PACKET must assert DRQ");
+    let mut ident = vec![0u8; 512];
+    for i in 0..256 {
+        let w = io.read(SECONDARY_PORTS.cmd_base, 2) as u16;
+        ident[i * 2..i * 2 + 2].copy_from_slice(&w.to_le_bytes());
+    }
+    let word0 = u16::from_le_bytes([ident[0], ident[1]]);
+    assert_eq!(word0 & 0xC000, 0x8000, "identify word0 must be ATAPI");
+    assert_eq!((word0 >> 8) & 0x1F, 0x05, "identify word0 device type CD-ROM");
+    assert_ne!(
+        u16::from_le_bytes([ident[49 * 2], ident[49 * 2 + 1]]) & (1 << 9),
+        0,
+        "identify word49 LBA bit"
+    );
+}
+
+/// An older snapshot that still encoded BAR0–3 as I/O windows must not come
+/// back as native-capable after restore. Win7 would otherwise keep seeing
+/// phantom BARs and skip the legacy channel resource assignment.
+#[test]
+fn restore_of_old_native_bar_snapshot_stays_legacy_only() {
+    let mut dev = Piix3IdePciDevice::new();
+    dev.controller.attach_secondary_master_atapi(
+        aero_devices_storage::atapi::AtapiCdrom::new(Some(Box::new(MemIso::new(2)))),
+    );
+    let mut state = dev.snapshot_state();
+    // Forge the pre-fix guest-visible BAR image (prog-if 0x8A + BAR0 at 0x1F0).
+    state.pci.regs[0x09] = 0x8a;
+    // Pre-fix snapshots left PIIX3 IDETIM at reset-0 (channels off).
+    state.pci.regs[0x40..0x44].fill(0);
+    state.pci.bar0 = 0x1F1;
+    state.pci.bar1 = 0x3F5;
+    state.pci.bar2 = 0x171;
+    state.pci.bar3 = 0x375;
+    state.pci.regs[0x10..0x14].copy_from_slice(&0x0000_1F01u32.to_le_bytes());
+    state.pci.regs[0x14..0x18].copy_from_slice(&0x0000_3F05u32.to_le_bytes());
+    state.pci.regs[0x18..0x1C].copy_from_slice(&0x0000_1701u32.to_le_bytes());
+    state.pci.regs[0x1C..0x20].copy_from_slice(&0x0000_3705u32.to_le_bytes());
+
+    let mut restored = Piix3IdePciDevice::new();
+    restored.restore_state(&state);
+
+    assert_eq!(read_u8(&mut restored, 0x09), 0x80);
+    assert_eq!(
+        read_u16(&mut restored, 0x40) & 0x8000,
+        0x8000,
+        "restore must enable primary IDETIM even if the snapshot left it clear"
+    );
+    assert_eq!(
+        read_u16(&mut restored, 0x42) & 0x8000,
+        0x8000,
+        "restore must enable secondary IDETIM even if the snapshot left it clear"
+    );
+    for off in [0x10u16, 0x14, 0x18, 0x1c] {
+        assert_eq!(
+            read_u32(&mut restored, off),
+            0,
+            "restored BAR at {off:#x} must stay unimplemented"
+        );
+    }
+    assert_eq!(
+        restored.config().bar_definition(4),
+        Some(PciBarDefinition::Io { size: 16 })
+    );
+
+    restored.config_mut().set_command(0x0005);
+    let mut io = IoPortBus::new();
+    let shared = Rc::new(RefCell::new(restored));
+    register_piix3_ide_ports(&mut io, shared);
+    io.write(SECONDARY_PORTS.cmd_base + 6, 1, 0xA0);
+    io.write(SECONDARY_PORTS.ctrl_base, 1, 0x04);
+    io.write(SECONDARY_PORTS.ctrl_base, 1, 0x00);
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 4, 1) as u8, 0x14);
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 5, 1) as u8, 0xEB);
 }
 
 #[test]
@@ -419,6 +530,13 @@ fn status_read_while_slave_absent_selected_does_not_ack_master_irq() {
     io.write(PRIMARY_PORTS.cmd_base + 7, 1, 0xEC);
     assert!(ide.borrow().controller.primary_irq_pending());
 
+    // QEMU ignores Device/Head writes while DRQ is set, so drain IDENTIFY first.
+    // The last word raises the completion IRQ with DRQ clear.
+    for _ in 0..256 {
+        let _ = io.read(PRIMARY_PORTS.cmd_base, 2);
+    }
+    assert!(ide.borrow().controller.primary_irq_pending());
+
     // Select absent slave and read STATUS. This should return bus-high but must not acknowledge the
     // master's interrupt.
     io.write(PRIMARY_PORTS.cmd_base + 6, 1, 0xF0);
@@ -430,14 +548,6 @@ fn status_read_while_slave_absent_selected_does_not_ack_master_irq() {
 
     // Select master again and acknowledge the IRQ.
     io.write(PRIMARY_PORTS.cmd_base + 6, 1, 0xE0);
-    let _ = io.read(PRIMARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.primary_irq_pending());
-
-    // Drain the IDENTIFY data to complete the command and then acknowledge its completion IRQ.
-    for _ in 0..256 {
-        let _ = io.read(PRIMARY_PORTS.cmd_base, 2);
-    }
-    assert!(ide.borrow().controller.primary_irq_pending());
     let _ = io.read(PRIMARY_PORTS.cmd_base + 7, 1);
     assert!(!ide.borrow().controller.primary_irq_pending());
 }
@@ -3391,6 +3501,42 @@ fn atapi_identify_device_aborts_with_signature() {
 }
 
 #[test]
+fn atapi_signature_present_after_srst_reset() {
+    // Regression test: after SRST deassertion, the selected ATAPI device must
+    // present its signature (sector_count=0x01, lba_low=0x01, lba_mid=0x14,
+    // lba_high=0xEB) so the host can classify it. Without this, Win7's
+    // atapi.sys/pciide.sys can't detect the CD-ROM via SRST-based enumeration.
+    let iso = MemIso::new(1);
+
+    let ide = Rc::new(RefCell::new(Piix3IdePciDevice::new()));
+    ide.borrow_mut().controller.attach_secondary_master_atapi(
+        aero_devices_storage::atapi::AtapiCdrom::new(Some(Box::new(iso))),
+    );
+    ide.borrow_mut().config_mut().set_command(0x0001);
+
+    let mut ioports = IoPortBus::new();
+    register_piix3_ide_ports(&mut ioports, ide.clone());
+
+    // Select master on secondary channel.
+    ioports.write(SECONDARY_PORTS.cmd_base + 6, 1, 0xA0);
+
+    // Assert then deassert SRST on the secondary channel.
+    ioports.write(SECONDARY_PORTS.ctrl_base, 1, 0x04); // SRST=1
+    ioports.write(SECONDARY_PORTS.ctrl_base, 1, 0x00); // SRST=0
+
+    // Read the signature from the task file registers.
+    let sector_count = ioports.read(SECONDARY_PORTS.cmd_base + 2, 1) as u8;
+    let lba_low = ioports.read(SECONDARY_PORTS.cmd_base + 3, 1) as u8;
+    let lba_mid = ioports.read(SECONDARY_PORTS.cmd_base + 4, 1) as u8;
+    let lba_high = ioports.read(SECONDARY_PORTS.cmd_base + 5, 1) as u8;
+
+    assert_eq!(sector_count, 0x01, "ATAPI sector_count signature");
+    assert_eq!(lba_low, 0x01, "ATAPI lba_low signature");
+    assert_eq!(lba_mid, 0x14, "ATAPI lba_mid signature");
+    assert_eq!(lba_high, 0xEB, "ATAPI lba_high signature");
+}
+
+#[test]
 fn atapi_identify_packet_device_returns_identify_data() {
     // Many OSes also issue IDENTIFY PACKET DEVICE (0xA1) to ATAPI drives to fetch identify words.
     // This should succeed even without media present.
@@ -3417,13 +3563,22 @@ fn atapi_identify_packet_device_returns_identify_data() {
         buf[i * 2..i * 2 + 2].copy_from_slice(&w.to_le_bytes());
     }
 
-    // Word 0: ATAPI device (0x8580) + packet size indicator (bit0=1).
+    // Word 0: ATAPI + CD-ROM + interrupt DRQ (QEMU 0x85C0).
     let word0 = u16::from_le_bytes([buf[0], buf[1]]);
-    assert_eq!(word0, 0x8581);
+    assert_eq!(word0, 0x85C0);
+    assert_eq!((word0 >> 8) & 0x1F, 0x05);
 
-    // Word 49: DMA capability bit should be set.
+    // Word 49: IORDY + LBA + DMA. LBA is required for a CdRom PDO.
     let word49 = u16::from_le_bytes([buf[49 * 2], buf[49 * 2 + 1]]);
     assert_ne!(word49 & (1 << 8), 0);
+    assert_ne!(word49 & (1 << 9), 0, "ATAPI identify must advertise LBA");
+
+    // Word 53 claims words 64–70 valid; word 64 must name PIO 3/4 or
+    // atapi.sys treats the PACKET device as unusable.
+    let word53 = u16::from_le_bytes([buf[53 * 2], buf[53 * 2 + 1]]);
+    let word64 = u16::from_le_bytes([buf[64 * 2], buf[64 * 2 + 1]]);
+    assert_eq!(word53 & 0x02, 0x02);
+    assert_eq!(word64 & 0x03, 0x03);
 
     // Model string words 27..46 (40 bytes), ATA-encoded (bytes swapped within each word).
     let mut model_bytes = Vec::new();
@@ -3440,6 +3595,81 @@ fn atapi_identify_packet_device_returns_identify_data() {
     // Reading STATUS acknowledges and clears the pending IRQ.
     let _ = io.read(SECONDARY_PORTS.cmd_base + 7, 1);
     assert!(!ide.borrow().controller.secondary_irq_pending());
+}
+
+#[test]
+fn atapi_taskfile_single_write_is_immediately_readable() {
+    // QEMU copies the previous value to HOB and puts the new write in the
+    // visible register. Win7 ataport reads the PACKET byte-count limit back
+    // before issuing 0xA0; the old "first write lives in HOB" scheme returned
+    // the ATAPI signature instead.
+    let ide = Rc::new(RefCell::new(Piix3IdePciDevice::new()));
+    ide.borrow_mut()
+        .controller
+        .attach_secondary_master_atapi(aero_devices_storage::atapi::AtapiCdrom::new(None));
+    ide.borrow_mut().config_mut().set_command(0x0001);
+
+    let mut io = IoPortBus::new();
+    register_piix3_ide_ports(&mut io, ide.clone());
+
+    io.write(SECONDARY_PORTS.cmd_base + 6, 1, 0xA0);
+    io.write(SECONDARY_PORTS.ctrl_base, 1, 0x04);
+    io.write(SECONDARY_PORTS.ctrl_base, 1, 0x00);
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 4, 1) as u8, 0x14);
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 5, 1) as u8, 0xEB);
+
+    io.write(SECONDARY_PORTS.cmd_base + 4, 1, 0x24);
+    io.write(SECONDARY_PORTS.cmd_base + 5, 1, 0x00);
+    assert_eq!(
+        io.read(SECONDARY_PORTS.cmd_base + 4, 1) as u8,
+        0x24,
+        "LBA Mid must read back the byte-count write, not the leftover signature"
+    );
+    assert_eq!(io.read(SECONDARY_PORTS.cmd_base + 5, 1) as u8, 0x00);
+}
+
+#[test]
+fn atapi_packet_cdb_phase_does_not_raise_irq() {
+    let ide = Rc::new(RefCell::new(Piix3IdePciDevice::new()));
+    ide.borrow_mut()
+        .controller
+        .attach_secondary_master_atapi(aero_devices_storage::atapi::AtapiCdrom::new(None));
+    ide.borrow_mut().config_mut().set_command(0x0001);
+
+    let mut io = IoPortBus::new();
+    register_piix3_ide_ports(&mut io, ide.clone());
+
+    io.write(SECONDARY_PORTS.cmd_base + 6, 1, 0xA0);
+    io.write(SECONDARY_PORTS.cmd_base + 4, 1, 0x24);
+    io.write(SECONDARY_PORTS.cmd_base + 5, 1, 0x00);
+    io.write(SECONDARY_PORTS.cmd_base + 7, 1, 0xA0);
+    let st = io.read(SECONDARY_PORTS.ctrl_base, 1) as u8;
+    assert_ne!(st & 0x08, 0, "DRQ for the 12-byte CDB");
+    assert!(
+        !ide.borrow().controller.secondary_irq_pending(),
+        "QEMU/Win7: PACKET CDB phase is polled, not interrupted"
+    );
+}
+
+#[test]
+fn atapi_pio_inquiry_with_zero_byte_count_aborts_like_qemu() {
+    let ide = Rc::new(RefCell::new(Piix3IdePciDevice::new()));
+    ide.borrow_mut()
+        .controller
+        .attach_secondary_master_atapi(aero_devices_storage::atapi::AtapiCdrom::new(None));
+    ide.borrow_mut().config_mut().set_command(0x0001);
+
+    let mut io = IoPortBus::new();
+    register_piix3_ide_ports(&mut io, ide.clone());
+
+    io.write(SECONDARY_PORTS.cmd_base + 6, 1, 0xA0);
+    let mut inquiry = [0u8; 12];
+    inquiry[0] = 0x12;
+    inquiry[4] = 36;
+    send_atapi_packet(&mut io, SECONDARY_PORTS.cmd_base, 0, &inquiry, 0);
+    let st = io.read(SECONDARY_PORTS.ctrl_base, 1) as u8;
+    assert_ne!(st & 0x01, 0, "BCL=0 PIO data command must ABRT");
+    assert_eq!(st & 0x08, 0, "DRQ must be clear after the ATA abort");
 }
 
 #[test]
@@ -3568,7 +3798,11 @@ fn atapi_read_12_rejects_oversized_transfer_without_allocating_buffer() {
     assert_eq!(status & 0x80, 0, "BSY should be clear");
     assert_eq!(status & 0x08, 0, "DRQ should be clear (no data phase)");
     assert_ne!(status & 0x01, 0, "ERR should be set");
-    assert_eq!(ioports.read(SECONDARY_PORTS.cmd_base + 1, 1) as u8, 0x04);
+    assert_eq!(
+        ioports.read(SECONDARY_PORTS.cmd_base + 1, 1) as u8,
+        0x50,
+        "ATAPI packet errors report sense_key<<4 (ILLEGAL REQUEST=0x05)"
+    );
 }
 
 #[test]
@@ -4044,10 +4278,7 @@ fn atapi_dma_succeeds_when_bus_master_is_started_before_command_is_issued() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK packet-phase IRQ.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     ide.borrow_mut().tick(&mut mem);
 
@@ -4130,10 +4361,7 @@ fn atapi_dma_can_run_back_to_back_without_restarting_bus_master() {
         read10[7..9].copy_from_slice(&1u16.to_be_bytes());
         send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-        // ACK packet-phase IRQ.
-        assert!(ide.borrow().controller.secondary_irq_pending());
-        let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-        assert!(!ide.borrow().controller.secondary_irq_pending());
+        // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
         // Complete DMA.
         ide.borrow_mut().tick(&mut mem);
@@ -4215,10 +4443,7 @@ fn atapi_dma_does_not_run_until_bus_master_is_started() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK packet-phase IRQ.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Without BMIDE start, tick should not perform any DMA.
     ide.borrow_mut().tick(&mut mem);
@@ -4305,10 +4530,7 @@ fn atapi_dma_success_on_secondary_channel_requires_secondary_bus_master_start() 
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK packet-phase IRQ.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Start the *primary* bus master engine (wrong channel) and tick. The secondary DMA request
     // must remain pending, with no memory writes and no interrupt.
@@ -4402,10 +4624,7 @@ fn atapi_dma_success_on_primary_channel_requires_primary_bus_master_start() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, PRIMARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK packet-phase IRQ.
-    assert!(ide.borrow().controller.primary_irq_pending());
-    let _ = ioports.read(PRIMARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.primary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Start the *secondary* bus master engine (wrong channel) and tick. The primary DMA request
     // must remain pending, with no memory writes and no interrupt.
@@ -4517,7 +4736,11 @@ fn atapi_dma_read_out_of_bounds_aborts_without_setting_bus_master_error() {
 
     // ATAPI interrupt reason: status phase.
     assert_eq!(ioports.read(SECONDARY_PORTS.cmd_base + 2, 1) as u8, 0x03);
-    assert_eq!(ioports.read(SECONDARY_PORTS.cmd_base + 1, 1) as u8, 0x04);
+    assert_eq!(
+        ioports.read(SECONDARY_PORTS.cmd_base + 1, 1) as u8,
+        0x50,
+        "ATAPI packet errors report sense_key<<4"
+    );
 
     let mut out = vec![0u8; 2048];
     mem.read_physical(dma_buf, &mut out);
@@ -4571,11 +4794,8 @@ fn atapi_packet_phase_irq_is_latched_while_nien_is_set_and_surfaces_after_reenab
 
     assert!(!ide.borrow().controller.primary_irq_pending());
 
-    // Re-enable interrupts; the latched packet-phase IRQ should now surface.
+    // CDB phase never latches INTRQ (QEMU). Unmasking nIEN must not invent one.
     ioports.write(PRIMARY_PORTS.ctrl_base, 1, 0x00);
-    assert!(ide.borrow().controller.primary_irq_pending());
-
-    let _ = ioports.read(PRIMARY_PORTS.cmd_base + 7, 1);
     assert!(!ide.borrow().controller.primary_irq_pending());
 }
 
@@ -4659,14 +4879,12 @@ fn atapi_alt_status_does_not_clear_irq_latch_on_packet_phase() {
     }
     let _ = ioports.read(PRIMARY_PORTS.cmd_base + 7, 1);
 
-    // Issue a DMA-capable READ(10) packet. This should raise the packet-phase IRQ requesting the
-    // 12-byte packet; the DMA completion IRQ won't occur until the BMIDE engine is started and
-    // `tick()` runs.
-    let mut read10 = [0u8; 12];
-    read10[0] = 0x28;
-    read10[2..6].copy_from_slice(&0u32.to_be_bytes());
-    read10[7..9].copy_from_slice(&1u16.to_be_bytes());
-    send_atapi_packet(&mut ioports, PRIMARY_PORTS.cmd_base, 0x01, &read10, 2048);
+    // PIO INQUIRY completes with a data-phase IRQ. Use that to prove ALT_STATUS
+    // does not ack the latch (the CDB phase itself no longer raises INTRQ).
+    let mut inquiry = [0u8; 12];
+    inquiry[0] = 0x12;
+    inquiry[4] = 36;
+    send_atapi_packet(&mut ioports, PRIMARY_PORTS.cmd_base, 0, &inquiry, 36);
 
     assert!(ide.borrow().controller.primary_irq_pending());
 
@@ -4741,10 +4959,7 @@ fn atapi_software_reset_clears_pending_dma_request() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK packet-phase IRQ.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Assert software reset (SRST) via Device Control; this should clear the pending DMA request.
     ioports.write(SECONDARY_PORTS.ctrl_base, 1, 0x04);
@@ -4826,10 +5041,7 @@ fn atapi_dma_success_irq_is_latched_while_nien_is_set_and_surfaces_after_reenabl
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK the packet-phase interrupt so the only remaining IRQ is the DMA completion.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Mask interrupts before running DMA; completion should latch internally.
     ioports.write(SECONDARY_PORTS.ctrl_base, 1, 0x02);
@@ -4905,10 +5117,7 @@ fn atapi_dma_success_irq_can_be_acknowledged_while_nien_is_set() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK the packet-phase interrupt so the only remaining IRQ is the DMA completion.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Mask interrupts before running DMA.
     ioports.write(SECONDARY_PORTS.ctrl_base, 1, 0x02);
@@ -4995,10 +5204,7 @@ fn atapi_nien_mask_on_primary_channel_does_not_mask_secondary_dma_irq() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK packet-phase IRQ.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Complete DMA.
     ioports.write(bm_base + 8, 1, 0x09);
@@ -5078,10 +5284,7 @@ fn atapi_nien_mask_on_secondary_channel_does_not_mask_primary_dma_irq() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, PRIMARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK packet-phase IRQ.
-    assert!(ide.borrow().controller.primary_irq_pending());
-    let _ = ioports.read(PRIMARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.primary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Complete DMA.
     ioports.write(bm_base, 1, 0x09);
@@ -5159,10 +5362,7 @@ fn atapi_dma_success_sets_interrupt_reason_and_byte_count_registers() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK packet-phase IRQ.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // While the DMA request is pending, interrupt reason should indicate Data-In (IO=1, CoD=0),
     // and the byte count registers should reflect the transfer length (0x0800).
@@ -5239,10 +5439,7 @@ fn atapi_dma_missing_prd_eot_sets_error_status_on_secondary_channel() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK the packet-phase interrupt so we can observe the DMA completion interrupt.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Start the secondary bus master engine, direction=read (device -> memory).
     ioports.write(bm_base + 8, 1, 0x09);
@@ -5377,10 +5574,7 @@ fn atapi_dma_prd_too_short_sets_error_status_and_partially_transfers_data() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK the packet-phase interrupt so we can observe the DMA completion interrupt.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Start the secondary bus master engine, direction=read (device -> memory).
     ioports.write(bm_base + 8, 1, 0x09);
@@ -5480,10 +5674,7 @@ fn atapi_dma_direction_mismatch_sets_error_status_and_does_not_transfer_data() {
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK the packet-phase interrupt so we can observe the DMA completion interrupt.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     ide.borrow_mut().tick(&mut mem);
 
@@ -5569,10 +5760,7 @@ fn atapi_dma_error_irq_is_latched_while_nien_is_set_and_surfaces_after_reenable(
     read10[7..9].copy_from_slice(&1u16.to_be_bytes());
     send_atapi_packet(&mut ioports, SECONDARY_PORTS.cmd_base, 0x01, &read10, 2048);
 
-    // ACK the packet-phase interrupt so we can observe the DMA completion interrupt.
-    assert!(ide.borrow().controller.secondary_irq_pending());
-    let _ = ioports.read(SECONDARY_PORTS.cmd_base + 7, 1);
-    assert!(!ide.borrow().controller.secondary_irq_pending());
+    // CDB phase is polled (no INTRQ). DMA/status IRQ comes after tick().
 
     // Mask interrupts before running DMA; completion should latch irq_pending.
     ioports.write(SECONDARY_PORTS.ctrl_base, 1, 0x02);
@@ -6733,12 +6921,12 @@ fn ata_write_dma_direction_mismatch_sets_error_status_and_does_not_write_disk() 
 }
 
 #[test]
-fn bios_post_preserves_piix3_legacy_bar_bases() {
+fn bios_post_preserves_piix3_bmide_bar_and_leaves_command_blocks_hardwired() {
     let mut bus = PciPlatform::build_bus();
     let bdf = IDE_PIIX3.bdf;
 
-    // The device initializes its BARs to legacy port addresses; BIOS POST should preserve those
-    // fixed assignments rather than allocating new ones.
+    // QEMU PIIX3: only BAR4 exists. BIOS POST must keep BMIDE and must not
+    // invent native command-block BARs at 0x1F0/0x170.
     bus.add_device(bdf, Box::new(Piix3IdePciDevice::new()));
 
     let mut alloc = PciResourceAllocator::new(PciResourceAllocatorConfig::default());
@@ -6746,22 +6934,10 @@ fn bios_post_preserves_piix3_legacy_bar_bases() {
 
     let cfg = bus.device_config(bdf).unwrap();
 
-    assert_eq!(
-        cfg.bar_range(0).unwrap().base,
-        u64::from(PRIMARY_PORTS.cmd_base)
-    );
-    assert_eq!(
-        cfg.bar_range(1).unwrap().base,
-        u64::from(PRIMARY_PORTS.ctrl_base - 2)
-    );
-    assert_eq!(
-        cfg.bar_range(2).unwrap().base,
-        u64::from(SECONDARY_PORTS.cmd_base)
-    );
-    assert_eq!(
-        cfg.bar_range(3).unwrap().base,
-        u64::from(SECONDARY_PORTS.ctrl_base - 2)
-    );
+    assert_eq!(cfg.bar_definition(0), None);
+    assert_eq!(cfg.bar_definition(1), None);
+    assert_eq!(cfg.bar_definition(2), None);
+    assert_eq!(cfg.bar_definition(3), None);
     assert_eq!(
         cfg.bar_range(4).unwrap().base,
         u64::from(Piix3IdePciDevice::DEFAULT_BUS_MASTER_BASE)

@@ -7,7 +7,7 @@ import {
   parseIoAipcWorkerInitMessage,
   parseIoWorkerInitMessage,
   parseSerialDemoCpuWorkerInitMessage,
-} from "../web/src/workers/worker_init_parsers.ts";
+} from "../apps/web/src/workers/worker_init_parsers.ts";
 
 function makeHostileThrowingProxy() {
   return new Proxy(

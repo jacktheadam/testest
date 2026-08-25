@@ -12,7 +12,7 @@ test('aero-gpu-wasm upload_rgba8888_dirty_rects only uploads dirty region', asyn
   test.skip(testInfo.project.name !== 'chromium', 'wgpu WebGL2 upload test only runs in Chromium');
 
   // Use a minimal same-origin page so we can dynamic-import Vite TS modules.
-  await page.goto('/web/src/pages/blank.html', { waitUntil: 'load' });
+  await page.goto('/apps/web/src/pages/blank.html', { waitUntil: 'load' });
 
   const caps = await page.evaluate(() => {
     return {
@@ -37,7 +37,7 @@ test('aero-gpu-wasm upload_rgba8888_dirty_rects only uploads dirty region', asyn
       return btoa(binary);
     }
 
-    const wasm = await import('/web/src/wasm/aero-gpu.ts');
+    const wasm = await import('/apps/web/src/wasm/aero-gpu.ts');
     await wasm.default();
 
     const beforeStats = (wasm.get_gpu_stats?.() as any) ?? {};
@@ -198,7 +198,7 @@ test('aero-gpu-wasm upload_rgba8888_dirty_rects falls back to full upload when r
   // configurations; keep this test on the default Chromium project.
   test.skip(testInfo.project.name !== 'chromium', 'wgpu WebGL2 upload test only runs in Chromium');
 
-  await page.goto('/web/src/pages/blank.html', { waitUntil: 'load' });
+  await page.goto('/apps/web/src/pages/blank.html', { waitUntil: 'load' });
 
   const caps = await page.evaluate(() => {
     return {
@@ -222,7 +222,7 @@ test('aero-gpu-wasm upload_rgba8888_dirty_rects falls back to full upload when r
       return btoa(binary);
     }
 
-    const wasm = await import('/web/src/wasm/aero-gpu.ts');
+    const wasm = await import('/apps/web/src/wasm/aero-gpu.ts');
     await wasm.default();
 
     const beforeStats = (wasm.get_gpu_stats?.() as any) ?? {};

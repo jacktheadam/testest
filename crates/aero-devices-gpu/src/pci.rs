@@ -39,7 +39,7 @@ pub const LEGACY_VGA_VRAM_BYTES: u64 = aero_gpu_vga::VGA_LEGACY_MEM_LEN as u64;
 /// (4 × 64KiB planes). VBE packed-pixel framebuffer writes are mapped after this region so
 /// firmware/bootloaders/Windows can draw into the LFB without overwriting VGA plane contents.
 ///
-/// See `docs/16-aerogpu-vga-vesa-compat.md`.
+/// See `wiki/areas/graphics.md`.
 pub const VBE_LFB_OFFSET: u64 = proto::AEROGPU_PCI_BAR1_VBE_LFB_OFFSET_BYTES as u64;
 
 const _: () = {
@@ -916,7 +916,41 @@ impl MmioHandler for AeroGpuBar1VramMmio {
             }
             vram[idx] = ((value >> (i * 8)) & 0xFF) as u8;
         }
+
+        // Paint-wall probe: count stores into the VBE LFB window inside BAR1.
+        // `AERO_COUNT_LFB_WRITES=1` enables; first 16 log. Shares semantics with
+        // aero-gpu-vga LFB counter so DUMP_VGA can print a combined total via either.
+        if (VBE_LFB_OFFSET..VBE_LFB_OFFSET + 0x40_0000).contains(&offset) {
+            aerogpu_lfb_write_note(offset.saturating_sub(VBE_LFB_OFFSET), size as u64, value);
+        }
     }
+}
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+
+static AEROGPU_LFB_WRITES: AtomicU64 = AtomicU64::new(0);
+static AEROGPU_LFB_LOGGED: AtomicU64 = AtomicU64::new(0);
+static AEROGPU_LFB_ENABLED: OnceLock<bool> = OnceLock::new();
+
+fn aerogpu_lfb_write_note(offset: u64, len: u64, value: u64) {
+    if !*AEROGPU_LFB_ENABLED.get_or_init(|| std::env::var_os("AERO_COUNT_LFB_WRITES").is_some()) {
+        return;
+    }
+    let n = AEROGPU_LFB_WRITES.fetch_add(1, Ordering::Relaxed) + 1;
+    let logged = AEROGPU_LFB_LOGGED.load(Ordering::Relaxed);
+    if logged < 16
+        && AEROGPU_LFB_LOGGED
+            .compare_exchange(logged, logged + 1, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    {
+        eprintln!("[aerogpu-lfb-write] #{n} off={offset:#x} len={len} val={value:#x}");
+    }
+}
+
+/// BAR1 VBE-LFB store count since process start (0 unless `AERO_COUNT_LFB_WRITES`).
+pub fn aerogpu_lfb_write_count() -> u64 {
+    AEROGPU_LFB_WRITES.load(Ordering::Relaxed)
 }
 
 /// MMIO handler for the legacy VGA window alias (`0xA0000..0xC0000`).

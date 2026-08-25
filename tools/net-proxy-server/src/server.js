@@ -2,20 +2,20 @@ import http from "node:http";
 import { lookup } from "node:dns/promises";
 import net from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
-import { formatOneLineError, formatOneLineUtf8 } from "./text.js";
-import { rejectHttpUpgrade } from "../../../src/http_upgrade_reject.js";
+import { formatOneLineError, formatOneLineUtf8 } from "../../../packages/transport-safety/src/text.js";
+import { rejectHttpUpgrade } from "../../../packages/transport-safety/src/http_upgrade_reject.js";
 import { wsCloseSafe, wsIsOpenSafe } from "../../../scripts/_shared/ws_safe.js";
-import { createWsSendQueue } from "../../../src/ws_backpressure.js";
-import { socketWritableLengthOrOverflow } from "../../../src/socket_writable_length.js";
+import { createWsSendQueue } from "../../../apps/web/src/ws_backpressure.js";
+import { socketWritableLengthOrOverflow } from "../../../packages/transport-safety/src/socket_writable_length.js";
 import {
   callMethodCaptureErrorBestEffort,
   destroyBestEffort,
   endCaptureErrorBestEffort,
   removeAllListenersBestEffort,
   writeCaptureErrorBestEffort,
-} from "../../../src/socket_safe.js";
-import { tryGetProp, tryGetStringProp } from "../../../src/safe_props.js";
-import { unrefBestEffort } from "../../../src/unref_safe.js";
+} from "../../../packages/transport-safety/src/socket_safe.js";
+import { tryGetProp, tryGetStringProp } from "../../../packages/transport-safety/src/safe_props.js";
+import { unrefBestEffort } from "../../../packages/transport-safety/src/unref_safe.js";
 import { hasWebSocketSubprotocol } from "./wsSubprotocol.js";
 import {
   TCP_MUX_HEADER_BYTES,

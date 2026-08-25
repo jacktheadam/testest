@@ -7,20 +7,20 @@ import { isWebGPURequired } from "../util/env";
 // - This catches accidental double-gamma, wrong alphaMode, and Y-flip mismatches.
 //
 // NOTE: This spec assumes Playwright is configured with a Vite dev server rooted at the repo,
-// so `/web/...` serves files from the `web/` directory.
+// so `/apps/web/...` serves files from the `web/` directory.
 
 async function renderHash(page: any, opts: any): Promise<string> {
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
   return await page.evaluate(async (opts: any) => {
     const canvas = document.createElement("canvas");
     document.body.appendChild(canvas);
-    const mod = await import("/web/src/gpu/validation-scene.ts");
+    const mod = await import("/apps/web/src/gpu/validation-scene.ts");
     return await mod.renderGpuColorTestCardAndHash(canvas, opts);
   }, opts);
 }
 
 async function webGpuIsUsable(page: any): Promise<boolean> {
-  await page.goto("/web/blank.html");
+  await page.goto("/apps/web/blank.html");
   return await page.evaluate(async () => {
     if (!navigator.gpu) return false;
 
@@ -54,7 +54,7 @@ async function webGpuIsUsable(page: any): Promise<boolean> {
       canvas.width = 8;
       canvas.height = 8;
       document.body.appendChild(canvas);
-      const mod = await withTimeout(import("/web/src/gpu/validation-scene.ts"), 2000);
+      const mod = await withTimeout(import("/apps/web/src/gpu/validation-scene.ts"), 2000);
       if (!mod) return false;
       const fn = (mod as any).renderGpuColorTestCardAndHash;
       if (typeof fn !== "function") return false;

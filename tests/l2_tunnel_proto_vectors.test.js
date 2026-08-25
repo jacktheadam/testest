@@ -3,8 +3,8 @@ import fs from "node:fs";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { encodeL2Message } from "../prototype/nt-arch-rfc/l2_tunnel_proto.js";
-import { L2_TUNNEL_SUBPROTOCOL } from "../web/src/shared/l2TunnelProtocol.ts";
+import { encodeL2Message } from "./helpers/l2_tunnel_proto.js";
+import { L2_TUNNEL_SUBPROTOCOL } from "../apps/web/src/shared/l2TunnelProtocol.ts";
 
 function decodeHex(hex) {
   assert.equal(hex.length % 2, 0, `hex string length must be even, got ${hex.length}`);

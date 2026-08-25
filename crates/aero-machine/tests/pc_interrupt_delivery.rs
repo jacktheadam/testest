@@ -249,19 +249,16 @@ fn pc_machine_e1000_intx_is_synced_but_not_acknowledged_when_if0() {
     let mut pc = PcMachine::new_with_e1000(2 * 1024 * 1024, None);
 
     let bdf = NIC_E1000_82540EM.bdf;
-    let gsi = pc
+    let irq = pc
         .bus
         .platform
         .pci_intx
-        .gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected E1000 INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let expected_vector = if gsi < 8 {
-        0x20u8.wrapping_add(gsi as u8)
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("E1000 INTx should have a legacy PIC compatibility route");
+    let expected_vector = if irq < 8 {
+        0x20u8.wrapping_add(irq)
     } else {
-        0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+        0x28u8.wrapping_add(irq.wrapping_sub(8))
     };
 
     // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -273,11 +270,7 @@ fn pc_machine_e1000_intx_is_synced_but_not_acknowledged_when_if0() {
         }
         // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
         ints.pic_mut().set_masked(2, false);
-        if let Ok(irq) = u8::try_from(gsi) {
-            if irq < 16 {
-                ints.pic_mut().set_masked(irq, false);
-            }
-        }
+        ints.pic_mut().set_masked(irq, false);
     }
 
     // Park the CPU at a NOP sled and simulate HLT with IF=0.
@@ -320,19 +313,16 @@ fn pc_machine_e1000_intx_is_synced_even_when_external_interrupt_queue_is_full() 
     let mut pc = PcMachine::new_with_e1000(2 * 1024 * 1024, None);
 
     let bdf = NIC_E1000_82540EM.bdf;
-    let gsi = pc
+    let irq = pc
         .bus
         .platform
         .pci_intx
-        .gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected E1000 INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let expected_vector = if gsi < 8 {
-        0x20u8.wrapping_add(gsi as u8)
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("E1000 INTx should have a legacy PIC compatibility route");
+    let expected_vector = if irq < 8 {
+        0x20u8.wrapping_add(irq)
     } else {
-        0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+        0x28u8.wrapping_add(irq.wrapping_sub(8))
     };
 
     // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -344,11 +334,7 @@ fn pc_machine_e1000_intx_is_synced_even_when_external_interrupt_queue_is_full() 
         }
         // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
         ints.pic_mut().set_masked(2, false);
-        if let Ok(irq) = u8::try_from(gsi) {
-            if irq < 16 {
-                ints.pic_mut().set_masked(irq, false);
-            }
-        }
+        ints.pic_mut().set_masked(irq, false);
     }
 
     // Park the CPU at a NOP sled and simulate HLT with IF=0 so the external interrupt FIFO cannot
@@ -416,19 +402,16 @@ fn pc_machine_e1000_intx_is_synced_but_not_acknowledged_during_interrupt_shadow(
     let mut pc = PcMachine::new_with_e1000(2 * 1024 * 1024, None);
 
     let bdf = NIC_E1000_82540EM.bdf;
-    let gsi = pc
+    let irq = pc
         .bus
         .platform
         .pci_intx
-        .gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected E1000 INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let expected_vector = if gsi < 8 {
-        0x20u8.wrapping_add(gsi as u8)
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("E1000 INTx should have a legacy PIC compatibility route");
+    let expected_vector = if irq < 8 {
+        0x20u8.wrapping_add(irq)
     } else {
-        0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+        0x28u8.wrapping_add(irq.wrapping_sub(8))
     };
 
     // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -440,11 +423,7 @@ fn pc_machine_e1000_intx_is_synced_but_not_acknowledged_during_interrupt_shadow(
         }
         // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
         ints.pic_mut().set_masked(2, false);
-        if let Ok(irq) = u8::try_from(gsi) {
-            if irq < 16 {
-                ints.pic_mut().set_masked(irq, false);
-            }
-        }
+        ints.pic_mut().set_masked(irq, false);
     }
 
     // Assert E1000 INTx level by enabling + setting a cause bit. This sets `irq_level()` in the
@@ -487,19 +466,16 @@ fn pc_machine_e1000_intx_asserted_via_bar1_io_wakes_hlt_in_same_slice() {
     let mut pc = PcMachine::new_with_e1000(2 * 1024 * 1024, None);
 
     let bdf = NIC_E1000_82540EM.bdf;
-    let gsi = pc
+    let irq = pc
         .bus
         .platform
         .pci_intx
-        .gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected E1000 INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let expected_vector = if gsi < 8 {
-        0x20u8.wrapping_add(gsi as u8)
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("E1000 INTx should have a legacy PIC compatibility route");
+    let expected_vector = if irq < 8 {
+        0x20u8.wrapping_add(irq)
     } else {
-        0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+        0x28u8.wrapping_add(irq.wrapping_sub(8))
     };
 
     // Configure the legacy PIC to use the standard remapped offsets and unmask the routed IRQ.
@@ -508,11 +484,7 @@ fn pc_machine_e1000_intx_asserted_via_bar1_io_wakes_hlt_in_same_slice() {
         ints.pic_mut().set_offsets(0x20, 0x28);
         // If the routed GSI maps to the slave PIC, ensure cascade (IRQ2) is unmasked as well.
         ints.pic_mut().set_masked(2, false);
-        if let Ok(irq) = u8::try_from(gsi) {
-            if irq < 16 {
-                ints.pic_mut().set_masked(irq, false);
-            }
-        }
+        ints.pic_mut().set_masked(irq, false);
     }
 
     // Resolve the E1000 BAR1 I/O port base assigned by BIOS POST.
@@ -618,7 +590,7 @@ fn pc_machine_delivers_ioapic_interrupt_to_real_mode_ivt_handler() {
     let mut pc = PcMachine::new(2 * 1024 * 1024);
 
     let vector = 0x60u8;
-    let gsi = 10u32;
+    let gsi = 20u32;
     let handler_addr = 0x1100u64;
     let code_base = 0x2100u64;
     let flag_addr = 0x0501u16;
@@ -633,7 +605,7 @@ fn pc_machine_delivers_ioapic_interrupt_to_real_mode_ivt_handler() {
     // Halt the CPU first so the interrupt must wake it.
     assert!(matches!(pc.run_slice(16), RunExit::Halted { .. }));
 
-    // Switch to APIC mode and route GSI10 to `vector` (level-triggered, active-low).
+    // Switch to APIC mode and route Q35 PCI GSI20 to `vector` (level-triggered, active-low).
     {
         let mut ints = pc.bus.platform.interrupts.borrow_mut();
         ints.set_mode(PlatformInterruptMode::Apic);
@@ -665,16 +637,12 @@ fn pc_machine_delivers_e1000_pci_intx_via_legacy_pic() {
         aero_pc_platform::PcCpuBus::new(aero_pc_platform::PcPlatform::new_with_e1000(RAM_SIZE));
 
     let bdf = aero_devices::pci::profile::NIC_E1000_82540EM.bdf;
-    let gsi = pc
+    let irq = pc
         .bus
         .platform
         .pci_intx
-        .gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected E1000 INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let irq = u8::try_from(gsi).unwrap();
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("E1000 INTx should have a legacy PIC compatibility route");
     let vector = pic_vector_for_irq(irq);
 
     let handler_addr = 0x1200u64;
@@ -763,16 +731,12 @@ fn pc_machine_delivers_e1000_pci_intx_after_tx_dma_sets_txdw() {
         aero_pc_platform::PcCpuBus::new(aero_pc_platform::PcPlatform::new_with_e1000(RAM_SIZE));
 
     let bdf = aero_devices::pci::profile::NIC_E1000_82540EM.bdf;
-    let gsi = pc
+    let irq = pc
         .bus
         .platform
         .pci_intx
-        .gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected E1000 INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let irq = u8::try_from(gsi).unwrap();
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("E1000 INTx should have a legacy PIC compatibility route");
     let vector = pic_vector_for_irq(irq);
 
     let handler_addr = 0x1300u64;
@@ -898,16 +862,12 @@ fn pc_machine_delivers_ahci_pci_intx_via_legacy_pic() {
         .unwrap();
 
     let bdf = SATA_AHCI_ICH9.bdf;
-    let gsi = pc
+    let irq = pc
         .bus
         .platform
         .pci_intx
-        .gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected AHCI INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let irq = u8::try_from(gsi).unwrap();
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("AHCI INTx should have a legacy PIC compatibility route");
     let vector = pic_vector_for_irq(irq);
 
     let handler_addr = 0x1300u64;

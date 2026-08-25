@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 const HID_USAGE_KEYBOARD_JSON: &str =
-    include_str!("../../../docs/fixtures/hid_usage_keyboard.json");
+    include_str!("../../../protocol-vectors/hid_usage_keyboard.json");
 const SCANCODES_JSON: &str = include_str!("../../../tools/gen_scancodes/scancodes.json");
 
 // Defensive limits: these JSON files are trusted repo data, but this is still an
@@ -151,6 +151,6 @@ fn hid_usage_fixture_and_ps2_scancode_mapping_do_not_drift() {
     assert_eq!(
         missing_hid,
         Vec::<String>::new(),
-        "Core PS/2 scancode mappings are missing from the shared HID usage fixture (docs/fixtures/hid_usage_keyboard.json): {missing_hid:?}"
+        "Core PS/2 scancode mappings are missing from the shared HID usage fixture (protocol-vectors/hid_usage_keyboard.json): {missing_hid:?}"
     );
 }

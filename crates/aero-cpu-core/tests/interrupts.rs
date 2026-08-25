@@ -351,15 +351,17 @@ fn page_fault_delivery_failure_escalates_to_double_fault() -> Result<(), CpuExit
     cpu.deliver_pending_event(&mut mem)?;
 
     // CR2 should contain the faulting address of the nested #PF raised during delivery.
+    // The failed #PF frame push targets 0x1FFC; RSP is not half-applied on that failure.
     assert_eq!(cpu.state.control.cr2, 0x1FFC);
     assert_eq!(cpu.state.rip(), 0x5000);
 
-    // Stack frame for #DF: error_code, eip, cs, eflags.
-    assert_eq!(cpu.state.read_gpr32(gpr::RSP), 0x1FEC);
-    assert_eq!(mem.read_u32(0x1FEC).unwrap(), 0);
-    assert_eq!(mem.read_u32(0x1FF0).unwrap(), 0x1234);
-    assert_eq!(mem.read_u32(0x1FF4).unwrap(), 0x08);
-    assert_eq!(mem.read_u32(0x1FF8).unwrap(), 0x202);
+    // Stack frame for #DF: error_code, eip, cs, eflags — pushed from the original RSP
+    // (0x2000), not from a half-applied #PF push that had already decremented SP.
+    assert_eq!(cpu.state.read_gpr32(gpr::RSP), 0x1FF0);
+    assert_eq!(mem.read_u32(0x1FF0).unwrap(), 0);
+    assert_eq!(mem.read_u32(0x1FF4).unwrap(), 0x1234);
+    assert_eq!(mem.read_u32(0x1FF8).unwrap(), 0x08);
+    assert_eq!(mem.read_u32(0x1FFC).unwrap(), 0x202);
 
     Ok(())
 }
@@ -547,6 +549,41 @@ fn int_long_mode_ist_overrides_rsp0() -> Result<(), CpuExit> {
     assert_eq!(cpu.state.rip(), 0x4000_0010);
     assert_eq!(cpu.state.read_gpr64(gpr::RSP), 0x7000);
     assert_eq!(cpu.state.segments.ss.selector, 0x2B);
+    Ok(())
+}
+
+/// Win7 `KiExceptionExit` synthesizes an IA-32e return frame in software and runs
+/// `IRETQ` without a matching hardware delivery in the emulator's bookkeeping.
+/// Empty `interrupt_frames` must not #GP(0) in long mode (RC: 0x1E at IRETQ).
+#[test]
+fn iretq_long_mode_software_frame_without_bookkeeping() -> Result<(), CpuExit> {
+    let mut mem = FlatTestBus::new(0x40000);
+
+    let mut cpu = CpuCore::new(CpuMode::Long);
+    cpu.state.segments.cs.selector = 0x08; // CPL0
+    cpu.state.segments.ss.selector = 0x10;
+    cpu.state.segments.ss.access = SEG_ACCESS_PRESENT | 0x2; // data R/W
+    cpu.state.set_rip(0x5000);
+    cpu.state.set_rflags(0x2); // IF clear before IRET
+                               // Leave interrupt_frames empty — software-built frame only (default).
+
+    let rsp = 0x8000u64;
+    // Full IA-32e frame: RIP, CS, RFLAGS, RSP, SS
+    mem.write_u64(rsp, 0x4000_00AA).unwrap();
+    mem.write_u64(rsp + 8, 0x08).unwrap();
+    mem.write_u64(rsp + 16, 0x202).unwrap();
+    mem.write_u64(rsp + 24, 0x9000).unwrap();
+    mem.write_u64(rsp + 32, 0x10).unwrap();
+    cpu.state.write_gpr64(gpr::RSP, rsp);
+
+    cpu.iret(&mut mem)?;
+
+    assert_eq!(cpu.state.rip(), 0x4000_00AA);
+    assert_eq!(cpu.state.segments.cs.selector, 0x08);
+    assert_eq!(cpu.state.segments.ss.selector, 0x10);
+    assert_eq!(cpu.state.read_gpr64(gpr::RSP), 0x9000);
+    assert_ne!(cpu.state.rflags() & RFLAGS_IF, 0);
+
     Ok(())
 }
 
@@ -1007,5 +1044,96 @@ fn poll_and_deliver_external_interrupt_delivers_queued_vector_before_polling_con
     assert_eq!(ctrl.poll_count, 0);
     assert!(cpu.pending.external_interrupts().is_empty());
     assert_eq!(cpu.state.rip(), 0x6666);
+    Ok(())
+}
+
+#[test]
+fn int_long_mode_same_cpl_aligns_rsp_to_16_bytes() -> Result<(), CpuExit> {
+    // IA-32e forces 16-byte stack alignment before pushing the interrupt frame.
+    // Win7 KiDebugTrapOrFault uses MOVAPS against the trap frame; a misaligned
+    // frame after DbgBreakPointWithStatus (INT3) #GPs.
+    //
+    // 64-bit mode *always* pushes SS:RSP (SDM Vol. 3 §6.14.2), even same-CPL
+    // without IST — frame is RIP/CS/RFLAGS/RSP/SS (5 qwords), not 3.
+    let mut mem = FlatTestBus::new(0x40000);
+
+    let idt_base = 0x1000;
+    // Vector 3 (INT3), 64-bit interrupt gate, DPL3 so software INT3 is allowed.
+    write_idt_gate64(&mut mem, idt_base, 3, 0x08, 0x5000, 0, 0xEE);
+
+    let mut cpu = CpuCore::new(CpuMode::Long);
+    cpu.state.tables.idtr.base = idt_base;
+    cpu.state.tables.idtr.limit = 0x0FFF;
+    cpu.state.segments.cs.selector = 0x08; // CPL0
+    cpu.state.segments.ss.selector = 0x10;
+    cpu.state.set_rip(0x4000);
+    // 8-byte-aligned but not 16-byte-aligned — post-CALL state.
+    let misaligned = 0x9008u64;
+    cpu.state.write_gpr64(gpr::RSP, misaligned);
+    cpu.state.set_rflags(0x202);
+
+    cpu.pending.raise_software_interrupt(3, 0x4000);
+    cpu.deliver_pending_event(&mut mem)?;
+
+    assert_eq!(cpu.state.rip(), 0x5000);
+    // Aligned base 0x9000; push SS/RSP/RFLAGS/CS/RIP (5*8=40) → 0x8FD8.
+    assert_eq!(cpu.state.read_gpr64(gpr::RSP), 0x8FD8);
+    let frame = cpu.state.read_gpr64(gpr::RSP);
+    assert_eq!(mem.read_u64(frame).unwrap(), 0x4000); // RIP
+    assert_eq!(mem.read_u64(frame + 8).unwrap(), 0x08); // CS
+    assert_eq!(mem.read_u64(frame + 16).unwrap(), 0x202); // RFLAGS
+    assert_eq!(mem.read_u64(frame + 24).unwrap(), misaligned); // old RSP
+    assert_eq!(mem.read_u64(frame + 32).unwrap(), 0x10); // old SS
+
+    Ok(())
+}
+
+#[test]
+fn long_mode_same_cpl_page_fault_pushes_full_ss_rsp_frame() -> Result<(), CpuExit> {
+    // Regression: same-CPL #PF without IST must still push SS:RSP so the guest
+    // trap frame is 48 bytes (error + RIP + CS + RFLAGS + RSP + SS). A 32-byte
+    // frame made Win7 KiPageFault read garbage "old RSP/SS" and KeBugCheck 0x50.
+    use aero_cpu_core::exceptions::Exception as ArchException;
+
+    let mut mem = FlatTestBus::new(0x40000);
+
+    let idt_base = 0x1000;
+    // Vector 14 (#PF), interrupt gate, DPL0.
+    write_idt_gate64(&mut mem, idt_base, 14, 0x08, 0x7000, 0, 0x8E);
+
+    let mut cpu = CpuCore::new(CpuMode::Long);
+    cpu.state.tables.idtr.base = idt_base;
+    cpu.state.tables.idtr.limit = 0x0FFF;
+    cpu.state.segments.cs.selector = 0x08; // CPL0
+    cpu.state.segments.ss.selector = 0x10;
+    let fault_rip = 0x1234_u64;
+    let fault_rsp = 0xA000_u64;
+    cpu.state.set_rip(fault_rip);
+    cpu.state.write_gpr64(gpr::RSP, fault_rsp);
+    cpu.state.set_rflags(0x202);
+
+    let cr2 = 0xffff_f700_0000_0fffu64;
+    let err = 0x2u32; // not-present write
+    cpu.pending.raise_exception_fault(
+        &mut cpu.state,
+        ArchException::PageFault,
+        fault_rip,
+        Some(err),
+        Some(cr2),
+    );
+    cpu.deliver_pending_event(&mut mem)?;
+
+    assert_eq!(cpu.state.rip(), 0x7000);
+    assert_eq!(cpu.state.control.cr2, cr2);
+    // 0xA000 already 16-byte aligned; 6 qwords = 48 → RSP = 0xA000 - 48 = 0x9FD0.
+    assert_eq!(cpu.state.read_gpr64(gpr::RSP), 0x9FD0);
+    let frame = cpu.state.read_gpr64(gpr::RSP);
+    assert_eq!(mem.read_u64(frame).unwrap(), err as u64); // error code
+    assert_eq!(mem.read_u64(frame + 8).unwrap(), fault_rip); // RIP
+    assert_eq!(mem.read_u64(frame + 16).unwrap(), 0x08); // CS
+    assert_eq!(mem.read_u64(frame + 24).unwrap(), 0x202); // RFLAGS
+    assert_eq!(mem.read_u64(frame + 32).unwrap(), fault_rsp); // old RSP
+    assert_eq!(mem.read_u64(frame + 40).unwrap(), 0x10); // old SS
+
     Ok(())
 }

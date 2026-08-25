@@ -6,7 +6,7 @@ test.describe("web import_convert pipeline (OPFS aerosparse)", () => {
   test.skip(({ browserName }) => browserName !== "chromium", "requires Chromium OPFS sync access handles");
 
   test.beforeEach(async ({ page }, testInfo) => {
-    await page.goto("/", { waitUntil: "load" });
+    await page.goto("/apps/web/", { waitUntil: "load" });
 
     const snapshotSupport = await probeOpfsSyncAccessHandle(page);
     if (!snapshotSupport.ok || !snapshotSupport.supported) {
@@ -125,7 +125,7 @@ test.describe("web import_convert pipeline (OPFS aerosparse)", () => {
       const { file, logical } = buildQcow2Fixture();
       const input = new File([file], "fixture.qcow2", { type: "application/octet-stream" });
 
-      const worker = new Worker("/web/src/storage/import_convert_worker.ts", { type: "module" });
+      const worker = new Worker("/apps/web/src/storage/import_convert_worker.ts", { type: "module" });
       const requestId = 1;
       const baseName = "qcow2-fixture";
 
@@ -305,7 +305,7 @@ test.describe("web import_convert pipeline (OPFS aerosparse)", () => {
       const { file, logical } = buildDynamicVhdFixture();
       const input = new File([file], "fixture.vhd", { type: "application/octet-stream" });
 
-      const worker = new Worker("/web/src/storage/import_convert_worker.ts", { type: "module" });
+      const worker = new Worker("/apps/web/src/storage/import_convert_worker.ts", { type: "module" });
       const requestId = 1;
       const baseName = "vhd-fixture";
       const manifest = await new Promise<any>((resolve, reject) => {
@@ -370,7 +370,7 @@ test.describe("web import_convert pipeline (OPFS aerosparse)", () => {
       bytes[bytes.length - 1] = 0xa5;
       const input = new File([bytes], "cancel.img", { type: "application/octet-stream" });
 
-      const worker = new Worker("/web/src/storage/import_convert_worker.ts", { type: "module" });
+      const worker = new Worker("/apps/web/src/storage/import_convert_worker.ts", { type: "module" });
       const requestId = 1;
 
       const res = await new Promise<{ ok: boolean; errorName?: string; errorMessage?: string }>((resolve) => {

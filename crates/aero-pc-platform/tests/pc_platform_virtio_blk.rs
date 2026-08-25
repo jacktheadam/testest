@@ -1288,7 +1288,10 @@ fn pc_platform_virtio_blk_processes_queue_and_raises_intx() {
         "BAR0 should be aligned to its size"
     );
 
-    let expected_irq = u8::try_from(pc.pci_intx.gsi_for_intx(bdf, PciInterruptPin::IntA)).unwrap();
+    let expected_irq = pc
+        .pci_intx
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("Q35 PCI GSI should have a compatibility PIC route");
 
     // Unmask the routed IRQ (and cascade) so we can observe virtio-blk INTx via the legacy PIC.
     {

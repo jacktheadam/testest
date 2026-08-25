@@ -286,13 +286,16 @@ pub const PCI_DEVICE_ID_VIRTIO_BLK_MODERN: u16 = 0x1042;
 pub const PCI_DEVICE_ID_VIRTIO_INPUT_MODERN: u16 = 0x1052;
 pub const PCI_DEVICE_ID_VIRTIO_SND_MODERN: u16 = 0x1059;
 
-pub const IDE_BARS: [PciBarProfile; 5] = [
-    PciBarProfile::io(0, 8),
-    PciBarProfile::io(1, 4),
-    PciBarProfile::io(2, 8),
-    PciBarProfile::io(3, 4),
-    PciBarProfile::io(4, 16),
-];
+/// PIIX3 IDE exposes only the Bus Master IDE register block as a PCI BAR.
+///
+/// QEMU's `piix3-ide` does the same (`pci_register_bar(..., 4, IO, bmdma)` and
+/// `PCI_CLASS_PROG = 0x80`). Command/control blocks stay hardwired at the ISA
+/// compatibility ports (0x1F0/0x3F6, 0x170/0x376) and IRQ14/IRQ15. Advertising
+/// BAR0–3 as programmable I/O windows makes Windows 7 `pci.sys` treat the
+/// function as native-capable: it sizes those BARs, leaves them unassigned, and
+/// never adds the legacy channel resources, so `intelide` starts with only
+/// BMIDE 0xC000 and never enumerates the ATAPI CD-ROM.
+pub const IDE_BARS: [PciBarProfile; 1] = [PciBarProfile::io(4, 16)];
 
 pub const UHCI_BARS: [PciBarProfile; 1] = [PciBarProfile::io(4, 32)];
 
@@ -482,7 +485,7 @@ pub const AEROGPU_BAR0_SIZE: u64 = 64 * 1024;
 /// This window backs the legacy VGA 0xA0000..0xBFFFF alias plus the VBE linear framebuffer and
 /// provides headroom for future WDDM-visible VRAM allocations. The canonical PCI profile uses
 /// 64MiB, which is large enough for a 32bpp 4K scanout (~32MiB). See
-/// `docs/16-aerogpu-vga-vesa-compat.md` for the intended BAR1 layout and the VBE LFB offset rules.
+/// `wiki/areas/graphics.md` for the intended BAR1 layout and the VBE LFB offset rules.
 pub const AEROGPU_VRAM_SIZE: u64 = 64 * 1024 * 1024;
 
 pub const AEROGPU_BARS: [PciBarProfile; 2] = [
@@ -736,10 +739,10 @@ pub const IDE_PIIX3: PciDeviceProfile = PciDeviceProfile {
     subsystem_vendor_id: 0,
     subsystem_id: 0,
     revision_id: 0,
-    // PIIX3 uses a programming interface of 0x8A:
-    // - bus master DMA present (bit 7)
-    // - both channels in legacy-compat mode but programmable (bits 1 and 3)
-    class: PciClassCode::new(0x01, 0x01, 0x8a),
+    // QEMU PIIX3/PIIX4 IDE: programming interface 0x80 = legacy ATA mode
+    // with bus-master DMA (bit 7), channels not programmable (bits 1 and 3
+    // clear). Win7 then adds the hardwired 0x1F0/0x170 + IRQ14/15 resources.
+    class: PciClassCode::new(0x01, 0x01, 0x80),
     header_type: 0x00,
     interrupt_pin: Some(PciInterruptPin::IntA),
     bars: &IDE_BARS,
@@ -1057,7 +1060,7 @@ pub const VIRTIO_INPUT_MOUSE: PciDeviceProfile = PciDeviceProfile {
 
 /// Optional virtio-input absolute pointer function (tablet).
 ///
-/// See `docs/windows7-virtio-driver-contract.md` §3.3: function 2 is an optional EV_ABS tablet that
+/// See the Windows guest drivers area page §3.3: function 2 is an optional EV_ABS tablet that
 /// shares the same Vendor/Device ID as the keyboard/mouse functions but uses subsystem ID 0x0012.
 pub const VIRTIO_INPUT_TABLET: PciDeviceProfile = PciDeviceProfile {
     name: "virtio-input-tablet",

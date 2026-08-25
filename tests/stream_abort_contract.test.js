@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isExpectedStreamAbort } from "../src/stream_abort.js";
+import { isExpectedStreamAbort } from "../apps/web/src/stream_abort.js";
 
 test("stream_abort: classifies known abort/disconnect codes", () => {
   assert.equal(isExpectedStreamAbort({ code: "ERR_STREAM_PREMATURE_CLOSE" }), true);

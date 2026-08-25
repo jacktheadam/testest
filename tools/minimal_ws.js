@@ -3,13 +3,13 @@ import https from "node:https";
 import net from "node:net";
 import { EventEmitter } from "node:events";
 import { randomBytes } from "node:crypto";
-import { formatOneLineUtf8 } from "../src/text.js";
-import { isValidHttpToken } from "../src/httpTokens.js";
-import { rejectHttpUpgrade } from "../src/http_upgrade_reject.js";
-import { computeWebSocketAccept, encodeWebSocketHandshakeResponse } from "../src/ws_handshake_response.js";
-import { endThenDestroyQuietly } from "../src/socket_end_then_destroy.js";
-import { destroyBestEffort, writeCaptureErrorBestEffort } from "../src/socket_safe.js";
-import { tryGetProp } from "../src/safe_props.js";
+import { formatOneLineUtf8 } from "../packages/transport-safety/src/text.js";
+import { isValidHttpToken } from "../packages/transport-safety/src/http_tokens.js";
+import { rejectHttpUpgrade } from "../packages/transport-safety/src/http_upgrade_reject.js";
+import { computeWebSocketAccept, encodeWebSocketHandshakeResponse } from "../packages/transport-safety/src/ws_handshake_response.js";
+import { endThenDestroyQuietly } from "../packages/transport-safety/src/socket_end_then_destroy.js";
+import { destroyBestEffort, writeCaptureErrorBestEffort } from "../packages/transport-safety/src/socket_safe.js";
+import { tryGetProp } from "../packages/transport-safety/src/safe_props.js";
 
 const utf8DecoderFatal = new TextDecoder("utf-8", { fatal: true });
 

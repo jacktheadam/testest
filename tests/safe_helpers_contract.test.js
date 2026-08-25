@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isInstanceOfSafe } from '../src/instanceof_safe.js';
-import { tryGetNumberProp, tryGetProp, tryGetStringProp } from '../src/safe_props.js';
-import safePropsCjs from '../src/safe_props.cjs';
+import { isInstanceOfSafe } from '../apps/web/src/instanceof_safe.js';
+import { tryGetNumberProp, tryGetProp, tryGetStringProp } from '../packages/transport-safety/src/safe_props.js';
+import safePropsCjs from '../packages/transport-safety/src/safe_props.cjs';
 
 test('safe_props: getters are safe against hostile objects', () => {
   const hostileGetter = {};

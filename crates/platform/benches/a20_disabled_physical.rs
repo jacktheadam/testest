@@ -31,7 +31,7 @@ fn bench_a20_disabled_large_read(c: &mut Criterion) {
 
     // Baseline reference: a naive per-byte implementation that applies the A20 mask to each
     // address and performs a 1-byte physical bus read.
-    let mut slow_bus = PhysicalMemoryBus::new(Box::new(DenseMemory::new(2 * 1024 * 1024).unwrap()));
+    let mut slow_bus = PhysicalMemoryBus::new(DenseMemory::new(2 * 1024 * 1024).unwrap());
     slow_bus
         .ram
         .write_from(0, &vec![0xAAu8; 2 * 1024 * 1024])

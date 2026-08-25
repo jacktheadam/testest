@@ -1,18 +1,20 @@
 [package]
 name = "aero-aerogpu"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
+publish = false
 
 [features]
 default = []
 # Legacy bring-up ABI ("ARGP"): deprecated vendor bytes 0x1A,0xED; device ID 0x0001
-# (see docs/abi/aerogpu-pci-identity.md).
+# (see wiki/areas/graphics.md).
 legacy-abi = ["dep:aero-protocol", "dep:memory"]
 
 [dependencies]
-aero-protocol = { path = "../../emulator/protocol", optional = true }
+aero-protocol = { path = "../aero-protocol", optional = true }
 memory = { path = "../memory", optional = true }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-time = "1"

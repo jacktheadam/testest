@@ -13,7 +13,7 @@ test("contract: no JS eval sinks in production sources", async () => {
 
   const allowlist = new Set([
     // Intentional CSP gate fixture: contains eval() to prove CSP blocks it.
-    "web/public/assets/security_headers_worker.js",
+    "apps/web/public/assets/security_headers_worker.js",
   ]);
 
   const violations = [];

@@ -162,7 +162,7 @@ impl MemoryBus for memory::Bus {
 
 /// Enable use of [`memory::PhysicalMemoryBus`] as the MMU page-walk backend.
 #[cfg(feature = "memory-bus")]
-impl MemoryBus for memory::PhysicalMemoryBus {
+impl<M: memory::GuestMemory> MemoryBus for memory::PhysicalMemoryBus<M> {
     #[inline]
     fn read_u8(&mut self, paddr: u64) -> u8 {
         memory::MemoryBus::read_u8(self, paddr)
@@ -808,6 +808,14 @@ impl Mmu {
         {
             self.stats.tlb_invlpg = self.stats.tlb_invlpg.wrapping_add(1);
         }
+        // Bring-up probe: sample INVLPG addresses (COW soft-fault livelock).
+        if std::env::var_os("AERO_LOG_INVLPG").is_some() {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 64 {
+                eprintln!("AERO_LOG_INVLPG: n={n} va={vaddr:#x}");
+            }
+        }
         if self.pcid_enabled() {
             // In PCID mode, INVLPG invalidates the current PCID's translation and
             // any global translation for the address. Other PCIDs are unaffected.
@@ -925,41 +933,48 @@ impl Mmu {
                 }
                 AccessType::Write => {
                     // Writes may fault due to U/S or R/W (including CR0.WP semantics).
-                    if is_user {
-                        if !entry.user() || !entry.writable() {
-                            let pf =
-                                PageFault::new(vaddr, pf_error_code(true, access, is_user, false));
-                            self.cr2 = pf.addr;
-                            return Err(TranslateFault::PageFault(pf));
+                    //
+                    // Stale TLB after COW/PTE upgrade: if the cached entry is non-writable
+                    // (or supervisor-only for user), drop it and re-walk before delivering
+                    // #PF. A missed INVLPG (or race with the leaf PTE store) otherwise
+                    // livelocks Win7 soft-fault (err=0x7 while the leaf is already RW).
+                    // Rewalk still faults if the leaf is truly RO.
+                    let need_rewalk = if is_user {
+                        !entry.user() || !entry.writable()
+                    } else {
+                        !entry.writable() && self.wp_enabled()
+                    };
+                    if need_rewalk {
+                        self.tlb.invalidate_address_all(vaddr);
+                        // Fall through to page walk below (exit TLB hit block).
+                    } else {
+                        let paddr = entry.translate(vaddr);
+
+                        // Lazily set D on the first write hit.
+                        if !entry.dirty() {
+                            let leaf_addr = entry.leaf_addr;
+                            let leaf_is_64 = entry.leaf_is_64();
+                            let tlb_set = hit.set();
+                            let tlb_way = hit.way();
+
+                            if leaf_is_64 {
+                                let val = bus.read_u64(leaf_addr);
+                                bus.write_u64(leaf_addr, val | PTE_D64);
+                            } else {
+                                let val = bus.read_u32(leaf_addr);
+                                bus.write_u32(leaf_addr, val | (PTE_D as u32));
+                            }
+                            self.tlb.set_dirty_slot(tlb_set, tlb_way);
                         }
-                    } else if !entry.writable() && self.wp_enabled() {
-                        let pf = PageFault::new(vaddr, pf_error_code(true, access, is_user, false));
-                        self.cr2 = pf.addr;
-                        return Err(TranslateFault::PageFault(pf));
+
+                        return Ok(paddr);
                     }
-
-                    let paddr = entry.translate(vaddr);
-
-                    // Lazily set D on the first write hit.
-                    if !entry.dirty() {
-                        let leaf_addr = entry.leaf_addr;
-                        let leaf_is_64 = entry.leaf_is_64();
-                        let tlb_set = hit.set();
-                        let tlb_way = hit.way();
-
-                        if leaf_is_64 {
-                            let val = bus.read_u64(leaf_addr);
-                            bus.write_u64(leaf_addr, val | PTE_D64);
-                        } else {
-                            let val = bus.read_u32(leaf_addr);
-                            bus.write_u32(leaf_addr, val | (PTE_D as u32));
-                        }
-                        self.tlb.set_dirty_slot(tlb_set, tlb_way);
-                    }
-
-                    return Ok(paddr);
                 }
                 AccessType::Read => unreachable!("handled above"),
+            }
+            // Write rewalk: continue past the TLB hit block into the walk below.
+            if access != AccessType::Write {
+                unreachable!("non-write accesses return inside the match");
             }
         }
 
@@ -1734,7 +1749,7 @@ impl Mmu {
         let pte_addr = pt_base + pt_index * 8;
         let pte = bus.read_u64(pte_addr);
 
-        let pte = match self.check_entry64(bus, pte_addr, pte, ctx, EntryKind64::PteLong)? {
+        let mut pte = match self.check_entry64(bus, pte_addr, pte, ctx, EntryKind64::PteLong)? {
             Some(v) => v,
             None => return Err(self.page_fault_not_present(vaddr, access, is_user)),
         };
@@ -1742,6 +1757,38 @@ impl Mmu {
         eff_user &= pte & PTE_US64 != 0;
         eff_writable &= pte & PTE_RW64 != 0;
         eff_nx |= nx_enabled && (pte & PTE_NX != 0);
+
+        // Bring-up: Win7 soft-fault COW for demand-zero / shared RO pages can
+        // livelock under setup (NP demand → RO map → write err=0x7 → unmap →
+        // repeat) without ever setting leaf RW. `AERO_COW_FORCE_RW=1` upgrades
+        // the leaf (and intermediate entries if needed) so user writes complete.
+        // Real RO protection (supervisor-only) still faults via check_perms.
+        if access.is_write()
+            && is_user
+            && !eff_writable
+            && (pte & PTE_P64 != 0)
+            && (pte & PTE_US64 != 0)
+            && cow_force_rw_enabled()
+        {
+            if pte & PTE_RW64 == 0 {
+                pte |= PTE_RW64;
+                bus.write_u64(pte_addr, pte);
+            }
+            // Intermediate RW=0 also blocks writes even when leaf is RW.
+            if pml4e & PTE_RW64 == 0 {
+                let v = pml4e | PTE_RW64;
+                bus.write_u64(pml4e_addr, v);
+            }
+            if pdpte & PTE_RW64 == 0 {
+                let v = pdpte | PTE_RW64;
+                bus.write_u64(pdpte_addr, v);
+            }
+            if pde & PTE_RW64 == 0 {
+                let v = pde | PTE_RW64;
+                bus.write_u64(pde_addr, v);
+            }
+            eff_writable = true;
+        }
 
         self.check_perms(vaddr, eff_user, eff_writable, eff_nx, access, is_user)?;
 
@@ -1960,13 +2007,17 @@ impl Mmu {
             return false;
         }
 
-        // Bits 52..=58 are "available to software"/ignored in most 64-bit paging-structure
-        // entries (IA-32e and PAE). Many OSes use them and real hardware does not raise
-        // reserved-bit faults when they are set.
+        // Bits 52..=62 are "available to software"/ignored in most 64-bit paging-structure
+        // entries (IA-32e PTE/PDE/PDPTE/PML4E). With CR4.PKE, bits 62:59 are protection keys
+        // rather than reserved; either way they must not raise RSVD #PF. Win7 maps pages with
+        // high AVL bits set (seen as PTE `0x88…` → bit 59); treating bit 59 as reserved caused
+        // a soft-fault livelock (#PF error_code RSVD=1 on every retry of the same store).
+        //
+        // Bit 63 is NX and is handled separately via EFER.NXE.
         //
         // Do not apply this relaxation to IA-32 PAE PDPTEs (PDPT entries); that format has
         // stricter reserved-bit requirements.
-        const IGNORED_AVL_HIGH_MASK: u64 = 0x7f << 52; // bits 52..=58
+        const IGNORED_AVL_HIGH_MASK: u64 = 0x7ff << 52; // bits 52..=62
 
         // NX bit reserved if NXE=0.
         let nx_enabled = self.nx_enabled();
@@ -1984,18 +2035,12 @@ impl Mmu {
             _ => {}
         }
 
-        // Large-page support is controlled by CR4.PSE in all paging modes we
-        // emulate. If it's clear, treat PS as a reserved bit.
-        if !self.cr4_pse() {
-            match kind {
-                EntryKind64::PdpteLong | EntryKind64::PdePae | EntryKind64::PdeLong => {
-                    if entry & PTE_PS64 != 0 {
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-        }
+        // Note: CR4.PSE gates 4MB pages ONLY in 32-bit paging (see `walk_legacy32`).
+        // In PAE and IA-32e paging, 2MB (PDE.PS) and 1GB (PDPTE.PS) large pages
+        // are unconditionally supported per SDM §4.1.4/§4.4.1/§4.5.2 — CR4.PSE
+        // is not consulted. The previous code treated PS as reserved when
+        // CR4.PSE=0 in PAE/long mode, which caused a spurious #PF(RSVD) on any
+        // OS using large pages without setting CR4.PSE.
 
         let addr_mask = self.phys_addr_mask();
 
@@ -2009,9 +2054,11 @@ impl Mmu {
             //   - bit 63: NX (only if EFER.NXE=1)
             //
             // Bits 1,2,5..=8 are reserved and must be 0.
+            // Bits 52..=62 are "ignored" (available to software) per SDM Table 4-8.
             let allowed_flags = PTE_P64 | (1 << 3) | (1 << 4) | (0x7 << 9);
             let allowed_addr = addr_mask & !0xfff;
             let mut allowed = allowed_flags | allowed_addr;
+            allowed |= 0x7FF << 52; // software-available/ignored bits
             if nx_enabled {
                 allowed |= PTE_NX;
             }
@@ -2145,6 +2192,15 @@ const PTE_G64: u64 = 1 << 8;
 const PTE_NX: u64 = 1 << 63;
 
 const LEGACY32_4MB_RESERVED_MASK: u64 = 0x003f_e000;
+
+/// Bring-up: force leaf (and intermediate) RW on user write to present RO pages.
+/// See `walk_long4` COW livelock note. Env: `AERO_COW_FORCE_RW=1`.
+fn cow_force_rw_enabled() -> bool {
+    match std::env::var("AERO_COW_FORCE_RW") {
+        Ok(v) => matches!(v.as_str(), "1" | "true" | "on" | "yes" | ""),
+        Err(_) => std::env::var_os("AERO_COW_FORCE_RW").is_some(),
+    }
+}
 
 #[cfg(test)]
 mod tests;

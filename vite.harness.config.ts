@@ -2,7 +2,7 @@
 //
 // It exists primarily for:
 // - Playwright E2E that exercises low-level primitives (workers, COOP/COEP, etc.)
-// - Importing source modules across the repo (e.g. `/web/src/...`) in a browser context
+// - Importing source modules across the repo (e.g. `/apps/web/src/...`) in a browser context
 //
 // The `web/` directory contains shared runtime modules and WASM build tooling.
 // Its Vite entrypoint (`web/index.html`) is legacy/experimental.
@@ -128,9 +128,9 @@ function audioWorkletDependenciesPlugin(): Plugin {
   // - `web/src/platform/audio-worklet-processor.js` imports `./audio_worklet_ring_layout.js`
   //
   // Emit copies into `dist/assets/` so the browser can resolve them at runtime.
-  const srcMicRingPath = resolve(rootDir, 'web/src/audio/mic_ring.js');
+  const srcMicRingPath = resolve(rootDir, 'apps/web/src/audio/mic_ring.js');
   const source = readFileSync(srcMicRingPath, 'utf8');
-  const srcAudioWorkletRingLayoutPath = resolve(rootDir, 'web/src/platform/audio_worklet_ring_layout.js');
+  const srcAudioWorkletRingLayoutPath = resolve(rootDir, 'apps/web/src/platform/audio_worklet_ring_layout.js');
   const audioWorkletRingLayoutSource = readFileSync(srcAudioWorkletRingLayoutPath, 'utf8');
   return {
     name: 'aero-audio-worklet-deps',
@@ -195,27 +195,26 @@ export default defineConfig({
     assetsInlineLimit: 0,
     rollupOptions: {
       // The harness preview server (port 4173) is used for COOP/COEP + CSP matrix tests.
-      // Include the legacy `web/` entrypoint so it can be exercised under the same
-      // preview server (served at `/web/`).
+      // Both application entry points are built so the matrix covers each of them.
       input: {
-        main: fileURLToPath(new URL('./index.html', import.meta.url)),
-        webusb_diagnostics: fileURLToPath(new URL('./webusb_diagnostics.html', import.meta.url)),
-        web: fileURLToPath(new URL('./web/index.html', import.meta.url)),
-        // Standalone pages linked from the legacy `web/` UI (keep them available in
+        main: fileURLToPath(new URL('./apps/web/index.html', import.meta.url)),
+        // The fuller shell used for manual Windows 7 bring-up.
+        bringup: fileURLToPath(new URL('./apps/web/bringup.html', import.meta.url)),
+        // Standalone pages linked from the bring-up UI (keep them available in
         // `vite preview` runs of the harness).
-        legacy_webusb_diagnostics: fileURLToPath(new URL('./web/webusb_diagnostics.html', import.meta.url)),
-        webgl2_fallback_demo: fileURLToPath(new URL('./web/webgl2_fallback_demo.html', import.meta.url)),
-        ipc_demo: fileURLToPath(new URL('./web/demo/ipc_demo.html', import.meta.url)),
-        vm_boot_vga_serial_smoke: fileURLToPath(new URL('./web/vm-boot-vga-serial-smoke.html', import.meta.url)),
-        wddm_scanout_smoke: fileURLToPath(new URL('./web/wddm-scanout-smoke.html', import.meta.url)),
-        wddm_scanout_vram_smoke: fileURLToPath(new URL('./web/wddm-scanout-vram-smoke.html', import.meta.url)),
-        wddm_scanout_debug: fileURLToPath(new URL('./web/wddm-scanout-debug.html', import.meta.url)),
+        webusb_diagnostics: fileURLToPath(new URL('./apps/web/webusb_diagnostics.html', import.meta.url)),
+        webgl2_fallback_demo: fileURLToPath(new URL('./apps/web/webgl2_fallback_demo.html', import.meta.url)),
+        ipc_demo: fileURLToPath(new URL('./apps/web/demo/ipc_demo.html', import.meta.url)),
+        vm_boot_vga_serial_smoke: fileURLToPath(new URL('./apps/web/vm-boot-vga-serial-smoke.html', import.meta.url)),
+        wddm_scanout_smoke: fileURLToPath(new URL('./apps/web/wddm-scanout-smoke.html', import.meta.url)),
+        wddm_scanout_vram_smoke: fileURLToPath(new URL('./apps/web/wddm-scanout-vram-smoke.html', import.meta.url)),
+        wddm_scanout_debug: fileURLToPath(new URL('./apps/web/wddm-scanout-debug.html', import.meta.url)),
       },
     },
   },
   // Reuse `web/public` across the repo so test assets and `_headers` templates
   // are consistently available in `vite preview` runs.
-  publicDir: 'web/public',
+  publicDir: 'apps/web/public',
   plugins: [
     aeroBuildInfoPlugin(),
     wasmMimeTypePlugin(),
@@ -229,6 +228,21 @@ export default defineConfig({
     format: 'es',
   },
   server: {
+    watch: {
+      // Vite's watcher walks the whole project root. This repository's Rust build directory holds
+      // well over a million files — past the inotify limit on its own — so watching it does not
+      // merely waste descriptors, it takes the dev server down with `ENOSPC` the moment anyone has
+      // run a build. Every path here is a build product or a scratch area; none is a source input.
+      ignored: [
+        "**/target/**",
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/.attic/**",
+        "**/test-results/**",
+        "**/playwright-report/**",
+        "**/.git/**",
+      ],
+    },
     headers: {
       ...(coopCoepDisabled ? {} : crossOriginIsolationHeaders),
       ...baselineSecurityHeaders,

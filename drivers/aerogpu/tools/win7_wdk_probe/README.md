@@ -30,8 +30,8 @@ printing `sizeof`/`offsetof` for the key structs involved in Win7 (WDDM 1.1) D3D
 
 Related reference docs:
 
-- Submission callbacks + fences: `docs/graphics/win7-d3d10-11-umd-callbacks-and-fences.md`
-- CreateResource allocation contract: `docs/graphics/win7-d3d10-11-umd-allocations.md`
+- Submission callbacks + fences: `wiki/areas/graphics.md`
+- CreateResource allocation contract: `wiki/areas/graphics.md`
 
 ## Build (Windows / Win7 UMD headers + VS toolchain)
 

@@ -139,8 +139,8 @@ pub struct CertInfo {
 
 impl CertInfo {
     pub fn from_path(path: &Path) -> Result<Self> {
-        let bytes = fs::read(path)
-            .with_context(|| format!("Failed to read cert: {}", path.display()))?;
+        let bytes =
+            fs::read(path).with_context(|| format!("Failed to read cert: {}", path.display()))?;
         let der = if bytes
             .windows(b"-----BEGIN CERTIFICATE-----".len())
             .any(|w| w == b"-----BEGIN CERTIFICATE-----")
@@ -230,7 +230,12 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn new_with_workdir(kind: BackendKind, deps: &DepContext, workdir: &Path, verbose: bool) -> Result<Self> {
+    pub fn new_with_workdir(
+        kind: BackendKind,
+        deps: &DepContext,
+        workdir: &Path,
+        verbose: bool,
+    ) -> Result<Self> {
         match kind {
             BackendKind::WindowsDism => {
                 if !cfg!(windows) {
@@ -252,10 +257,7 @@ impl Backend {
         }
 
         fs::create_dir_all(workdir).with_context(|| {
-            format!(
-                "Failed to create backend workdir at {}",
-                workdir.display()
-            )
+            format!("Failed to create backend workdir at {}", workdir.display())
         })?;
 
         Ok(Self {
@@ -409,22 +411,19 @@ impl Backend {
     where
         F: FnOnce(&Path) -> Result<()>,
     {
-        let mount_base = self.workdir.join(if writable { "mount" } else { "mount-ro" });
+        let mount_base = self
+            .workdir
+            .join(if writable { "mount" } else { "mount-ro" });
         fs::create_dir_all(&mount_base).context("Failed to create mount base")?;
 
-        let wim_name = wim
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("image");
+        let wim_name = wim.file_name().and_then(|s| s.to_str()).unwrap_or("image");
         let mount_dir = mount_base.join(format!("{wim_name}-{index}"));
         if mount_dir.exists() {
-            fs::remove_dir_all(&mount_dir).with_context(|| {
-                format!("Failed to clear mount dir {}", mount_dir.display())
-            })?;
+            fs::remove_dir_all(&mount_dir)
+                .with_context(|| format!("Failed to clear mount dir {}", mount_dir.display()))?;
         }
-        fs::create_dir_all(&mount_dir).with_context(|| {
-            format!("Failed to create mount dir {}", mount_dir.display())
-        })?;
+        fs::create_dir_all(&mount_dir)
+            .with_context(|| format!("Failed to create mount dir {}", mount_dir.display()))?;
 
         match self.kind {
             BackendKind::WindowsDism => {
@@ -439,8 +438,7 @@ impl Backend {
                 if !writable {
                     mount_cmd.arg("/ReadOnly");
                 }
-                run(&mut mount_cmd, self.verbose)
-                .context("DISM mount failed")?;
+                run(&mut mount_cmd, self.verbose).context("DISM mount failed")?;
 
                 let res = f(&mount_dir);
 
@@ -465,8 +463,7 @@ impl Backend {
                 if writable {
                     mount_cmd.arg("--rw");
                 }
-                run(&mut mount_cmd, self.verbose)
-                .context("wimlib-imagex mount failed")?;
+                run(&mut mount_cmd, self.verbose).context("wimlib-imagex mount failed")?;
 
                 let res = f(&mount_dir);
 
@@ -515,7 +512,10 @@ impl Backend {
             verbose: self.verbose,
         };
 
-        let reg_patch = cert.to_reg_patch(&format!("HKEY_LOCAL_MACHINE\\{}", key_name.trim_start_matches("HKLM\\")));
+        let reg_patch = cert.to_reg_patch(&format!(
+            "HKEY_LOCAL_MACHINE\\{}",
+            key_name.trim_start_matches("HKLM\\")
+        ));
         let patch_file = tempfile::Builder::new()
             .prefix("aero-win7-slipstream-cert-")
             .suffix(".reg")
@@ -524,9 +524,7 @@ impl Backend {
         fs::write(patch_file.path(), reg_patch).context("Failed to write cert patch file")?;
 
         run(
-            Command::new(reg)
-                .arg("import")
-                .arg(patch_file.path()),
+            Command::new(reg).arg("import").arg(patch_file.path()),
             self.verbose,
         )
         .context("reg import failed")?;
@@ -554,7 +552,12 @@ impl Backend {
         Ok(())
     }
 
-    fn inject_drivers_windows(&self, mount_dir: &Path, drivers: &Path, mode: SigningMode) -> Result<()> {
+    fn inject_drivers_windows(
+        &self,
+        mount_dir: &Path,
+        drivers: &Path,
+        mode: SigningMode,
+    ) -> Result<()> {
         let dism = self.deps.dism.as_deref().unwrap();
         let mut cmd = Command::new(dism);
         cmd.arg("/English")
@@ -588,16 +591,21 @@ impl Backend {
                         bcd_template.display()
                     ));
                 }
-                verify_bcd_hive(&self.deps, &bcd_template, mode, self.verbose).with_context(|| {
-                    format!("BCD-Template policy verification failed for index {idx}")
-                })?;
+                verify_bcd_hive(&self.deps, &bcd_template, mode, self.verbose).with_context(
+                    || format!("BCD-Template policy verification failed for index {idx}"),
+                )?;
                 Ok(())
             })?;
         }
         Ok(())
     }
 
-    pub fn verify_cert_in_wim(&self, wim: &Path, indexes: &[u32], thumbprint_sha1: &str) -> Result<()> {
+    pub fn verify_cert_in_wim(
+        &self,
+        wim: &Path,
+        indexes: &[u32],
+        thumbprint_sha1: &str,
+    ) -> Result<()> {
         for idx in indexes {
             self.with_mounted_wim_readonly(wim, *idx, |mount| {
                 let hive = mount
@@ -612,8 +620,12 @@ impl Backend {
                     ));
                 }
                 match self.kind {
-                    BackendKind::WindowsDism => verify_cert_windows(&self.deps, &hive, thumbprint_sha1, idx, self.verbose),
-                    BackendKind::CrossWimlib => verify_cert_hivex(&self.deps, &hive, thumbprint_sha1, self.verbose),
+                    BackendKind::WindowsDism => {
+                        verify_cert_windows(&self.deps, &hive, thumbprint_sha1, idx, self.verbose)
+                    }
+                    BackendKind::CrossWimlib => {
+                        verify_cert_hivex(&self.deps, &hive, thumbprint_sha1, self.verbose)
+                    }
                 }
             })?;
         }
@@ -633,7 +645,11 @@ fn verify_bcd_hive(deps: &DepContext, hive: &Path, mode: SigningMode, verbose: b
 
         for id in identifiers {
             match run_capture(
-                Command::new(bcdedit).arg("/store").arg(hive).arg("/enum").arg(id),
+                Command::new(bcdedit)
+                    .arg("/store")
+                    .arg(hive)
+                    .arg("/enum")
+                    .arg(id),
                 verbose,
             ) {
                 Ok(out) => {
@@ -674,9 +690,10 @@ fn verify_bcd_hive(deps: &DepContext, hive: &Path, mode: SigningMode, verbose: b
         }
     }
 
-    let hivex = deps.hivexregedit.as_deref().ok_or_else(|| {
-        anyhow!("Need hivexregedit or bcdedit to verify BCD hives")
-    })?;
+    let hivex = deps
+        .hivexregedit
+        .as_deref()
+        .ok_or_else(|| anyhow!("Need hivexregedit or bcdedit to verify BCD hives"))?;
     let exported = run_capture(Command::new(hivex).arg("--export").arg(hive), verbose)
         .context("hivexregedit export failed")?;
     if !bcd::hive_contains_policy(&exported, mode) {
@@ -688,10 +705,21 @@ fn verify_bcd_hive(deps: &DepContext, hive: &Path, mode: SigningMode, verbose: b
     Ok(())
 }
 
-fn verify_cert_hivex(deps: &DepContext, software_hive: &Path, thumbprint_sha1: &str, verbose: bool) -> Result<()> {
-    let hivex = deps.hivexregedit.as_deref().ok_or_else(|| anyhow!("Need hivexregedit"))?;
-    let exported = run_capture(Command::new(hivex).arg("--export").arg(software_hive), verbose)
-        .context("hivexregedit export failed")?;
+fn verify_cert_hivex(
+    deps: &DepContext,
+    software_hive: &Path,
+    thumbprint_sha1: &str,
+    verbose: bool,
+) -> Result<()> {
+    let hivex = deps
+        .hivexregedit
+        .as_deref()
+        .ok_or_else(|| anyhow!("Need hivexregedit"))?;
+    let exported = run_capture(
+        Command::new(hivex).arg("--export").arg(software_hive),
+        verbose,
+    )
+    .context("hivexregedit export failed")?;
 
     let root_key = format!(
         "\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\{}]",
@@ -742,7 +770,10 @@ fn verify_cert_windows(
     }
     impl Drop for UnloadGuard {
         fn drop(&mut self) {
-            let _ = run(Command::new(&self.reg).arg("unload").arg(&self.key), self.verbose);
+            let _ = run(
+                Command::new(&self.reg).arg("unload").arg(&self.key),
+                self.verbose,
+            );
         }
     }
     let _guard = UnloadGuard {
@@ -830,7 +861,10 @@ fn run_capture(cmd: &mut Command, verbose: bool) -> Result<String> {
         .output()
         .context("Failed to spawn external command")?;
     if !output.status.success() {
-        return Err(anyhow!("External command failed with status: {}", output.status));
+        return Err(anyhow!(
+            "External command failed with status: {}",
+            output.status
+        ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }

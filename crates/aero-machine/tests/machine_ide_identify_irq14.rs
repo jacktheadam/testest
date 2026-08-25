@@ -409,7 +409,8 @@ fn machine_ide_irq15_is_delivered_via_ioapic_in_apic_mode() {
 
     // Verify that IDENTIFY data is reachable via the data port (0x170).
     let word0 = m.io_read(SECONDARY_PORTS.cmd_base, 2) as u16;
-    assert_eq!(word0, 0x8581);
+    // Word 0: ATAPI device (0x8580), 12-byte packet size (bit0=0, per ATA/ATAPI-7).
+    assert_eq!(word0, 0x8580);
 
     // Run until the interrupt handler writes the flag byte.
     for _ in 0..10 {
@@ -918,7 +919,8 @@ fn machine_ide_secondary_identify_packet_raises_irq15_and_wakes_halted_cpu() {
 
     // Verify that IDENTIFY data is reachable via the data port (0x170).
     let word0 = m.io_read(SECONDARY_PORTS.cmd_base, 2) as u16;
-    assert_eq!(word0, 0x8581);
+    // Word 0: ATAPI device (0x8580), 12-byte packet size (bit0=0, per ATA/ATAPI-7).
+    assert_eq!(word0, 0x8580);
 
     // Run until the interrupt handler writes the flag byte.
     for _ in 0..10 {

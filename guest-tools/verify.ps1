@@ -703,9 +703,9 @@ function Add-DeviceBindingCheck(
 
     if ($matches.Count -eq 0) {
         if ($key -eq "device_binding_storage") {
-            $details += "See: docs/windows7-driver-troubleshooting.md#issue-storage-controller-switch-gotchas-boot-loops-0x7b"
+            $details += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
         } else {
-            $details += "See: docs/windows7-driver-troubleshooting.md#issue-virtio-device-not-found-or-unknown-device-after-switching"
+            $details += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
         }
         Add-Check $key $title "WARN" $missingSummary $data $details
         return
@@ -726,9 +726,9 @@ function Add-DeviceBindingCheck(
                 $codes[$m.config_manager_error_code.ToString()] = $true
             }
         }
-        if ($codes.ContainsKey("52")) { $details += "See: docs/windows7-driver-troubleshooting.md#issue-device-manager-code-52-signature-and-trust-failures" }
-        if ($codes.ContainsKey("28")) { $details += "See: docs/windows7-driver-troubleshooting.md#issue-device-manager-code-28-drivers-not-installed" }
-        if ($codes.ContainsKey("10")) { $details += "See: docs/windows7-driver-troubleshooting.md#issue-device-manager-code-10-device-cannot-start" }
+        if ($codes.ContainsKey("52")) { $details += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map" }
+        if ($codes.ContainsKey("28")) { $details += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map" }
+        if ($codes.ContainsKey("10")) { $details += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map" }
     }
 
     Add-Check $key $title $status $summary $data $details
@@ -1818,7 +1818,7 @@ try {
 
                 if (($missingCount -gt 0) -or ($sizeMismatchCount -gt 0) -or ($hashMismatchCount -gt 0) -or ($unreadableCount -gt 0)) {
                     $mDetails += "Remediation: Replace the Guest Tools ISO/zip with a fresh copy (do not mix driver folders across versions)."
-                    $mDetails += "See: docs/windows7-driver-troubleshooting.md#issue-guest-tools-media-integrity-check-fails-manifest-hash-mismatch"
+                    $mDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
                 }
 
                 # Mixed-media advisory: detect extra files that exist on disk but are not listed
@@ -2661,7 +2661,7 @@ try {
         $clockStatus = "WARN"
         $clockSummary = "System clock looks wrong: " + $now.ToString()
         $clockDetails += "Set correct date/time; incorrect clock can break signature verification (certificates may appear not-yet-valid or expired)."
-        $clockDetails += "See: docs/windows7-driver-troubleshooting.md#issue-device-manager-code-52-signature-and-trust-failures"
+        $clockDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
     }
 
     $clockData = @{
@@ -2707,7 +2707,7 @@ try {
         $kbStatus = "WARN"
         $kbDetails += "Windows 7 may require KB3033929 to validate SHA-256-signed driver catalogs (otherwise Device Manager Code 52)."
         $kbDetails += "Install KB3033929 (x86/x64) and reboot."
-        $kbDetails += "See: docs/windows7-driver-troubleshooting.md#issue-missing-kb3033929-sha-256-signature-support"
+        $kbDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
     }
 
     Add-Check "kb3033929" "Hotfix: KB3033929 (SHA-256 signatures)" $kbStatus $kbSummary $kbInfo $kbDetails
@@ -2747,7 +2747,7 @@ try {
         $kbStatus = "WARN"
         $kbDetails += "Windows 7 may require KB4474419 (SHA-2 support update) to validate newer SHA-2 signatures (otherwise Device Manager Code 52)."
         $kbDetails += "Install KB4474419 and reboot (KB4490628 is a common prerequisite)."
-        $kbDetails += "See: docs/windows7-driver-troubleshooting.md#issue-missing-kb3033929-sha-256-signature-support"
+        $kbDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
     }
 
     Add-Check "kb4474419" "Hotfix: KB4474419 (SHA-2 signatures)" $kbStatus $kbSummary $kbInfo $kbDetails
@@ -2787,7 +2787,7 @@ try {
         $kbStatus = "WARN"
         $kbDetails += "KB4490628 is a common servicing stack prerequisite for installing KB4474419 (SHA-2 support update)."
         $kbDetails += "Install KB4490628, then install KB4474419, then reboot."
-        $kbDetails += "See: docs/windows7-driver-troubleshooting.md#issue-missing-kb3033929-sha-256-signature-support"
+        $kbDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
     }
 
     Add-Check "kb4490628" "Hotfix: KB4490628 (Servicing Stack)" $kbStatus $kbSummary $kbInfo $kbDetails
@@ -3314,19 +3314,19 @@ try {
         if ($code52.Count -gt 0) {
             $devStatus = Merge-Status $devStatus "WARN"
             $devDetails += ($code52.Count.ToString() + " device(s) report Code 52 (signature/trust failure). Review Signature Mode + Certificate Store + KB3033929 checks.")
-            $devDetails += "See: docs/windows7-driver-troubleshooting.md#issue-device-manager-code-52-signature-and-trust-failures"
+            $devDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
         }
         $code28 = @($devices | Where-Object { $_.config_manager_error_code -eq 28 })
         if ($code28.Count -gt 0) {
             $devStatus = Merge-Status $devStatus "WARN"
             $devDetails += ($code28.Count.ToString() + " device(s) report Code 28 (drivers not installed). Re-run Guest Tools setup / update driver in Device Manager.")
-            $devDetails += "See: docs/windows7-driver-troubleshooting.md#issue-device-manager-code-28-drivers-not-installed"
+            $devDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
         }
         $code10 = @($devices | Where-Object { $_.config_manager_error_code -eq 10 })
         if ($code10.Count -gt 0) {
             $devStatus = Merge-Status $devStatus "WARN"
             $devDetails += ($code10.Count.ToString() + " device(s) report Code 10 (device cannot start).")
-            $devDetails += "See: docs/windows7-driver-troubleshooting.md#issue-device-manager-code-10-device-cannot-start"
+            $devDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
         }
     }
 
@@ -3680,7 +3680,7 @@ try {
                 $umdDetails += "Missing:"
                 foreach ($p in $missing) { $umdDetails += ("  - " + $p) }
                 if ($is64) {
-                    $umdDetails += "See: docs/windows7-driver-troubleshooting.md#issue-32-bit-d3d9-apps-fail-on-windows-7-x64-missing-wow64-umd"
+                    $umdDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
                 }
             } else {
                 $umdSummary = "AeroGPU D3D9 UMD DLL(s) are present."
@@ -3750,7 +3750,7 @@ try {
                 foreach ($p in $missing) { $dxDetails += ("  - " + $p) }
                 if ($is64) {
                     $dxDetails += "WOW64 D3D10/11 UMD is required for 32-bit D3D10/D3D11 apps on Win7 x64."
-                    $dxDetails += "See: docs/windows7-driver-troubleshooting.md#issue-32-bit-d3d11-apps-fail-on-windows-7-x64-missing-wow64-d3d1011-umd"
+                    $dxDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
                 }
             } else {
                 $dxSummary = "AeroGPU D3D10/11 UMD DLL(s) are present."
@@ -4333,7 +4333,7 @@ try {
         } elseif ($bindingSummary.no_media_match -gt 0 -or $bindingSummary.media_hwid_match_driver_mismatch -gt 0 -or $bindingSummary.no_signed_driver -gt 0) {
             $status = "WARN"
             $details += "Remediation: If devices are not matching the media, re-run setup.cmd from the correct Guest Tools ISO/zip and avoid mixing driver folders across versions."
-            $details += "See: docs/windows7-driver-troubleshooting.md#issue-virtio-device-not-found-or-unknown-device-after-switching"
+            $details += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
         }
     }
 
@@ -4407,7 +4407,7 @@ try {
         $svcSummary = "virtio-blk service not found (tried: " + ($candidates -join ", ") + ")."
         if ($storagePreseedSkipped) { $svcSummary += " NOTE: storage pre-seeding was skipped by setup.cmd (/skipstorage)." }
         $svcDetails += ("If Aero storage drivers are installed, expected a driver service like '" + $expected + "'.")
-        $svcDetails += "See: docs/windows7-driver-troubleshooting.md#issue-storage-controller-switch-gotchas-boot-loops-0x7b"
+        $svcDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
     } else {
         $bootCriticalIssue = $false
         $expectedSys = $cfgVirtioBlkSys
@@ -4506,7 +4506,7 @@ try {
             $svcDetails += "Storage service ErrorControl is not 1. Recommended is 1 for boot-critical storage."
         }
         if ($bootCriticalIssue) {
-            $svcDetails += "See: docs/windows7-driver-troubleshooting.md#issue-storage-controller-switch-gotchas-boot-loops-0x7b"
+            $svcDetails += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
         }
         if ($found.state -ne "Running") {
             $svcStatus = "WARN"
@@ -4660,7 +4660,7 @@ try {
         if ($mismatchClass -gt 0 -or $mismatchGuid -gt 0) { $details += ("Some keys have unexpected Class/ClassGUID. " + $rerunHint + " to regenerate CriticalDeviceDatabase entries.") }
 
         if ($status -ne "PASS") {
-            $details += "See: docs/windows7-driver-troubleshooting.md#issue-storage-controller-switch-gotchas-boot-loops-0x7b"
+            $details += "See: wiki/areas/drivers-windows.md#troubleshooting-quick-map"
         }
 
         $data = @{

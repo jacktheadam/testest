@@ -14,7 +14,7 @@ namespace aerogpu {
 // - Low overhead: fixed-size buffer, atomic index, optional "seen" filtering.
 //
 // The trace is disabled by default and must be enabled via environment variables.
-// See `docs/graphics/win7-d3d9-umd-tracing.md`.
+// See `wiki/areas/graphics.md`.
 
 constexpr uint64_t d3d9_trace_pack_u32_u32(uint32_t lo, uint32_t hi) {
   return static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);

@@ -4,11 +4,11 @@ This directory contains **clean-room** templates intended for a future `tools/wi
 
 These files contain **no Microsoft binaries** and are **not tied to any specific Windows image**. They are “golden reference” inputs that a future tool may copy and then substitute placeholders.
 
-See also: `docs/16-windows7-install-media-prep.md`.
+See also: `wiki/areas/drivers-windows.md`.
 
 For ready-to-edit, end-to-end unattended templates and Win7-compatible post-install scripts (test signing + driver install), also see:
 
-- `windows/win7-sp1/unattend/`
+- `guest-tools/unattend/` (absorbed from the former `windows/win7-sp1/unattend/`)
 
 ---
 
@@ -80,9 +80,9 @@ Common placeholders used across templates:
 - `{{AERO_SIGNING_MODE}}`
   - `testsigning` (preferred) or `nointegritychecks` (fallback / emulator-only)
 - `{{AERO_WINPE_DRIVER_PATH}}`
-  - e.g., `%configsetroot%\Drivers\WinPE\{{ARCH}}` (matches `windows/win7-sp1/unattend/` layout)
+  - e.g., `%configsetroot%\Drivers\WinPE\{{ARCH}}` (matches the `guest-tools/unattend/` layout)
 - `{{AERO_SYSTEM_DRIVER_PATH}}`
-  - e.g., `%configsetroot%\Drivers\Offline\{{ARCH}}` (matches `windows/win7-sp1/unattend/` layout)
+  - e.g., `%configsetroot%\Drivers\Offline\{{ARCH}}` (matches the `guest-tools/unattend/` layout)
 - `{{INSTALL_WIM_INDEX}}`
   - Install edition index inside `sources/install.wim` (only used in `autounattend.full.xml`).
 

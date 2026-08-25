@@ -1,0 +1,88 @@
+# This file contains settings for `cargo hakari`.
+# See https://docs.rs/cargo-hakari/latest/cargo_hakari/config for a full list of options.
+
+hakari-package = "workspace-hack"
+
+# Format version for hakari's output. Version 4 requires cargo-hakari 0.9.22 or above.
+dep-format-version = "4"
+
+# Setting workspace.resolver = "2" or higher in the root Cargo.toml is HIGHLY recommended.
+# Hakari works much better with the v2 resolver. (The v2 and v3 resolvers are identical from
+# hakari's perspective, so you're welcome to set either.)
+#
+# For more about the new feature resolver, see:
+# https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html#cargos-new-feature-resolver
+resolver = "2"
+
+# Add triples corresponding to platforms commonly used by developers here.
+# https://doc.rust-lang.org/rustc/platform-support.html
+platforms = [
+    "x86_64-unknown-linux-gnu",
+    "wasm32-unknown-unknown",
+]
+
+# Write out exact versions rather than a semver range. (Defaults to false.)
+# exact-versions = true
+
+# wasm32-targeted crates and everything in their dependency cone: the
+# workspace-hack pulls in native-only deps (tokio/mio/hyper) that do not
+# compile for wasm32-unknown-unknown. Exclude the whole cone from hakari
+# traversal so none of these crates depend on workspace-hack.
+[traversal-excludes]
+workspace-members = [
+    "aero-acpi",
+    "aero-audio",
+    "aero-cpu-core",
+    "aero-cpu-decoder",
+    "aero-d3d11",
+    "aero-d3d11-wasm",
+    "aero-d3d9",
+    "aero-devices",
+    "aero-devices-gpu",
+    "aero-devices-input",
+    "aero-devices-nvme",
+    "aero-devices-storage",
+    "aero-dxbc",
+    "aero-edid",
+    "aero-gpu",
+    "aero-gpu-utils",
+    "aero-gpu-vga",
+    "aero-gpu-wasm",
+    "aero-guest-phys",
+    "aero-interrupts",
+    "aero-io-snapshot",
+    "aero-ipc",
+    "aero-jit-wasm",
+    "aero-jit-x86",
+    "aero-l2-protocol",
+    "aero-machine",
+    "aero-mem",
+    "aero-microbench",
+    "aero-mmu",
+    "aero-net-backend",
+    "aero-net-e1000",
+    "aero-net-pump",
+    "aero-net-stack",
+    "aero-opfs",
+    "aero-pc-constants",
+    "aero-pc-platform",
+    "aero-pci-firmware-adapter",
+    "aero-pci-routing",
+    "aero-perf",
+    "aero-platform",
+    "aero-protocol",
+    "aero-shared",
+    "aero-snapshot",
+    "aero-storage",
+    "aero-storage-adapters",
+    "aero-types",
+    "aero-usb",
+    "aero-virtio",
+    "aero-wasm",
+    "aero-x86",
+    "firmware",
+    "memory",
+    "nt-packetlib",
+    "st-idb",
+    "virtio-gpu-proto",
+]

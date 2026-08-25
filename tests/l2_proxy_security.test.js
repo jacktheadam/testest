@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 
 import { wsCloseSafe, wsSendSafe } from "../scripts/_shared/ws_safe.js";
-import { unrefBestEffort } from "../src/unref_safe.js";
+import { unrefBestEffort } from "../packages/transport-safety/src/unref_safe.js";
 import { WebSocket } from "../tools/minimal_ws.js";
-import { encodeL2Frame, L2_TUNNEL_SUBPROTOCOL, L2_TUNNEL_TOKEN_SUBPROTOCOL_PREFIX } from "../web/src/shared/l2TunnelProtocol.ts";
+import { encodeL2Frame, L2_TUNNEL_SUBPROTOCOL, L2_TUNNEL_TOKEN_SUBPROTOCOL_PREFIX } from "../apps/web/src/shared/l2TunnelProtocol.ts";
 
 import { startRustL2Proxy } from "../tools/rust_l2_proxy.js";
 

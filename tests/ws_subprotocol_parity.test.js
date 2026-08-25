@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const gateway = await import(new URL("../backend/aero-gateway/src/routes/wsSubprotocol.ts", import.meta.url));
+const gateway = await import(new URL("../services/gateway/src/routes/wsSubprotocol.ts", import.meta.url));
 const tools = await import(new URL("../tools/net-proxy-server/src/wsSubprotocol.js", import.meta.url));
 
 test("wsSubprotocol: gateway and tools implementations match", () => {

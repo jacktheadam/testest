@@ -10,7 +10,7 @@ const REG_STATESTS: u64 = 0x0e;
 #[test]
 fn hda_pci_mmio_routes_through_physical_memory_bus() {
     let ram = DenseMemory::new(0x20000).expect("failed to allocate guest RAM");
-    let mut bus = PhysicalMemoryBus::new(Box::new(ram));
+    let mut bus = PhysicalMemoryBus::new(ram);
 
     bus.map_mmio(
         HDA_BASE,

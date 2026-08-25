@@ -1,8 +1,9 @@
 [package]
 name = "aero-pc-platform"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
+publish = false
 
 [features]
 default = []
@@ -36,6 +37,11 @@ aero-pci-routing = { path = "../aero-pci-routing" }
 [[test]]
 name = "pc_platform_hda"
 path = "tests/pc_platform_hda.rs"
+required-features = ["hda"]
+
+[[test]]
+name = "guest_hda_session_samples"
+path = "tests/guest_hda_session_samples.rs"
 required-features = ["hda"]
 
 [[test]]

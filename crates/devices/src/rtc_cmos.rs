@@ -1138,6 +1138,40 @@ mod tests {
     }
 
     #[test]
+    fn periodic_irq8_routes_with_win7_lowest_priority_programming() {
+        let clock = ManualClock::new();
+
+        let interrupts = Rc::new(RefCell::new(PlatformInterrupts::new()));
+        interrupts
+            .borrow_mut()
+            .set_mode(PlatformInterruptMode::Apic);
+
+        let vector = 0xD2u8;
+        // Win7's phase-0 HAL uses lowest-priority delivery (bits 10:8 = 1), logical
+        // destination mode (bit 11), destination bit 0, and edge triggering for IRQ8.
+        program_ioapic_entry(
+            &mut interrupts.borrow_mut(),
+            8,
+            u32::from(vector) | (1 << 8) | (1 << 11),
+            1 << 24,
+        );
+
+        let irq_line = PlatformIrqLine::isa(interrupts.clone(), 8);
+        let rtc = Rc::new(RefCell::new(RtcCmos::new(clock.clone(), irq_line)));
+        let mut bus = IoPortBus::new();
+        register_rtc_cmos(&mut bus, rtc.clone());
+
+        // Default Status A rate is 1024 Hz. Enable periodic IRQs exactly as HalpProgramRtcClock
+        // does (24-hour mode + PIE), then cross one period.
+        bus.write_u8(PORT_INDEX, REG_STATUS_B);
+        bus.write_u8(PORT_DATA, REG_B_24H | REG_B_PIE);
+        clock.advance_ns(1_000_000);
+        rtc.borrow_mut().tick();
+
+        assert_eq!(interrupts.borrow().get_pending(), Some(vector));
+    }
+
+    #[test]
     fn nvram_reports_base_and_extended_memory_sizes() {
         let clock = ManualClock::new();
         let irq = TestIrq::new();

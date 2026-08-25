@@ -219,6 +219,10 @@ impl CpuBus for WriteIntent<'_> {
         self.bus.invlpg(vaddr);
     }
 
+    fn write_cr3(&mut self, value: u64) {
+        self.bus.write_cr3(value);
+    }
+
     fn read_u8(&mut self, vaddr: u64) -> Result<u8, Exception> {
         self.bus.read_u8_access(vaddr, AccessType::Write)
     }
@@ -296,6 +300,10 @@ impl CpuBus for PcCpuBus {
 
     fn invlpg(&mut self, vaddr: u64) {
         self.mmu.invlpg(vaddr);
+    }
+
+    fn write_cr3(&mut self, value: u64) {
+        self.mmu.set_cr3(value);
     }
 
     fn read_u8(&mut self, vaddr: u64) -> Result<u8, Exception> {

@@ -730,11 +730,8 @@ fn virtio_input_inject_key_syncs_legacy_intx_into_pic() {
     let pci_intx = m.pci_intx_router().expect("pc platform enabled");
     let expected_vector = {
         let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let irq = u8::try_from(gsi).expect("virtio-input gsi must fit in u8");
-        assert!(
-            irq < 16,
-            "expected virtio-input to route to a legacy PIC IRQ (got GSI {gsi})"
-        );
+        let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+            .expect("Q35 virtio-input GSI should have a compatibility PIC route");
 
         let mut ints = interrupts.borrow_mut();
         ints.pic_mut().set_offsets(0x20, 0x28);
@@ -850,11 +847,8 @@ fn virtio_input_input_batch_syncs_legacy_intx_into_pic() {
     let pci_intx = m.pci_intx_router().expect("pc platform enabled");
     let expected_vector = {
         let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let irq = u8::try_from(gsi).expect("virtio-input gsi must fit in u8");
-        assert!(
-            irq < 16,
-            "expected virtio-input to route to a legacy PIC IRQ (got GSI {gsi})"
-        );
+        let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+            .expect("Q35 virtio-input GSI should have a compatibility PIC route");
 
         let mut ints = interrupts.borrow_mut();
         ints.pic_mut().set_offsets(0x20, 0x28);
@@ -1417,11 +1411,8 @@ fn virtio_input_intx_is_gated_on_pci_command_intx_disable() {
     let pci_intx = m.pci_intx_router().expect("pc platform enabled");
     let expected_vector = {
         let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-        let irq = u8::try_from(gsi).expect("virtio-input gsi must fit in u8");
-        assert!(
-            irq < 16,
-            "expected virtio-input to route to a legacy PIC IRQ (got GSI {gsi})"
-        );
+        let irq = aero_devices::pci::q35_legacy_pic_irq_for_gsi(gsi)
+            .expect("Q35 virtio-input GSI should have a compatibility PIC route");
 
         let mut ints = interrupts.borrow_mut();
         ints.pic_mut().set_offsets(0x20, 0x28);

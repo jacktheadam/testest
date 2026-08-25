@@ -1,7 +1,7 @@
 //! Aero GPU trace container.
 //!
 //! This crate intentionally stays dependency-free and focuses on a stable on-disk format:
-//! see `docs/abi/gpu-trace-format.md`.
+//! see `wiki/areas/graphics.md`.
 
 mod format;
 mod reader;

@@ -67,7 +67,7 @@ fn said_runs_wasm_pack_without_node_modules() -> Result<(), Box<dyn std::error::
 
     write_fake_argv_logger(&bin_dir.join("cargo"), "cargo")?;
     write_fake_node_version_checker(&bin_dir.join("node"))?;
-    write_fake_argv_logger(&bin_dir.join("npm"), "npm")?;
+    write_fake_argv_logger(&bin_dir.join("pnpm"), "pnpm")?;
     write_fake_argv_logger(&bin_dir.join("wasm-pack"), "wasm-pack")?;
 
     let orig_path = std::env::var("PATH").unwrap_or_default();
@@ -93,7 +93,7 @@ fn said_runs_wasm_pack_without_node_modules() -> Result<(), Box<dyn std::error::
     assert!(
         !invocations
             .iter()
-            .any(|argv| argv.first().map(|s| s.as_str()) == Some("npm")),
+            .any(|argv| argv.first().map(|s| s.as_str()) == Some("pnpm")),
         "expected npm not to be invoked when --rust-only is set; invocations={invocations:?}"
     );
 
@@ -244,7 +244,7 @@ fn said_rust_only_skips_node_and_npm() -> Result<(), Box<dyn std::error::Error>>
 
     write_fake_argv_logger(&bin_dir.join("cargo"), "cargo")?;
     write_fake_argv_logger(&bin_dir.join("node"), "node")?;
-    write_fake_argv_logger(&bin_dir.join("npm"), "npm")?;
+    write_fake_argv_logger(&bin_dir.join("pnpm"), "pnpm")?;
     write_fake_argv_logger(&bin_dir.join("wasm-pack"), "wasm-pack")?;
 
     let orig_path = std::env::var("PATH").unwrap_or_default();
@@ -275,7 +275,7 @@ fn said_rust_only_skips_node_and_npm() -> Result<(), Box<dyn std::error::Error>>
     assert!(
         !invocations
             .iter()
-            .any(|argv| argv.first().map(|s| s.as_str()) == Some("npm")),
+            .any(|argv| argv.first().map(|s| s.as_str()) == Some("pnpm")),
         "expected npm not to be invoked when --rust-only is set; invocations={invocations:?}"
     );
     assert!(
@@ -321,7 +321,7 @@ fn said_usb_all_runs_full_aero_usb_suite() -> Result<(), Box<dyn std::error::Err
 
     write_fake_argv_logger(&bin_dir.join("cargo"), "cargo")?;
     write_fake_argv_logger(&bin_dir.join("node"), "node")?;
-    write_fake_argv_logger(&bin_dir.join("npm"), "npm")?;
+    write_fake_argv_logger(&bin_dir.join("pnpm"), "pnpm")?;
     write_fake_argv_logger(&bin_dir.join("wasm-pack"), "wasm-pack")?;
 
     let orig_path = std::env::var("PATH").unwrap_or_default();
@@ -360,7 +360,7 @@ fn said_machine_rust_only_runs_machine_tests() -> Result<(), Box<dyn std::error:
 
     write_fake_argv_logger(&bin_dir.join("cargo"), "cargo")?;
     write_fake_argv_logger(&bin_dir.join("node"), "node")?;
-    write_fake_argv_logger(&bin_dir.join("npm"), "npm")?;
+    write_fake_argv_logger(&bin_dir.join("pnpm"), "pnpm")?;
     write_fake_argv_logger(&bin_dir.join("wasm-pack"), "wasm-pack")?;
 
     let orig_path = std::env::var("PATH").unwrap_or_default();
@@ -385,7 +385,7 @@ fn said_machine_rust_only_runs_machine_tests() -> Result<(), Box<dyn std::error:
     assert!(
         !invocations
             .iter()
-            .any(|argv| argv.first().map(|s| s.as_str()) == Some("npm")),
+            .any(|argv| argv.first().map(|s| s.as_str()) == Some("pnpm")),
         "expected npm not to be invoked when --rust-only is set; invocations={invocations:?}"
     );
     assert!(
@@ -453,7 +453,7 @@ fn said_with_wasm_rust_only_runs_aero_wasm_integration_tests(
 
     write_fake_argv_logger(&bin_dir.join("cargo"), "cargo")?;
     write_fake_argv_logger(&bin_dir.join("node"), "node")?;
-    write_fake_argv_logger(&bin_dir.join("npm"), "npm")?;
+    write_fake_argv_logger(&bin_dir.join("pnpm"), "pnpm")?;
     write_fake_argv_logger(&bin_dir.join("wasm-pack"), "wasm-pack")?;
 
     let orig_path = std::env::var("PATH").unwrap_or_default();
@@ -478,7 +478,7 @@ fn said_with_wasm_rust_only_runs_aero_wasm_integration_tests(
     assert!(
         !invocations
             .iter()
-            .any(|argv| argv.first().map(|s| s.as_str()) == Some("npm")),
+            .any(|argv| argv.first().map(|s| s.as_str()) == Some("pnpm")),
         "expected npm not to be invoked when --rust-only is set; invocations={invocations:?}"
     );
     assert!(

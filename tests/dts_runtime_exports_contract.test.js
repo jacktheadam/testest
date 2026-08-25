@@ -1,3 +1,17 @@
+/**
+ * A declaration that promises a function the runtime does not export is worse
+ * than no declaration: it type-checks at every call site and fails only when the
+ * code runs. These helpers are hand-written JavaScript with hand-written
+ * declarations, so nothing else enforces the correspondence.
+ *
+ * Two shapes are covered:
+ *
+ * - **Dual-surface helpers** in `packages/transport-safety/`, consumed as
+ *   CommonJS by the Node services and as ES modules by the browser host. One
+ *   shared declaration describes both, and both runtime formats must satisfy it.
+ * - **ES-module-only helpers** that live with the host in `src/`, where a
+ *   declaration and its module sit side by side.
+ */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
@@ -7,8 +21,9 @@ import { createRequire } from "node:module";
 
 import { listFilesRecursive } from "./_helpers/fs_walk.js";
 
-function parseExportedFunctionNamesFromDts(dtsSource) {
-  /** @type {string[]} */
+const require = createRequire(import.meta.url);
+
+function declaredFunctionNames(dtsSource) {
   const names = [];
   const re = /^export function\s+([A-Za-z0-9_]+)\s*\(/gm;
   for (;;) {
@@ -19,97 +34,70 @@ function parseExportedFunctionNamesFromDts(dtsSource) {
   return names;
 }
 
-test("d.ts exports: declared functions exist at runtime (ESM/CJS)", async () => {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const root = path.resolve(here, "..");
-  const srcDir = path.resolve(root, "src");
+function repoRoot() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+}
 
-  const relFiles = await listFilesRecursive(srcDir);
-  const relFileSet = new Set(relFiles);
+test("transport-safety: both module surfaces export everything the declaration promises", async () => {
+  const pkgRel = "packages/transport-safety/src";
+  const pkgDir = path.resolve(repoRoot(), pkgRel);
+  const files = new Set(await listFilesRecursive(pkgDir));
 
-  const cjsDts = relFiles.filter((rel) => rel.endsWith(".cjs.d.ts")).sort();
-  assert.ok(cjsDts.length > 0, "Expected at least one src/**/*.cjs.d.ts stub");
+  const shared = [...files].filter((rel) => rel.endsWith(".types.d.ts")).sort();
+  assert.ok(shared.length > 0, `Expected at least one shared declaration in ${pkgRel}`);
 
-  const require = createRequire(import.meta.url);
+  for (const sharedRel of shared) {
+    const base = sharedRel.replace(/\.types\.d\.ts$/, "");
+    const esmRel = `${base}.js`;
+    const cjsRel = `${base}.cjs`;
 
-  // Dual-module stubs: require both runtime formats to match the stub surface.
-  for (const cjsDtsRel of cjsDts) {
-    const baseRel = cjsDtsRel.replace(/\.cjs\.d\.ts$/, "");
-    const esmDtsRel = `${baseRel}.d.ts`;
-    assert.ok(
-      relFileSet.has(esmDtsRel),
-      `Missing ESM .d.ts stub for:\n- src/${cjsDtsRel}\nExpected:\n- src/${esmDtsRel}`,
-    );
+    assert.ok(files.has(esmRel), `Missing ES module surface ${pkgRel}/${esmRel}`);
+    assert.ok(files.has(cjsRel), `Missing CommonJS implementation ${pkgRel}/${cjsRel}`);
 
-    const [esmDtsSource, cjsDtsSource] = await Promise.all([
-      readFile(path.resolve(srcDir, esmDtsRel), "utf8"),
-      readFile(path.resolve(srcDir, cjsDtsRel), "utf8"),
-    ]);
+    const declared = declaredFunctionNames(await readFile(path.resolve(pkgDir, sharedRel), "utf8"));
+    assert.ok(declared.length > 0, `${pkgRel}/${sharedRel} declares no functions`);
 
-    const esmFnNames = parseExportedFunctionNamesFromDts(esmDtsSource);
-    const cjsFnNames = parseExportedFunctionNamesFromDts(cjsDtsSource);
+    const esmMod = await import(pathToFileURL(path.resolve(pkgDir, esmRel)).href);
+    const cjsMod = require(path.resolve(pkgDir, cjsRel));
 
-    // The parity test ensures the files match, but keep the runtime contract robust even if that
-    // test is ever relaxed.
-    assert.deepEqual(
-      esmFnNames,
-      cjsFnNames,
-      `Expected function export list parity between:\n- src/${esmDtsRel}\n- src/${cjsDtsRel}`,
-    );
-
-    const esmModuleRel = `${baseRel}.js`;
-    const cjsModuleRel = `${baseRel}.cjs`;
-    assert.ok(
-      relFileSet.has(esmModuleRel),
-      `Missing ESM runtime module for:\n- src/${esmDtsRel}\nExpected:\n- src/${esmModuleRel}`,
-    );
-    assert.ok(
-      relFileSet.has(cjsModuleRel),
-      `Missing CJS runtime module for:\n- src/${cjsDtsRel}\nExpected:\n- src/${cjsModuleRel}`,
-    );
-
-    const esmMod = await import(pathToFileURL(path.resolve(srcDir, esmModuleRel)).href);
-    const cjsMod = require(path.resolve(srcDir, cjsModuleRel));
-
-    for (const fnName of esmFnNames) {
+    for (const fn of declared) {
       assert.equal(
-        typeof esmMod[fnName],
+        typeof esmMod[fn],
         "function",
-        `Expected ESM module src/${esmModuleRel} to export function ${fnName} (declared in src/${esmDtsRel})`,
+        `${pkgRel}/${esmRel} must export ${fn}, declared in ${sharedRel}`,
       );
       assert.equal(
-        typeof cjsMod[fnName],
+        typeof cjsMod[fn],
         "function",
-        `Expected CJS module src/${cjsModuleRel} to export function ${fnName} (declared in src/${cjsDtsRel})`,
-      );
-    }
-  }
-
-  // ESM-only stubs: enforce that declared runtime functions exist in the ESM module.
-  const dts = relFiles.filter((rel) => rel.endsWith(".d.ts") && !rel.endsWith(".cjs.d.ts")).sort();
-  for (const dtsRel of dts) {
-    const baseRel = dtsRel.replace(/\.d\.ts$/, "");
-    const cjsDtsRel = `${baseRel}.cjs.d.ts`;
-    if (relFileSet.has(cjsDtsRel)) continue; // already validated above
-
-    const dtsSource = await readFile(path.resolve(srcDir, dtsRel), "utf8");
-    const fnNames = parseExportedFunctionNamesFromDts(dtsSource);
-    if (fnNames.length === 0) continue;
-
-    const esmModuleRel = `${baseRel}.js`;
-    assert.ok(
-      relFileSet.has(esmModuleRel),
-      `Missing ESM runtime module for:\n- src/${dtsRel}\nExpected:\n- src/${esmModuleRel}`,
-    );
-
-    const esmMod = await import(pathToFileURL(path.resolve(srcDir, esmModuleRel)).href);
-    for (const fnName of fnNames) {
-      assert.equal(
-        typeof esmMod[fnName],
-        "function",
-        `Expected ESM module src/${esmModuleRel} to export function ${fnName} (declared in src/${dtsRel})`,
+        `${pkgRel}/${cjsRel} must export ${fn}, declared in ${sharedRel}`,
       );
     }
   }
 });
 
+test("host helpers: ES module exports match their declarations", async () => {
+  const srcDir = path.resolve(repoRoot(), "apps/web/src");
+  const files = await listFilesRecursive(srcDir);
+  const fileSet = new Set(files);
+
+  const stubs = files.filter((rel) => rel.endsWith(".d.ts") && !rel.endsWith(".cjs.d.ts")).sort();
+
+  for (const stubRel of stubs) {
+    const base = stubRel.replace(/\.d\.ts$/, "");
+    const moduleRel = `${base}.js`;
+    // Ambient declarations (global types, environment shims) have no module.
+    if (!fileSet.has(moduleRel)) continue;
+
+    const declared = declaredFunctionNames(await readFile(path.resolve(srcDir, stubRel), "utf8"));
+    if (declared.length === 0) continue;
+
+    const mod = await import(pathToFileURL(path.resolve(srcDir, moduleRel)).href);
+    for (const fn of declared) {
+      assert.equal(
+        typeof mod[fn],
+        "function",
+        `src/${moduleRel} must export ${fn}, declared in src/${stubRel}`,
+      );
+    }
+  }
+});

@@ -15,17 +15,17 @@ import http from "node:http";
 import https from "node:https";
 import { randomBytes } from "node:crypto";
 import { Duplex } from "node:stream";
-import { isValidHttpToken } from "../src/httpTokens.js";
-import { formatOneLineUtf8 } from "../src/text.js";
-import { rejectHttpUpgrade } from "../src/http_upgrade_reject.js";
+import { isValidHttpToken } from "../packages/transport-safety/src/http_tokens.js";
+import { formatOneLineUtf8 } from "../packages/transport-safety/src/text.js";
+import { rejectHttpUpgrade } from "../packages/transport-safety/src/http_upgrade_reject.js";
 import {
   callMethodCaptureErrorBestEffort,
   destroyBestEffort,
   endBestEffort,
-} from "../src/socket_safe.js";
-import { tryGetProp } from "../src/safe_props.js";
-import { wsCloseSafe, wsSendSafe } from "../src/ws_safe.js";
-import { encodeWebSocketHandshakeResponse } from "../src/ws_handshake_response.js";
+} from "../packages/transport-safety/src/socket_safe.js";
+import { tryGetProp } from "../packages/transport-safety/src/safe_props.js";
+import { wsCloseSafe, wsSendSafe } from "../apps/web/src/ws_safe.js";
+import { encodeWebSocketHandshakeResponse } from "../packages/transport-safety/src/ws_handshake_response.js";
 
 const utf8DecoderFatal = new TextDecoder("utf-8", { fatal: true });
 

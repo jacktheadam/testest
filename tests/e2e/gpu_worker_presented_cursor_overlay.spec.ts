@@ -7,7 +7,7 @@ async function waitForReady(page: Page) {
 }
 
 async function runBackend(page: Page, backend: string) {
-  await page.goto(`/web/gpu-worker-presented-cursor-overlay.html?backend=${encodeURIComponent(backend)}`, {
+  await page.goto(`/apps/web/gpu-worker-presented-cursor-overlay.html?backend=${encodeURIComponent(backend)}`, {
     waitUntil: "load",
   });
   await waitForReady(page);

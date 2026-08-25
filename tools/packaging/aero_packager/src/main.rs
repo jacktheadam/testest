@@ -27,7 +27,7 @@ struct Cli {
 
     /// Machine-readable device contract used to generate `config/devices.cmd`.
     ///
-    /// If omitted, the packager searches for `docs/windows-device-contract.json` by walking up from
+    /// If omitted, the packager searches for `protocol-vectors/windows-device-contract.json` by walking up from
     /// `--guest-tools-dir` (useful when Guest Tools are staged under `out/...`).
     #[arg(long)]
     windows_device_contract: Option<PathBuf>,
@@ -117,7 +117,9 @@ fn resolve_windows_device_contract_path(
     let mut cur: Option<&Path> = Some(guest_tools_dir);
     for _ in 0..16 {
         let Some(p) = cur else { break };
-        let candidate = p.join("docs").join("windows-device-contract.json");
+        let candidate = p
+            .join("protocol-vectors")
+            .join("windows-device-contract.json");
         if candidate.is_file() {
             return candidate;
         }
@@ -128,6 +130,6 @@ fn resolve_windows_device_contract_path(
     guest_tools_dir
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }

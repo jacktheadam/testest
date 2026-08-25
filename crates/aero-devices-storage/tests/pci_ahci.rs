@@ -4,8 +4,8 @@ use std::sync::Arc;
 use aero_devices::pci::profile;
 use aero_devices::pci::PciDevice as _;
 use aero_devices_storage::ata::{
-    AtaDrive, ATA_CMD_IDENTIFY, ATA_CMD_READ_DMA_EXT, ATA_STATUS_BSY, ATA_STATUS_DRDY,
-    ATA_STATUS_DSC,
+    AtaDrive, ATA_CMD_IDENTIFY, ATA_CMD_READ_DMA_EXT, ATA_CMD_READ_VERIFY,
+    ATA_STATUS_BSY, ATA_STATUS_DRDY, ATA_STATUS_DSC,
 };
 use aero_devices_storage::AhciPciDevice;
 use aero_storage::{MemBackend, RawDisk, VirtualDisk, SECTOR_SIZE};
@@ -381,6 +381,46 @@ fn mmio_identify_and_read_dma_ext_via_pci_wrapper() {
     mem.read_physical(read_buf, &mut out);
     assert_eq!(&out[0..4], b"BOOT");
     assert_eq!(&out[510..512], &[0x55, 0xAA]);
+}
+
+/// FormatEx / VDS Format issues READ VERIFY with no PRDT. Aborting that
+/// command as unsupported made Win7 Setup fail with 0x80070057 while
+/// preparing a newly created System Reserved volume.
+#[test]
+fn ahci_read_verify_completes_without_task_file_error() {
+    let capacity = 8 * SECTOR_SIZE as u64;
+    let disk = RawDisk::create(MemBackend::new(), capacity).unwrap();
+    let mut dev = AhciPciDevice::new(1);
+    dev.attach_drive(0, AtaDrive::new(Box::new(disk)).unwrap());
+    dev.config_mut().set_command(0x0006);
+
+    let mut mem = Bus::new(0x20_000);
+    let clb = 0x1000u64;
+    let fb = 0x2000u64;
+    let ctba = 0x3000u64;
+
+    dev.mmio_write(PORT_BASE + PORT_REG_CLB, 4, clb);
+    dev.mmio_write(PORT_BASE + PORT_REG_FB, 4, fb);
+    dev.mmio_write(HBA_GHC, 4, u64::from(GHC_IE | GHC_AE));
+    dev.mmio_write(PORT_BASE + PORT_REG_IE, 4, u64::from(PORT_IS_DHRS));
+    dev.mmio_write(
+        PORT_BASE + PORT_REG_CMD,
+        4,
+        u64::from(PORT_CMD_ST | PORT_CMD_FRE),
+    );
+
+    write_cmd_header(&mut mem, clb, 0, ctba, 0, false);
+    write_cfis(&mut mem, ctba, ATA_CMD_READ_VERIFY, 0, 1);
+
+    dev.mmio_write(PORT_BASE + PORT_REG_CI, 4, 1);
+    dev.process(&mut mem);
+
+    assert_eq!(dev.mmio_read(PORT_BASE + PORT_REG_CI, 4) as u32, 0);
+    let is = dev.mmio_read(PORT_BASE + PORT_REG_IS, 4) as u32;
+    assert_ne!(is & PORT_IS_DHRS, 0, "VERIFY must complete with D2H");
+    assert_eq!(is & PORT_IS_TFES, 0, "VERIFY must not abort");
+    let tfd = dev.mmio_read(PORT_BASE + PORT_REG_TFD, 4) as u32;
+    assert_eq!(tfd & 0xff, u32::from(ATA_STATUS_DRDY | ATA_STATUS_DSC));
 }
 
 #[test]

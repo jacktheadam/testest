@@ -8,7 +8,7 @@
 
 `devices.cmd` is generated from the canonical machine-readable device contract:
 
-- `docs/windows-device-contract.json`
+- `protocol-vectors/windows-device-contract.json`
 
 Regenerate it with:
 
@@ -45,8 +45,8 @@ recognize either enumeration.
 For Aero virtio devices, these IDs are expected to follow the repo's device contract (virtio-pci
 modern-only IDs plus PCI Revision ID `0x01`). Keep `devices.cmd` consistent with:
 
-- `docs/windows7-virtio-driver-contract.md` (behavioral contract)
-- `docs/windows-device-contract.json` (machine-readable manifest)
+- `wiki/areas/drivers-windows.md` (behavioral contract)
+- `protocol-vectors/windows-device-contract.json` (machine-readable manifest)
 
 `AERO_VIRTIO_BLK_SERVICE` MUST match the virtio-blk storage driver's INF `AddService` name, because `setup.cmd`
 uses it to mark the storage service as `BOOT_START` and to pre-seed `CriticalDeviceDatabase` entries.

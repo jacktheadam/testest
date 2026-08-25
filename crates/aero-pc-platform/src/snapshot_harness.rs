@@ -350,8 +350,8 @@ impl SnapshotTarget for PcPlatformSnapshotHarness<'_> {
             //
             // This must run *after* PCI INTx sync: `PciIntxRouter::sync_levels_to_sink()` sets
             // routed GSI levels to either asserted or deasserted, and can otherwise clear a GSI
-            // asserted by another device (e.g. HPET timer2 default route = GSI10, which is also
-            // commonly used for PCI INTA#).
+            // asserted by another device (for example, an HPET timer explicitly routed onto a
+            // Q35 PCI GSI).
             if self.restored_hpet {
                 self.pc
                     .hpet

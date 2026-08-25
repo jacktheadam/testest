@@ -842,7 +842,10 @@ impl VirtioInput {
     ) -> Result<bool, VirtioDeviceError> {
         let mut need_irq = false;
         while let Some(chain) = self.buffers.pop_front() {
-            let Some(event) = self.pending.pop_front() else {
+            // Peek at the pending event before validating the descriptor chain.
+            // This prevents event loss if the chain is malformed (the event
+            // is only consumed after a successful write).
+            let Some(event) = self.pending.front().copied() else {
                 self.buffers.push_front(chain);
                 break;
             };
@@ -866,6 +869,9 @@ impl VirtioInput {
                     .map_err(|_| VirtioDeviceError::IoError)?;
                 written += take;
             }
+
+            // Event successfully delivered (or at least attempted); consume it.
+            self.pending.pop_front();
 
             need_irq |= queue
                 .add_used(mem, chain.head_index(), written as u32)

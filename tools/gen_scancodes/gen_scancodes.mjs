@@ -7,7 +7,7 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
 
 const INPUT_PATH = path.join(SCRIPT_DIR, 'scancodes.json');
 const OUT_TS_PATHS = [
-  path.join(REPO_ROOT, 'web/src/input/scancodes.ts'),
+  path.join(REPO_ROOT, 'apps/web/src/input/scancodes.ts'),
 ];
 const OUT_RS_PATHS = [
   path.join(REPO_ROOT, 'crates/aero-devices-input/src/scancodes_generated.rs'),

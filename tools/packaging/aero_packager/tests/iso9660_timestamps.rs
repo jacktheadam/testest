@@ -9,7 +9,7 @@ fn device_contract_path() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("docs")
+        .join("protocol-vectors")
         .join("windows-device-contract.json")
 }
 
@@ -92,4 +92,3 @@ fn iso_directory_record_timestamps_clamp_too_late_epoch_to_2155() -> anyhow::Res
 
     Ok(())
 }
-

@@ -117,6 +117,7 @@ const EERD_DATA_SHIFT: u32 = 16;
 
 // EECD bits (subset).
 const EECD_EE_PRES: u32 = 1 << 8;
+const EECD_AUTO_RD: u32 = 1 << 9; // EEPROM auto-read done; signals MAC is loaded
 
 // MDIC bits/fields (subset).
 const MDIC_DATA_MASK: u32 = 0x0000_FFFF;
@@ -129,8 +130,12 @@ const MDIC_OP_READ: u32 = 0x0800_0000;
 const MDIC_READY: u32 = 0x1000_0000;
 
 // Interrupt Cause bits (subset).
-pub const ICR_TXDW: u32 = 1 << 0;
-pub const ICR_RXT0: u32 = 1 << 7;
+pub const ICR_TXDW: u32 = 1 << 0; // Transmit Descriptor Written Back
+pub const ICR_TXQE: u32 = 1 << 1; // Transmit Queue Empty
+pub const ICR_LSC: u32 = 1 << 2; // Link Status Change
+pub const ICR_RXDMT0: u32 = 1 << 4; // Receive Descriptor Minimum Threshold Reached
+pub const ICR_RXO: u32 = 1 << 6; // Receiver Overrun
+pub const ICR_RXT0: u32 = 1 << 7; // Receive Descriptor Threshold
 
 // RCTL bits (subset).
 const RCTL_EN: u32 = 1 << 1;
@@ -140,6 +145,7 @@ const RCTL_BSEX: u32 = 1 << 25;
 
 // TCTL bits (subset).
 const TCTL_EN: u32 = 1 << 1;
+const TCTL_PSP: u32 = 1 << 3; // Pad Short Packets (pad TX to 60 bytes)
 
 // TX descriptor bits (legacy).
 const TXD_CMD_EOP: u8 = 1 << 0;
@@ -256,8 +262,8 @@ impl TxContextDesc {
             tucss: bytes[4],
             tucso: bytes[5],
             tucse: u16::from_le_bytes(bytes[6..8].try_into().unwrap()),
-            mss: u16::from_le_bytes(bytes[12..14].try_into().unwrap()),
-            hdr_len: bytes[14],
+            mss: u16::from_le_bytes(bytes[14..16].try_into().unwrap()),
+            hdr_len: bytes[13],
             cmd: bytes[11],
             tcp_hdr_len: bytes[15],
         }
@@ -741,8 +747,15 @@ impl E1000Device {
         const MII_PHYSID1: usize = 2;
         const MII_PHYSID2: usize = 3;
 
-        // BMSR: link up + auto-negotiation complete.
-        self.phy[MII_BMSR] = 0x0004 | 0x0020;
+        // BMSR: link up + auto-negotiation complete + capability bits.
+        //   bit  1: EXTSTAT (extended status)
+        //   bit  2: LSTATUS (link up)
+        //   bit  3: ANEGCAPABLE (auto-negotiation capable)
+        //   bit  5: ANEGCOMPLETE (auto-negotiation complete)
+        //   bit  8: ESTATEN (extended status in reg 15)
+        //   bit 11: 100FULL, bit 12: 100HALF
+        //   bit 13: 10FULL,  bit 14: 10HALF
+        self.phy[MII_BMSR] = 0x696D;
 
         // A plausible Intel-ish PHY ID (not intended to match real silicon).
         self.phy[MII_PHYSID1] = 0x0141;
@@ -961,13 +974,16 @@ impl E1000Device {
 
     fn reset(&mut self) {
         self.ctrl = 0;
-        self.eecd = EECD_EE_PRES;
+        self.eecd = EECD_EE_PRES | EECD_AUTO_RD;
         self.eerd = 0;
         self.ctrl_ext = 0;
         self.mdic = MDIC_READY;
         self.io_reg = 0;
 
         self.icr = 0;
+        // Signal initial link-up so drivers waiting on an LSC interrupt
+        // (common during e1iexpress init) see the link is ready.
+        self.icr |= ICR_LSC;
         self.ims = 0;
         self.irq_level = false;
 
@@ -1063,7 +1079,10 @@ impl E1000Device {
         match offset {
             REG_ICR => {
                 let v = self.icr;
-                self.icr = 0;
+                // Per 82540EM spec: reading ICR clears only bits whose
+                // corresponding IMS bit is set (unmasked causes). Masked
+                // causes persist until IMS is enabled and ICR is re-read.
+                self.icr &= !self.ims;
                 self.update_irq_level();
                 v
             }
@@ -1302,6 +1321,12 @@ impl E1000Device {
     fn queue_tx_frame(&mut self, frame: Vec<u8>) {
         if frame.len() < MIN_L2_FRAME_LEN || frame.len() > MAX_L2_FRAME_LEN {
             return;
+        }
+        // TCTL.PSP: pad short TX frames to the Ethernet minimum (60 bytes,
+        // excluding FCS) so they aren't dropped by strict switches/NICs.
+        let mut frame = frame;
+        if (self.tctl & TCTL_PSP) != 0 && frame.len() < 60 {
+            frame.resize(60, 0);
         }
         if self.tx_out.len() >= MAX_TX_OUT_QUEUE {
             // Bound memory even if the host never drains the TX queue.

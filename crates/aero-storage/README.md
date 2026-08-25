@@ -29,8 +29,7 @@ Note: IndexedDB-based storage is async and is not currently exposed as a synchro
 `aero_storage::StorageBackend` / `aero_storage::VirtualDisk` for the boot-critical controller path;
 see:
 
-- [`docs/19-indexeddb-storage-story.md`](../../docs/19-indexeddb-storage-story.md)
-- [`docs/20-storage-trait-consolidation.md`](../../docs/20-storage-trait-consolidation.md)
+- [`wiki/areas/storage.md`](wiki/areas/storage.md)
 
 The async IndexedDB block store lives in `crates/st-idb`.
 

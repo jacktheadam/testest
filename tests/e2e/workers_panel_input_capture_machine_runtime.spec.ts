@@ -6,17 +6,17 @@ test("Workers panel: VGA canvas captures keyboard input and forwards batches to 
   test.setTimeout(90_000);
   page.setDefaultTimeout(90_000);
 
-  // The repo-root Vite harness serves the legacy web UI at `/web/` (and the
+  // The repo-root Vite harness serves the legacy web UI at `/apps/web/` (and the
   // canonical harness UI at `/`). In other deployments the legacy UI may be
   // mounted at the origin root. Start at `/` as the smoke-test entrypoint, then
-  // fall back to `/web/index.html` when the Workers panel isn't present.
+  // fall back to `/apps/web/bringup.html` when the Workers panel isn't present.
   // Keep the worker VM footprint modest on browsers like Firefox that can be
   // significantly slower to initialize large shared WebAssembly.Memory regions.
   await page.goto("/?vmRuntime=machine&mem=256&vram=16", { waitUntil: "load" });
   try {
     await page.locator("#workers-start").waitFor({ state: "attached", timeout: 2000 });
   } catch {
-    await page.goto("/web/index.html?vmRuntime=machine&mem=256&vram=16", { waitUntil: "load" });
+    await page.goto("/apps/web/bringup.html?vmRuntime=machine&mem=256&vram=16", { waitUntil: "load" });
   }
 
   const support = await page.evaluate(() => {

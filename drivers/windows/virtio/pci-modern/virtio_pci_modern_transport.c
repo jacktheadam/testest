@@ -1112,8 +1112,7 @@ NTSTATUS VirtioPciModernTransportSetConfigMsixVector(VIRTIO_PCI_MODERN_TRANSPORT
 	 * use MSI-X exclusively. If vectors are unassigned (`0xFFFF`) or the MSI-X table entry
 	 * is masked/unprogrammed, the device must suppress interrupts for this source (no
 	 * MSI-X message and no INTx fallback). If MSI-X is disabled, the device delivers
-	 * interrupts via legacy INTx + ISR semantics (see docs/windows7-virtio-driver-contract.md
-	 * §1.8.4).
+	 * interrupts via legacy INTx + ISR semantics (see wiki/areas/drivers-windows.md).
 	 */
 	if (vector == VIRTIO_PCI_MSI_NO_VECTOR) {
 		return (read_vector == VIRTIO_PCI_MSI_NO_VECTOR) ? STATUS_SUCCESS : STATUS_IO_DEVICE_ERROR;

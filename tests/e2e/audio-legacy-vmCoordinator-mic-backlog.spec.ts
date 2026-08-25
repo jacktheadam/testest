@@ -7,7 +7,7 @@ import {
   HEADER_U32_LEN as MIC_HEADER_U32_LEN,
   READ_POS_INDEX as MIC_READ_POS_INDEX,
   WRITE_POS_INDEX as MIC_WRITE_POS_INDEX,
-} from "../../web/src/audio/mic_ring.js";
+} from "../../apps/web/src/audio/mic_ring.js";
 
 const PREVIEW_ORIGIN = process.env.AERO_PLAYWRIGHT_PREVIEW_ORIGIN ?? "http://127.0.0.1:4173";
 
@@ -16,7 +16,7 @@ test("Legacy VmCoordinator discards buffered mic samples on attach/resume/step (
   test.skip(test.info().project.name !== "chromium", "Mic ring SharedArrayBuffer tests only run on Chromium.");
   page.setDefaultTimeout(90_000);
 
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: "load" });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: "load" });
   await page.waitForSelector("#vm-safety-panel");
 
   // Start the legacy single-worker VM coordinator (src/emulator/vmCoordinator.js) via the harness UI.

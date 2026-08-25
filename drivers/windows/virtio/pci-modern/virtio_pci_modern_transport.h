@@ -8,7 +8,7 @@
  * to CommonCfg/Notify/ISR/DeviceCfg regions.
  *
  * In STRICT mode, this module enforces the AERO-W7-VIRTIO v1 transport contract
- * (docs/):
+ * (see wiki/areas/drivers-windows.md):
  *   - PCI Vendor ID == 0x1AF4 (virtio vendor)
  *   - PCI Device ID in the modern-only ID space (>= 0x1040)
  *   - PCI Revision ID == 0x01
@@ -57,7 +57,7 @@ extern "C" {
  * Contract v1 strict-mode BAR0 size requirement.
  *
  * In STRICT mode the transport enforces the fixed BAR0 layout described by
- * docs/windows7-virtio-driver-contract.md, which requires a 0x4000-byte BAR0.
+ * wiki/areas/drivers-windows.md, which requires a 0x4000-byte BAR0.
  */
 #define VIRTIO_PCI_MODERN_TRANSPORT_BAR0_REQUIRED_LEN 0x4000u
 
@@ -226,7 +226,7 @@ NTSTATUS VirtioPciModernTransportNotifyQueue(VIRTIO_PCI_MODERN_TRANSPORT *Transp
  * `VIRTIO_PCI_MSI_NO_VECTOR` disables MSI-X delivery **and** suppresses interrupts
  * for that source (no MSI-X message and no INTx fallback). To use legacy INTx + ISR
  * semantics, MSI-X must be disabled at the PCI layer (see
- * docs/windows7-virtio-driver-contract.md §1.8.4).
+ * wiki/areas/drivers-windows.md).
  */
 NTSTATUS VirtioPciModernTransportSetConfigMsixVector(VIRTIO_PCI_MODERN_TRANSPORT *Transport, UINT16 Vector);
 NTSTATUS VirtioPciModernTransportSetQueueMsixVector(VIRTIO_PCI_MODERN_TRANSPORT *Transport, UINT16 QueueIndex, UINT16 Vector);

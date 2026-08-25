@@ -593,6 +593,81 @@ fn nx_without_nxe_causes_reserved_bit_page_fault() {
     );
 }
 
+/// Non-present prototype-style PTEs (Windows soft-fault / session mapping encoding):
+/// Present=0, software "Prototype" bit 10 set, NX and high AVL bits set.
+/// Hardware must deliver #PF with P=0 (and RSVD=0), never treat the software
+/// bits as reserved. Observed live encoding: `0xf8a00087f6b80400` at session VA.
+#[test]
+fn long_mode_not_present_prototype_pte_is_not_rsvd() {
+    let mut mmu = Mmu::new();
+    let mut mem = TestMemory::new(0x40000);
+
+    let pml4_base = 0x1000u64;
+    let pdpt_base = 0x2000u64;
+    let pd_base = 0x3000u64;
+    let pt_base = 0x4000u64;
+    // P=0, Prototype(bit10)=1, NX=1, high AVL bits (matches Win7 session leaf).
+    let prototype_bit = 1u64 << 10;
+    let pte = 0xf8a0_0087_f6b8_0000u64 | prototype_bit; // Present clear
+
+    mem.write_u64_raw(pml4_base, pdpt_base | PTE_P64 | PTE_RW64);
+    mem.write_u64_raw(pdpt_base, pd_base | PTE_P64 | PTE_RW64);
+    mem.write_u64_raw(pd_base, pt_base | PTE_P64 | PTE_RW64);
+    mem.write_u64_raw(pt_base, pte);
+
+    mmu.set_cr3(pml4_base);
+    mmu.set_cr4(CR4_PAE);
+    mmu.set_efer(EFER_LME | EFER_NXE);
+    mmu.set_cr0(CR0_PG | CR0_WP);
+
+    let vaddr = 0x123u64;
+    let err = mmu
+        .translate(&mut mem, vaddr, AccessType::Read, 0)
+        .expect_err("prototype NP PTE must #PF");
+    match err {
+        TranslateFault::PageFault(pf) => {
+            assert_eq!(pf.addr, vaddr);
+            // P=0 (not present), RSVD=0 (bit 3). Write=0, user=0 for kernel read.
+            assert_eq!(pf.error_code & 1, 0, "P must be 0");
+            assert_eq!((pf.error_code >> 3) & 1, 0, "RSVD must be 0");
+        }
+        other => panic!("expected PageFault, got {other:?}"),
+    }
+}
+
+/// Win7 soft-fault PTEs often set high AVL / software bits (e.g. bit 59). Those are
+/// ignored on real hardware and must not raise RSVD #PF (bring-up livelock).
+#[test]
+fn long_mode_pte_bit59_avl_is_not_reserved() {
+    let mut mmu = Mmu::new();
+    let mut mem = TestMemory::new(0x40000);
+
+    let pml4_base = 0x1000u64;
+    let pdpt_base = 0x2000u64;
+    let pd_base = 0x3000u64;
+    let pt_base = 0x4000u64;
+    let page_base = 0x5000u64;
+    // Match the Win7 livelock encoding: NX | bit59 | P|RW|A|D|G-ish flags.
+    let bit59 = 1u64 << 59;
+    let pte = page_base | PTE_P64 | PTE_RW64 | PTE_NX | bit59 | 0x960;
+
+    mem.write_u64_raw(pml4_base, pdpt_base | PTE_P64 | PTE_RW64);
+    mem.write_u64_raw(pdpt_base, pd_base | PTE_P64 | PTE_RW64);
+    mem.write_u64_raw(pd_base, pt_base | PTE_P64 | PTE_RW64);
+    mem.write_u64_raw(pt_base, pte);
+
+    mmu.set_cr3(pml4_base);
+    mmu.set_cr4(CR4_PAE);
+    mmu.set_efer(EFER_LME | EFER_NXE);
+    mmu.set_cr0(CR0_PG | CR0_WP);
+
+    let vaddr = 0x123u64;
+    assert_eq!(
+        mmu.translate(&mut mem, vaddr, AccessType::Write, 0),
+        Ok(page_base + vaddr)
+    );
+}
+
 #[test]
 fn tlb_hit_avoids_page_walk_and_invlpg_forces_miss() {
     let mut mmu = Mmu::new();
@@ -639,6 +714,103 @@ fn tlb_hit_avoids_page_walk_and_invlpg_forces_miss() {
         Ok(page_base + vaddr)
     );
     assert!(mem.reads() > 0);
+}
+
+/// Win7 COW soft-fault livelock: TLB caches a present RO leaf, guest upgrades
+/// the leaf to RW without (or before) INVLPG is observed; the next write must
+/// re-walk and succeed instead of re-delivering #PF err=0x7 forever.
+#[test]
+fn cow_force_rw_upgrades_user_ro_leaf_on_write() {
+    let _guard = {
+        // Serialize env mutation if other tests race (best-effort).
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    };
+    std::env::set_var("AERO_COW_FORCE_RW", "1");
+
+    let mut mmu = Mmu::new();
+    let mut mem = TestMemory::new(0x40000);
+
+    let pml4_base = 0x1000u64;
+    let pdpt_base = 0x2000u64;
+    let pd_base = 0x3000u64;
+    let pt_base = 0x4000u64;
+    let page_base = 0x8000u64;
+
+    mem.write_u64_raw(pml4_base, pdpt_base | PTE_P64 | PTE_RW64 | PTE_US64);
+    mem.write_u64_raw(pdpt_base, pd_base | PTE_P64 | PTE_RW64 | PTE_US64);
+    mem.write_u64_raw(pd_base, pt_base | PTE_P64 | PTE_RW64 | PTE_US64);
+    // Present + User, not writable (COW / demand-zero).
+    mem.write_u64_raw(pt_base, page_base | PTE_P64 | PTE_US64);
+
+    mmu.set_cr3(pml4_base);
+    mmu.set_cr4(CR4_PAE);
+    mmu.set_efer(EFER_LME);
+    mmu.set_cr0(CR0_PG | CR0_WP);
+
+    let vaddr = 0x100u64;
+    // Write must upgrade leaf RW and succeed (no #PF).
+    assert_eq!(
+        mmu.translate(&mut mem, vaddr, AccessType::Write, 3),
+        Ok(page_base + vaddr)
+    );
+    let leaf = mem.read_u64_raw(pt_base);
+    assert_ne!(
+        leaf & PTE_RW64,
+        0,
+        "leaf must gain RW under AERO_COW_FORCE_RW"
+    );
+
+    std::env::remove_var("AERO_COW_FORCE_RW");
+}
+
+#[test]
+fn write_rewalks_after_stale_ro_tlb_when_pte_becomes_writable() {
+    let mut mmu = Mmu::new();
+    let mut mem = TestMemory::new(0x40000);
+
+    let pml4_base = 0x1000u64;
+    let pdpt_base = 0x2000u64;
+    let pd_base = 0x3000u64;
+    let pt_base = 0x4000u64;
+    let page_base = 0x8000u64;
+
+    mem.write_u64_raw(pml4_base, pdpt_base | PTE_P64 | PTE_RW64 | PTE_US64);
+    mem.write_u64_raw(pdpt_base, pd_base | PTE_P64 | PTE_RW64 | PTE_US64);
+    mem.write_u64_raw(pd_base, pt_base | PTE_P64 | PTE_RW64 | PTE_US64);
+    // Present + User, **not** writable (COW / PAGE_READONLY share).
+    mem.write_u64_raw(pt_base, page_base | PTE_P64 | PTE_US64);
+
+    mmu.set_cr3(pml4_base);
+    mmu.set_cr4(CR4_PAE);
+    mmu.set_efer(EFER_LME);
+    mmu.set_cr0(CR0_PG | CR0_WP);
+
+    let vaddr = 0x100u64;
+
+    // Fill DTLB with RO translation (read hit).
+    assert_eq!(
+        mmu.translate(&mut mem, vaddr, AccessType::Read, 3),
+        Ok(page_base + vaddr)
+    );
+
+    // Write while RO → #PF (present + write).
+    assert!(matches!(
+        mmu.translate(&mut mem, vaddr, AccessType::Write, 3),
+        Err(TranslateFault::PageFault(PageFault {
+            error_code,
+            ..
+        })) if error_code & 1 != 0 && (error_code >> 1) & 1 != 0
+    ));
+
+    // Guest soft-fault handler upgrades the leaf to writable (no INVLPG yet).
+    mem.write_u64_raw(pt_base, page_base | PTE_P64 | PTE_RW64 | PTE_US64);
+
+    // Next write must re-walk (drop stale RO TLB) and succeed.
+    assert_eq!(
+        mmu.translate(&mut mem, vaddr, AccessType::Write, 3),
+        Ok(page_base + vaddr)
+    );
 }
 
 #[test]
@@ -1871,4 +2043,40 @@ fn stats_counts_tlb_flushes_and_invalidations() {
     let s = mmu.stats().unwrap();
     assert_eq!(s.tlb_invpcid, 1);
     assert_eq!(s.tlb_flush_all, 1);
+}
+
+#[test]
+fn long_mode_2mb_large_page_does_not_require_cr4_pse() {
+    // Regression test: CR4.PSE gates 4MB pages ONLY in 32-bit paging.
+    // In PAE and IA-32e paging, 2MB (PDE.PS) large pages are unconditionally
+    // supported per SDM §4.1.4/§4.4.1/§4.5.2. The prior code treated PS as
+    // reserved when CR4.PSE=0 in PAE/long mode, causing spurious #PF(RSVD).
+    let mut mmu = Mmu::new();
+    let mut mem = TestMemory::new(0x40000);
+
+    let pml4_base = 0x1000u64;
+    let pdpt_base = 0x2000u64;
+    let pd_base = 0x3000u64;
+
+    // PML4E[0] -> PDPT
+    mem.write_u64_raw(pml4_base, pdpt_base | PTE_P64);
+    // PDPTE[0] -> PD
+    mem.write_u64_raw(pdpt_base, pd_base | PTE_P64);
+    // PDE[0] maps a 2MB large page at physical 0, PS=1.
+    mem.write_u64_raw(pd_base, PTE_P64 | PTE_RW64 | PTE_PS64);
+
+    mmu.set_cr3(pml4_base);
+    // Enable long mode WITHOUT CR4.PSE.
+    mmu.set_cr4(CR4_PAE);
+    mmu.set_efer(EFER_LME | EFER_NXE);
+    mmu.set_cr0(CR0_PG);
+
+    let vaddr = 0x0010_1234u64; // within first 2MB
+    let result = mmu.translate(&mut mem, vaddr, AccessType::Read, 0);
+    assert!(
+        result.is_ok(),
+        "2MB large page in long mode should not require CR4.PSE: {:?}",
+        result
+    );
+    assert_eq!(result.unwrap(), vaddr);
 }

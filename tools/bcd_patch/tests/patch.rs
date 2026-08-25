@@ -173,3 +173,65 @@ fn roundtrip_preserves_tree_when_already_patched() {
 
     assert_eq!(snap_before, snap_after);
 }
+
+/// Kernel debugging is what makes a stuck boot describe itself, so the elements
+/// that enable it have to be written exactly — Windows silently ignores a
+/// malformed transport rather than complaining.
+#[test]
+fn kernel_debug_writes_the_enable_flag_and_the_serial_transport() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("BCD");
+    std::fs::write(&store, build_minimal_bcd_hive(false)).unwrap();
+
+    patch_bcd_store(
+        &store,
+        PatchOpts {
+            kernel_debug: true,
+            ..PatchOpts::default()
+        },
+    )
+    .unwrap();
+
+    let hive = RegistryHive::from_file(&store).unwrap();
+    assert_boolean_element(&hive, OBJ_GLOBALSETTINGS, ELEM_DEBUGGER_ENABLED, true);
+    assert_integer_element(
+        &hive,
+        OBJ_GLOBALSETTINGS,
+        ELEM_DEBUGGER_TYPE,
+        DEBUGGER_TYPE_SERIAL,
+    );
+    assert_integer_element(
+        &hive,
+        OBJ_GLOBALSETTINGS,
+        ELEM_DEBUGGER_SERIAL_PORT,
+        DEBUGGER_DEFAULT_PORT,
+    );
+    assert_integer_element(
+        &hive,
+        OBJ_GLOBALSETTINGS,
+        ELEM_DEBUGGER_SERIAL_BAUDRATE,
+        DEBUGGER_DEFAULT_BAUDRATE,
+    );
+}
+
+/// Debugging changes how the guest boots, so it must stay off unless asked for.
+#[test]
+fn kernel_debug_is_not_written_by_default() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("BCD");
+    std::fs::write(&store, build_minimal_bcd_hive(false)).unwrap();
+
+    patch_bcd_store(&store, PatchOpts::default()).unwrap();
+
+    let hive = RegistryHive::from_file(&store).unwrap();
+    assert!(element_absent(
+        &hive,
+        OBJ_GLOBALSETTINGS,
+        ELEM_DEBUGGER_ENABLED
+    ));
+    assert!(element_absent(
+        &hive,
+        OBJ_GLOBALSETTINGS,
+        ELEM_DEBUGGER_TYPE
+    ));
+}

@@ -32,7 +32,7 @@ pub struct DiskBackendStats {
 /// today. For synchronous device/controller models and disk image formats, use
 /// `aero_storage::{StorageBackend, VirtualDisk}` instead.
 ///
-/// See `docs/20-storage-trait-consolidation.md`.
+/// See `wiki/areas/storage.md`.
 pub trait DiskBackend {
     fn capacity(&self) -> u64;
     fn stats(&self) -> DiskBackendStats;

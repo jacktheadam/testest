@@ -126,7 +126,7 @@ fn gen_random_trace(rng: &mut ChaCha8Rng, max_instrs: usize) -> TraceIr {
                 let base = gen_operand(rng, &values);
                 let index = gen_operand(rng, &values);
                 let scale = *[1u8, 2, 4, 8].choose(rng).unwrap();
-                let disp = rng.gen::<i32>() as i64;
+                let disp = rng.random::<i32>() as i64;
                 body.push(Instr::Addr {
                     dst,
                     base,

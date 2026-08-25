@@ -614,9 +614,8 @@ impl Identifiers {
 
         for (idx, file) in tree.files.iter().enumerate() {
             validate_joliet_level3_name_len(&file.name, false, &file.rel_path)?;
-            let encoded = encode_ucs2be(&file.name).with_context(|| {
-                format!("encode Joliet UCS-2 identifier for {}", file.rel_path)
-            })?;
+            let encoded = encode_ucs2be(&file.name)
+                .with_context(|| format!("encode Joliet UCS-2 identifier for {}", file.rel_path))?;
             validate_joliet_id_len(&file.name, false, &file.rel_path, &encoded)?;
             ids.joliet_file_id[idx] = encoded;
         }
@@ -837,10 +836,7 @@ struct DirectoryExtentArgs<'a> {
     source_date_epoch: i64,
 }
 
-fn build_directory_extent(
-    dir_idx: usize,
-    args: &DirectoryExtentArgs<'_>,
-) -> Result<Vec<u8>> {
+fn build_directory_extent(dir_idx: usize, args: &DirectoryExtentArgs<'_>) -> Result<Vec<u8>> {
     let mut records = Vec::new();
     let ts = iso_timestamp_7(args.source_date_epoch);
 
@@ -951,9 +947,7 @@ struct VolumeDescriptorArgs<'a> {
     joliet: Option<JolietLevel>,
 }
 
-fn build_volume_descriptor(
-    args: VolumeDescriptorArgs<'_>,
-) -> [u8; SECTOR_SIZE] {
+fn build_volume_descriptor(args: VolumeDescriptorArgs<'_>) -> [u8; SECTOR_SIZE] {
     let mut out = [0u8; SECTOR_SIZE];
     out[0] = args.vd_type;
     out[1..6].copy_from_slice(b"CD001");
@@ -1195,7 +1189,11 @@ mod tests {
                 bytes: b"hello".to_vec(),
             }],
         );
-        assert_eq!(iso_1800[pvd_offset() + 156 + 18], 0, "expected clamped year to be 1900");
+        assert_eq!(
+            iso_1800[pvd_offset() + 156 + 18],
+            0,
+            "expected clamped year to be 1900"
+        );
         assert_eq!(&iso_1800[pvd_offset() + 813..pvd_offset() + 817], b"1900");
     }
 

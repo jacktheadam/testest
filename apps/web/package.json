@@ -1,0 +1,37 @@
+{
+  "name": "aero-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "check:node": "node ../../scripts/check-node-version.mjs",
+    "build:wasm:microbench": "wasm-pack build --target web --release --no-opt --out-dir src/wasm/aero_microbench ../../crates/aero-microbench --locked",
+    "wasm:build:threaded": "node ./scripts/build_wasm.mjs threaded",
+    "wasm:build:single": "node ./scripts/build_wasm.mjs single",
+    "wasm:ensure": "node ./scripts/ensure_wasm.mjs",
+    "wasm:build": "pnpm run wasm:build:single && pnpm run wasm:build:threaded",
+    "build:wasm": "pnpm run build:wasm:microbench && pnpm run wasm:ensure",
+    "predev": "pnpm run check:node && pnpm run build:wasm",
+    "dev": "vite",
+    "prebuild": "pnpm run check:node && pnpm run build:wasm",
+    "build": "vite build",
+    "preview": "vite preview",
+    "serve": "vite preview",
+    "typecheck": "tsc -p tsconfig.json",
+    "pretest": "pnpm run check:node",
+    "test": "node ./scripts/vitest_grep_shim.mjs",
+    "pretest:unit": "pnpm run check:node",
+    "test:unit": "node ./scripts/vitest_grep_shim.mjs",
+    "test:unit:watch": "vitest",
+    "pretest:unit:coverage": "pnpm run check:node",
+    "test:unit:coverage": "node ./scripts/vitest_grep_shim.mjs --coverage",
+    "pretest:node": "pnpm run check:node",
+    "test:node": "node --test --experimental-strip-types --import ../../scripts/register-ts-strip-loader.mjs test/*.test.ts",
+    "wasm:build:dev": "node ./scripts/build_wasm.mjs single dev",
+    "wasm:build:release": "pnpm run wasm:build",
+    "wasm:size": "node ./scripts/wasm-size.mjs"
+  }
+}

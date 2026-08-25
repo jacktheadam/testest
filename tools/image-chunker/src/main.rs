@@ -3566,18 +3566,23 @@ mod tests {
         headers: Vec<(String, String)>,
     }
 
-    async fn start_test_http_server(
-        responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        >,
-    ) -> Result<(
+    /// What a test server replies with: status, headers, body.
+    type TestHttpResponse = (u16, Vec<(String, String)>, Vec<u8>);
+
+    /// A handler the test server calls for each request. `Arc` because the server task and the
+    /// test that configured it both hold it, `Send + Sync + 'static` because it crosses into a
+    /// spawned task.
+    type TestHttpResponder =
+        Arc<dyn Fn(TestHttpRequest) -> TestHttpResponse + Send + Sync + 'static>;
+
+    /// The address the test server bound to, its shutdown signal, and its task handle.
+    type TestHttpServer = (
         String,
         tokio::sync::oneshot::Sender<()>,
         tokio::task::JoinHandle<()>,
-    )> {
+    );
+
+    async fn start_test_http_server(responder: TestHttpResponder) -> Result<TestHttpServer> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
 
@@ -3725,12 +3730,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_with_retry_does_not_retry_on_oversized_response() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 requests.fetch_add(1, Ordering::SeqCst);
@@ -3765,12 +3765,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_with_retry_retries_on_429() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 let n = requests.fetch_add(1, Ordering::SeqCst);
@@ -3802,12 +3797,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_with_retry_retries_on_408() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 let n = requests.fetch_add(1, Ordering::SeqCst);
@@ -3839,12 +3829,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_with_retry_does_not_retry_on_404() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 requests.fetch_add(1, Ordering::SeqCst);
@@ -3877,12 +3862,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_with_retry_retries_on_transient_500() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 let n = requests.fetch_add(1, Ordering::SeqCst);
@@ -4052,12 +4032,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_optional_with_retry_returns_none_on_404() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 requests.fetch_add(1, Ordering::SeqCst);
@@ -4088,12 +4063,7 @@ mod tests {
     async fn download_http_bytes_optional_with_retry_does_not_retry_on_oversized_response(
     ) -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 requests.fetch_add(1, Ordering::SeqCst);
@@ -4129,12 +4099,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_optional_with_retry_retries_on_transient_500() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 let n = requests.fetch_add(1, Ordering::SeqCst);
@@ -4167,12 +4132,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_optional_with_retry_retries_on_429() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 let n = requests.fetch_add(1, Ordering::SeqCst);
@@ -4205,12 +4165,7 @@ mod tests {
     #[tokio::test]
     async fn download_http_bytes_optional_with_retry_retries_on_408() -> Result<()> {
         let requests = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let requests = Arc::clone(&requests);
             Arc::new(move |_req: TestHttpRequest| {
                 let n = requests.fetch_add(1, Ordering::SeqCst);
@@ -6775,15 +6730,11 @@ mod tests {
         )?;
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
         let result = verify(VerifyArgs {
@@ -6835,15 +6786,11 @@ mod tests {
         )?;
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
         let result = verify(VerifyArgs {
@@ -6910,12 +6857,7 @@ mod tests {
         let requests: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let requests_for_responder = Arc::clone(&requests);
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| {
+        let responder: TestHttpResponder = Arc::new(move |req: TestHttpRequest| {
             requests_for_responder
                 .lock()
                 .expect("lock requests")
@@ -7767,17 +7709,13 @@ mod tests {
         )?;
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -7827,17 +7765,13 @@ mod tests {
         manifest.chunk_index_width = 1;
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            "/chunks/0.bin" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/1.bin" => (200, Vec::new(), chunk1.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                "/chunks/0.bin" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/1.bin" => (200, Vec::new(), chunk1.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -7888,17 +7822,13 @@ mod tests {
         };
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -7963,17 +7893,13 @@ mod tests {
         };
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -8032,17 +7958,13 @@ mod tests {
         };
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -8092,17 +8014,13 @@ mod tests {
         };
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -8155,12 +8073,7 @@ mod tests {
         let chunk_head_requests = Arc::new(AtomicU64::new(0));
         let chunk_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
             let chunk_get_requests = Arc::clone(&chunk_get_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -8255,12 +8168,7 @@ mod tests {
         let chunk_range_get_requests = Arc::new(AtomicU64::new(0));
         let chunk_non_range_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
             let chunk_range_get_requests = Arc::clone(&chunk_range_get_requests);
             let chunk_non_range_get_requests = Arc::clone(&chunk_non_range_get_requests);
@@ -8372,12 +8280,7 @@ mod tests {
         let chunk_head_requests = Arc::new(AtomicU64::new(0));
         let chunk_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
             let chunk_get_requests = Arc::clone(&chunk_get_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -8478,12 +8381,7 @@ mod tests {
         let chunk_head_requests = Arc::new(AtomicU64::new(0));
         let chunk_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
             let chunk_get_requests = Arc::clone(&chunk_get_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -8575,12 +8473,7 @@ mod tests {
         let chunk_head_requests = Arc::new(AtomicU64::new(0));
         let chunk_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
             let chunk_get_requests = Arc::clone(&chunk_get_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -8672,12 +8565,7 @@ mod tests {
         let chunk_head_requests = Arc::new(AtomicU64::new(0));
         let chunk_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
             let chunk_get_requests = Arc::clone(&chunk_get_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -8768,12 +8656,7 @@ mod tests {
         let chunk_head_requests = Arc::new(AtomicU64::new(0));
         let chunk_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
             let chunk_get_requests = Arc::clone(&chunk_get_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -8865,12 +8748,7 @@ mod tests {
         let chunk_head_requests = Arc::new(AtomicU64::new(0));
         let chunk_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
             let chunk_get_requests = Arc::clone(&chunk_get_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -8971,17 +8849,13 @@ mod tests {
         };
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
-            "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),
+                "/chunks/00000000.bin" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/00000001.bin" => (200, Vec::new(), chunk1.clone()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -9041,12 +8915,7 @@ mod tests {
         let requests: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let requests_for_responder = Arc::clone(&requests);
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| {
+        let responder: TestHttpResponder = Arc::new(move |req: TestHttpRequest| {
             requests_for_responder
                 .lock()
                 .expect("lock requests")
@@ -9127,23 +8996,19 @@ mod tests {
 
         let token = "token=abc";
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            // The query must be present on both manifest and chunk requests.
-            "/manifest.json?token=abc" => (200, Vec::new(), manifest_bytes.clone()),
-            "/chunks/00000000.bin?token=abc" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/00000001.bin?token=abc" => (200, Vec::new(), chunk1.clone()),
-            // If the query is missing, make it a hard failure so the test would fail without
-            // query preservation logic.
-            "/chunks/00000000.bin" | "/chunks/00000001.bin" => {
-                (401, Vec::new(), b"missing token".to_vec())
-            }
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                // The query must be present on both manifest and chunk requests.
+                "/manifest.json?token=abc" => (200, Vec::new(), manifest_bytes.clone()),
+                "/chunks/00000000.bin?token=abc" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/00000001.bin?token=abc" => (200, Vec::new(), chunk1.clone()),
+                // If the query is missing, make it a hard failure so the test would fail without
+                // query preservation logic.
+                "/chunks/00000000.bin" | "/chunks/00000001.bin" => {
+                    (401, Vec::new(), b"missing token".to_vec())
+                }
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -9197,12 +9062,7 @@ mod tests {
         let head_requests = Arc::new(AtomicU64::new(0));
         let get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let head_requests = Arc::clone(&head_requests);
             let get_requests = Arc::clone(&get_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -9304,20 +9164,16 @@ mod tests {
 
         let token = "token=abc";
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
-            "/manifest.json?token=abc" => (200, Vec::new(), manifest_bytes.clone()),
-            "/meta.json?token=abc" => (200, Vec::new(), meta_bytes.clone()),
-            "/chunks/00000000.bin?token=abc" => (200, Vec::new(), chunk0.clone()),
-            "/chunks/00000001.bin?token=abc" => (200, Vec::new(), chunk1.clone()),
-            // Fail hard if the verifier drops the query.
-            "/meta.json" => (401, Vec::new(), b"missing token".to_vec()),
-            _ => (404, Vec::new(), b"not found".to_vec()),
-        });
+        let responder: TestHttpResponder =
+            Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
+                "/manifest.json?token=abc" => (200, Vec::new(), manifest_bytes.clone()),
+                "/meta.json?token=abc" => (200, Vec::new(), meta_bytes.clone()),
+                "/chunks/00000000.bin?token=abc" => (200, Vec::new(), chunk0.clone()),
+                "/chunks/00000001.bin?token=abc" => (200, Vec::new(), chunk1.clone()),
+                // Fail hard if the verifier drops the query.
+                "/meta.json" => (401, Vec::new(), b"missing token".to_vec()),
+                _ => (404, Vec::new(), b"not found".to_vec()),
+            });
 
         let (base_url, shutdown_tx, server_handle) = start_test_http_server(responder).await?;
 
@@ -9367,12 +9223,7 @@ mod tests {
         let manifest_requests = Arc::new(AtomicU64::new(0));
         let chunk0_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let manifest_requests = Arc::clone(&manifest_requests);
             let chunk0_requests = Arc::clone(&chunk0_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
@@ -9451,12 +9302,7 @@ mod tests {
         let manifest_requests = Arc::new(AtomicU64::new(0));
         let chunk_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let unauthorized_requests = Arc::clone(&unauthorized_requests);
             let manifest_requests = Arc::clone(&manifest_requests);
             let chunk_requests = Arc::clone(&chunk_requests);
@@ -9577,12 +9423,7 @@ mod tests {
         let chunk_head_requests = Arc::new(AtomicU64::new(0));
         let chunk_get_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let unauthorized_requests = Arc::clone(&unauthorized_requests);
             let manifest_requests = Arc::clone(&manifest_requests);
             let chunk_head_requests = Arc::clone(&chunk_head_requests);
@@ -9719,12 +9560,7 @@ mod tests {
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
         let checked = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let checked = Arc::clone(&checked);
             Arc::new(move |req: TestHttpRequest| {
                 let encoding = req
@@ -9800,12 +9636,7 @@ mod tests {
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize manifest")?;
 
         let checked = Arc::new(AtomicU64::new(0));
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let checked = Arc::clone(&checked);
             Arc::new(move |req: TestHttpRequest| {
                 let encoding = req
@@ -9882,12 +9713,7 @@ mod tests {
 
         let chunk0_requests = Arc::new(AtomicU64::new(0));
 
-        let responder: Arc<
-            dyn Fn(TestHttpRequest) -> (u16, Vec<(String, String)>, Vec<u8>)
-                + Send
-                + Sync
-                + 'static,
-        > = {
+        let responder: TestHttpResponder = {
             let chunk0_requests = Arc::clone(&chunk0_requests);
             Arc::new(move |req: TestHttpRequest| match req.path.as_str() {
                 "/manifest.json" => (200, Vec::new(), manifest_bytes.clone()),

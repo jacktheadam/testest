@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { checkThreadedWasmBundle } from "./util/wasm_bundle";
-import { DEFAULT_EXTERNAL_HUB_PORT_COUNT, UHCI_EXTERNAL_HUB_FIRST_DYNAMIC_PORT } from "../../web/src/usb/uhci_external_hub";
+import { DEFAULT_EXTERNAL_HUB_PORT_COUNT, UHCI_EXTERNAL_HUB_FIRST_DYNAMIC_PORT } from "../../apps/web/src/usb/uhci_external_hub";
 
 test("runtime UHCI: WebHID + WebUSB passthrough are guest-visible (NAK while pending)", async ({ page }) => {
   // This spec exercises a full UHCI runtime stack (PCI config, control transfers, interrupt IN/OUT,
@@ -9,7 +9,7 @@ test("runtime UHCI: WebHID + WebUSB passthrough are guest-visible (NAK while pen
   // enough that the TD-level polling loops take >20s, so keep the per-test budget generous.
   test.setTimeout(90_000);
 
-  await page.goto(`/`, { waitUntil: "load" });
+  await page.goto(`/apps/web/`, { waitUntil: "load" });
 
   const bundle = await checkThreadedWasmBundle(page);
   if (!bundle.ok) {
@@ -39,9 +39,9 @@ test("runtime UHCI: WebHID + WebUSB passthrough are guest-visible (NAK while pen
 
   const result = await page.evaluate(async (opts) => {
     const { dynamicHubPort, externalHubPortCount } = opts as { dynamicHubPort: number; externalHubPortCount: number };
-    const { allocateSharedMemorySegments, createSharedMemoryViews } = await import("/web/src/runtime/shared_layout.ts");
-    const { MessageType } = await import("/web/src/runtime/protocol.ts");
-    const { emptySetBootDisksMessage } = await import("/web/src/runtime/boot_disks_protocol.ts");
+    const { allocateSharedMemorySegments, createSharedMemoryViews } = await import("/apps/web/src/runtime/shared_layout.ts");
+    const { MessageType } = await import("/apps/web/src/runtime/protocol.ts");
+    const { emptySetBootDisksMessage } = await import("/apps/web/src/runtime/boot_disks_protocol.ts");
 
     // This spec uses a few low guest RAM addresses for UHCI frame/TD buffers, so a minimal guest
     // RAM size is sufficient and keeps parallel Playwright runs from allocating unnecessary memory.
@@ -56,11 +56,11 @@ test("runtime UHCI: WebHID + WebUSB passthrough are guest-visible (NAK while pen
     // WebKit can fail to load large module workers directly via `new Worker(httpUrl, { type: "module" })`
     // (it emits an `error` event without useful details). Wrap the module entrypoint in a tiny
     // blob-based module worker and import the real worker from there for cross-browser stability.
-    const ioWorkerEntrypoint = new URL("/web/src/workers/io.worker.ts", location.href).toString();
+    const ioWorkerEntrypoint = new URL("/apps/web/src/workers/io.worker.ts", location.href).toString();
     const ioWorkerWrapperUrl = URL.createObjectURL(
       new Blob(
         [
-          `\n            (async () => {\n              const MAX_ERROR_CHARS = 512;\n              const fallbackFormatErr = (err) => {\n                const msg = err instanceof Error ? err.message : err;\n                return String(msg ?? \"Error\")\n                  .replace(/[\\x00-\\x1F\\x7F]/g, \" \")\n                  .replace(/\\s+/g, \" \")\n                  .trim()\n                  .slice(0, MAX_ERROR_CHARS);\n              };\n\n              let formatErr = fallbackFormatErr;\n              try {\n                const mod = await import(\"/web/src/text.ts\");\n                const formatOneLineUtf8 = mod?.formatOneLineUtf8;\n                if (typeof formatOneLineUtf8 === \"function\") {\n                  formatErr = (err) => {\n                    const msg = err instanceof Error ? err.message : err;\n                    return formatOneLineUtf8(String(msg ?? \"\"), 512) || \"Error\";\n                  };\n                }\n              } catch {\n                // ignore: keep fallbackFormatErr\n              }\n\n              try {\n                await import(${JSON.stringify(ioWorkerEntrypoint)});\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_imported\" }), 0);\n              } catch (err) {\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_import_failed\", message: formatErr(err) }), 0);\n              }\n            })();\n          `,
+          `\n            (async () => {\n              const MAX_ERROR_CHARS = 512;\n              const fallbackFormatErr = (err) => {\n                const msg = err instanceof Error ? err.message : err;\n                return String(msg ?? \"Error\")\n                  .replace(/[\\x00-\\x1F\\x7F]/g, \" \")\n                  .replace(/\\s+/g, \" \")\n                  .trim()\n                  .slice(0, MAX_ERROR_CHARS);\n              };\n\n              let formatErr = fallbackFormatErr;\n              try {\n                const mod = await import(\"/packages/transport-safety/src/text.js\");\n                const formatOneLineUtf8 = mod?.formatOneLineUtf8;\n                if (typeof formatOneLineUtf8 === \"function\") {\n                  formatErr = (err) => {\n                    const msg = err instanceof Error ? err.message : err;\n                    return formatOneLineUtf8(String(msg ?? \"\"), 512) || \"Error\";\n                  };\n                }\n              } catch {\n                // ignore: keep fallbackFormatErr\n              }\n\n              try {\n                await import(${JSON.stringify(ioWorkerEntrypoint)});\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_imported\" }), 0);\n              } catch (err) {\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_import_failed\", message: formatErr(err) }), 0);\n              }\n            })();\n          `,
         ],
         { type: "text/javascript" },
       ),
@@ -194,9 +194,9 @@ test("runtime UHCI: WebHID + WebUSB passthrough are guest-visible (NAK while pen
     const guestSab = segments.guestMemory.buffer as unknown as SharedArrayBuffer;
 
      const guestWorkerCode = `
-        import { openRingByKind } from "${location.origin}/web/src/ipc/ipc.ts";
-        import { IO_IPC_CMD_QUEUE_KIND, IO_IPC_EVT_QUEUE_KIND } from "${location.origin}/web/src/runtime/shared_layout.ts";
-        import { AeroIpcIoClient } from "${location.origin}/web/src/io/ipc/aero_ipc_io.ts";
+        import { openRingByKind } from "${location.origin}/apps/web/src/ipc/ipc.ts";
+        import { IO_IPC_CMD_QUEUE_KIND, IO_IPC_EVT_QUEUE_KIND } from "${location.origin}/apps/web/src/runtime/shared_layout.ts";
+        import { AeroIpcIoClient } from "${location.origin}/apps/web/src/io/ipc/aero_ipc_io.ts";
 
         let UHCI_BASE = 0;
         const HUB_DYNAMIC_PORT = ${dynamicHubPort};
@@ -858,7 +858,7 @@ test("runtime UHCI: WebHID + WebUSB passthrough are guest-visible (NAK while pen
       const wrapperUrl = URL.createObjectURL(
         new Blob(
           [
-            `\n              (async () => {\n                const MAX_ERROR_CHARS = 512;\n                const fallbackFormatErr = (err) => {\n                  const msg = err instanceof Error ? err.message : err;\n                  return String(msg ?? \"Error\")\n                    .replace(/[\\x00-\\x1F\\x7F]/g, \" \")\n                    .replace(/\\s+/g, \" \")\n                    .trim()\n                    .slice(0, MAX_ERROR_CHARS);\n                };\n\n                let formatErr = fallbackFormatErr;\n                try {\n                  const mod = await import(\"/web/src/text.ts\");\n                  const formatOneLineUtf8 = mod?.formatOneLineUtf8;\n                  if (typeof formatOneLineUtf8 === \"function\") {\n                    formatErr = (err) => {\n                      const msg = err instanceof Error ? err.message : err;\n                      return formatOneLineUtf8(String(msg ?? \"\"), 512) || \"Error\";\n                    };\n                  }\n                } catch {\n                  // ignore: keep fallbackFormatErr\n                }\n\n                try {\n                  await import(${JSON.stringify(entrypoint)});\n                  setTimeout(() => self.postMessage({ type: \"__aero_guest_worker_imported\" }), 0);\n                } catch (err) {\n                  setTimeout(() => self.postMessage({ type: \"__aero_guest_worker_import_failed\", message: formatErr(err) }), 0);\n                }\n              })();\n            `,
+            `\n              (async () => {\n                const MAX_ERROR_CHARS = 512;\n                const fallbackFormatErr = (err) => {\n                  const msg = err instanceof Error ? err.message : err;\n                  return String(msg ?? \"Error\")\n                    .replace(/[\\x00-\\x1F\\x7F]/g, \" \")\n                    .replace(/\\s+/g, \" \")\n                    .trim()\n                    .slice(0, MAX_ERROR_CHARS);\n                };\n\n                let formatErr = fallbackFormatErr;\n                try {\n                  const mod = await import(\"/packages/transport-safety/src/text.js\");\n                  const formatOneLineUtf8 = mod?.formatOneLineUtf8;\n                  if (typeof formatOneLineUtf8 === \"function\") {\n                    formatErr = (err) => {\n                      const msg = err instanceof Error ? err.message : err;\n                      return formatOneLineUtf8(String(msg ?? \"\"), 512) || \"Error\";\n                    };\n                  }\n                } catch {\n                  // ignore: keep fallbackFormatErr\n                }\n\n                try {\n                  await import(${JSON.stringify(entrypoint)});\n                  setTimeout(() => self.postMessage({ type: \"__aero_guest_worker_imported\" }), 0);\n                } catch (err) {\n                  setTimeout(() => self.postMessage({ type: \"__aero_guest_worker_import_failed\", message: formatErr(err) }), 0);\n                }\n              })();\n            `,
           ],
           { type: "text/javascript" },
         ),

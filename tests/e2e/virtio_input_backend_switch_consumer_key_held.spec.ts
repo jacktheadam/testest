@@ -4,7 +4,7 @@ import { checkThreadedWasmBundle } from "./util/wasm_bundle";
 
 test("IO worker does not switch keyboard backend while a Consumer Control key is held (prevents stuck media keys)", async ({ page }) => {
   test.setTimeout(60_000);
-  await page.goto("/", { waitUntil: "load" });
+  await page.goto("/apps/web/", { waitUntil: "load" });
 
   const bundle = await checkThreadedWasmBundle(page);
   if (!bundle.ok) {
@@ -38,10 +38,10 @@ test("IO worker does not switch keyboard backend while a Consumer Control key is
   test.skip(!support.wasmThreads, "Shared WebAssembly.Memory (WASM threads) is unavailable.");
 
   const result = await page.evaluate(async () => {
-    const { allocateSharedMemorySegments, createSharedMemoryViews, StatusIndex } = await import("/web/src/runtime/shared_layout.ts");
-    const { InputEventQueue } = await import("/web/src/input/event_queue.ts");
-    const { MessageType } = await import("/web/src/runtime/protocol.ts");
-    const { emptySetBootDisksMessage } = await import("/web/src/runtime/boot_disks_protocol.ts");
+    const { allocateSharedMemorySegments, createSharedMemoryViews, StatusIndex } = await import("/apps/web/src/runtime/shared_layout.ts");
+    const { InputEventQueue } = await import("/apps/web/src/input/event_queue.ts");
+    const { MessageType } = await import("/apps/web/src/runtime/protocol.ts");
+    const { emptySetBootDisksMessage } = await import("/apps/web/src/runtime/boot_disks_protocol.ts");
 
     // This test only needs a tiny guest RAM window for virtqueue descriptors/buffers.
     //
@@ -61,11 +61,11 @@ test("IO worker does not switch keyboard backend while a Consumer Control key is
     // WebKit can fail to load large module workers directly via `new Worker(httpUrl, { type: "module" })`
     // (it emits an `error` event without useful details). Wrap the module entrypoint in a tiny
     // blob-based module worker and import the real worker from there for cross-browser stability.
-    const ioWorkerEntrypoint = new URL("/web/src/workers/io.worker.ts", location.href).toString();
+    const ioWorkerEntrypoint = new URL("/apps/web/src/workers/io.worker.ts", location.href).toString();
     const ioWorkerWrapperUrl = URL.createObjectURL(
       new Blob(
         [
-          `\n            (async () => {\n              const MAX_ERROR_CHARS = 512;\n              const fallbackFormatErr = (err) => {\n                const msg = err instanceof Error ? err.message : err;\n                return String(msg ?? \"Error\")\n                  .replace(/[\\x00-\\x1F\\x7F]/g, \" \")\n                  .replace(/\\s+/g, \" \")\n                  .trim()\n                  .slice(0, MAX_ERROR_CHARS);\n              };\n\n              let formatErr = fallbackFormatErr;\n              try {\n                const mod = await import(\"/web/src/text.ts\");\n                const formatOneLineUtf8 = mod?.formatOneLineUtf8;\n                if (typeof formatOneLineUtf8 === \"function\") {\n                  formatErr = (err) => {\n                    const msg = err instanceof Error ? err.message : err;\n                    return formatOneLineUtf8(String(msg ?? \"\"), 512) || \"Error\";\n                  };\n                }\n              } catch {\n                // ignore: keep fallbackFormatErr\n              }\n\n              try {\n                await import(${JSON.stringify(ioWorkerEntrypoint)});\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_imported\" }), 0);\n              } catch (err) {\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_import_failed\", message: formatErr(err) }), 0);\n              }\n            })();\n         `,
+          `\n            (async () => {\n              const MAX_ERROR_CHARS = 512;\n              const fallbackFormatErr = (err) => {\n                const msg = err instanceof Error ? err.message : err;\n                return String(msg ?? \"Error\")\n                  .replace(/[\\x00-\\x1F\\x7F]/g, \" \")\n                  .replace(/\\s+/g, \" \")\n                  .trim()\n                  .slice(0, MAX_ERROR_CHARS);\n              };\n\n              let formatErr = fallbackFormatErr;\n              try {\n                const mod = await import(\"/packages/transport-safety/src/text.js\");\n                const formatOneLineUtf8 = mod?.formatOneLineUtf8;\n                if (typeof formatOneLineUtf8 === \"function\") {\n                  formatErr = (err) => {\n                    const msg = err instanceof Error ? err.message : err;\n                    return formatOneLineUtf8(String(msg ?? \"\"), 512) || \"Error\";\n                  };\n                }\n              } catch {\n                // ignore: keep fallbackFormatErr\n              }\n\n              try {\n                await import(${JSON.stringify(ioWorkerEntrypoint)});\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_imported\" }), 0);\n              } catch (err) {\n                setTimeout(() => self.postMessage({ type: \"__aero_io_worker_import_failed\", message: formatErr(err) }), 0);\n              }\n            })();\n         `,
         ],
         { type: "text/javascript" },
       ),
@@ -214,9 +214,9 @@ test("IO worker does not switch keyboard backend while a Consumer Control key is
     };
 
     const cpuWorkerCode = `
-      import { openRingByKind } from "${location.origin}/web/src/ipc/ipc.ts";
-      import { queueKind } from "${location.origin}/web/src/ipc/layout.ts";
-      import { AeroIpcIoClient } from "${location.origin}/web/src/io/ipc/aero_ipc_io.ts";
+      import { openRingByKind } from "${location.origin}/apps/web/src/ipc/ipc.ts";
+      import { queueKind } from "${location.origin}/apps/web/src/ipc/layout.ts";
+      import { AeroIpcIoClient } from "${location.origin}/apps/web/src/io/ipc/aero_ipc_io.ts";
 
       const PCI_ADDR = 0x0cf8;
       const PCI_DATA = 0x0cfc;
@@ -243,7 +243,7 @@ test("IO worker does not switch keyboard backend while a Consumer Control key is
       let formatErr = fallbackFormatErr;
       (async () => {
         try {
-          const mod = await import("${location.origin}/web/src/text.ts");
+          const mod = await import("${location.origin}/packages/transport-safety/src/text.js");
           const formatOneLineUtf8 = mod?.formatOneLineUtf8;
           if (typeof formatOneLineUtf8 === "function") {
             formatErr = (err) => {

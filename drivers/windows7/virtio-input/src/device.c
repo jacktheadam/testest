@@ -25,7 +25,7 @@ static EVT_WDF_WORKITEM VioInputEvtConfigChangeWorkItem;
  *
  * Aero contract v1 requires virtio-input devices to implement
  * VIRTIO_INPUT_CFG_EV_BITS and advertise a minimum set of supported event
- * codes (see docs/windows7-virtio-driver-contract.md §3.3.4–§3.3.5).
+ * codes (see wiki/areas/drivers-windows.md §3.3.4–§3.3.5).
  *
  * The device returns up to 128 bytes of little-endian bitmaps. Bit numbering is
  * per the virtio-input spec (Linux input ABI): bit <code> corresponds to the
@@ -130,7 +130,7 @@ static NTSTATUS VioInputValidateAndCacheQueueNotifyAddresses(_Inout_ PDEVICE_CON
     }
 
     /*
-     * Contract v1 requires `queue_notify_off(q) = q` (docs/windows7-virtio-driver-contract.md §1.6).
+     * Contract v1 requires `queue_notify_off(q) = q` (wiki/areas/drivers-windows.md §1.6).
      *
      * Validate this so we can safely use the cached notify addresses from hot
      * paths without taking the CommonCfg lock.

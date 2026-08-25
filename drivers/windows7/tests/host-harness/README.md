@@ -2,7 +2,7 @@
 
 End-to-end virtio-input validation plan (device model + driver + web runtime routing):
 
-- [`docs/virtio-input-test-plan.md`](../../../../docs/virtio-input-test-plan.md) (from repo root)
+- [`wiki/areas/usb-input.md`](wiki/areas/usb-input.md#94-validation-ladder) (from repo root)
 
 This directory contains the host-side scripts used to run the Windows 7 guest selftests under QEMU and return a deterministic PASS/FAIL exit code.
 
@@ -1735,7 +1735,7 @@ advertise `REV_01` (the shipped INFs are revision-gated, and some drivers also v
 
 The harness sets `disable-legacy=on` for virtio-net/virtio-blk/virtio-input (and virtio-snd when enabled) so QEMU does **not** expose
 the legacy I/O-port transport (transitional devices enumerate with the older `0x1000..` PCI Device IDs such as `1AF4:1000`, `1AF4:1001`, and `1AF4:1011`). This matches
-[`docs/windows7-virtio-driver-contract.md`](../../../../docs/windows7-virtio-driver-contract.md) (`AERO-W7-VIRTIO` v1),
+[`wiki/areas/drivers-windows.md`](wiki/areas/drivers-windows.md#the-aero-w7-virtio-device-contract-v1) (`AERO-W7-VIRTIO` v1),
 which is modern-only.
 
 When `-WithVirtioSnd` / `--with-virtio-snd` is enabled, the harness also forces `disable-legacy=on` and

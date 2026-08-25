@@ -29,7 +29,7 @@ const MAX_OVERLAY_BLOCK_SIZE_BYTES: u32 = 64 * 1024 * 1024;
 /// New synchronous disk code in this repo should prefer [`aero_storage::VirtualDisk`] and adapt to
 /// this snapshot trait using [`AeroStorageDiskBackend`] when needed.
 ///
-/// See `docs/20-storage-trait-consolidation.md`.
+/// See `wiki/areas/storage.md`.
 pub trait DiskBackend {
     fn read_at(&self, offset: u64, buf: &mut [u8]);
     fn write_at(&mut self, offset: u64, data: &[u8]);

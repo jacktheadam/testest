@@ -56,7 +56,7 @@ fn input_e2e_appends_extra_playwright_args_after_spec_list() {
     let log_path = tmp.path().join("argv.log");
 
     write_fake_argv_logger(&bin_dir.join("cargo"), "cargo").expect("write fake cargo");
-    write_fake_argv_logger(&bin_dir.join("npm"), "npm").expect("write fake npm");
+    write_fake_argv_logger(&bin_dir.join("pnpm"), "pnpm").expect("write fake npm");
     write_fake_argv_logger(&bin_dir.join("node"), "node").expect("write fake node");
 
     let orig_path = std::env::var("PATH").unwrap_or_default();
@@ -78,7 +78,7 @@ fn input_e2e_appends_extra_playwright_args_after_spec_list() {
     let npm_e2e = invocations
         .iter()
         .find(|argv| {
-            argv.first().map(|s| s.as_str()) == Some("npm")
+            argv.first().map(|s| s.as_str()) == Some("pnpm")
                 && argv.contains(&"test:e2e".to_string())
         })
         .expect("expected an npm test:e2e invocation");

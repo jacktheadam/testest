@@ -35,15 +35,14 @@ fn configure_virtio_net_pic(
     let pci_intx = m.pci_intx_router().expect("pc platform enabled");
 
     let bdf = aero_devices::pci::profile::VIRTIO_NET.bdf;
-    let gsi = pci_intx.borrow().gsi_for_intx(bdf, PciInterruptPin::IntA);
-    assert!(
-        gsi < 16,
-        "expected virtio-net INTx to route to legacy PIC IRQ (<16), got gsi={gsi}"
-    );
-    let expected_vector = if gsi < 8 {
-        0x20u8.wrapping_add(gsi as u8)
+    let irq = pci_intx
+        .borrow()
+        .legacy_pic_irq_for_intx(bdf, PciInterruptPin::IntA)
+        .expect("virtio-net INTx should have a legacy PIC compatibility route");
+    let expected_vector = if irq < 8 {
+        0x20u8.wrapping_add(irq)
     } else {
-        0x28u8.wrapping_add((gsi as u8).wrapping_sub(8))
+        0x28u8.wrapping_add(irq.wrapping_sub(8))
     };
 
     // Configure PIC offsets and unmask only the routed IRQ (and cascade if needed).
@@ -54,9 +53,7 @@ fn configure_virtio_net_pic(
             ints.pic_mut().set_masked(irq, true);
         }
         ints.pic_mut().set_masked(2, false);
-        if let Ok(irq) = u8::try_from(gsi) {
-            ints.pic_mut().set_masked(irq, false);
-        }
+        ints.pic_mut().set_masked(irq, false);
     }
 
     (interrupts, expected_vector)

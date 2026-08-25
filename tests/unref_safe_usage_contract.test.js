@@ -9,9 +9,11 @@ function findFirstOptionalUnrefCallIndex(maskedSource) {
   return maskedSource.indexOf(".unref?.(");
 }
 
-test("js_source_scan: src/ must not use .unref?.() (use unrefBestEffort)", async () => {
+test("js_source_scan: browser host must not use .unref?.() (use unrefBestEffort)", async () => {
   const repoRoot = process.cwd();
-  const sources = await collectJsTsSourceFiles(repoRoot, ["src"]);
+  // The host moved from a repo-root `src/` to `apps/web/`. Scanning the old path
+  // found zero files and passed vacuously.
+  const sources = await collectJsTsSourceFiles(repoRoot, ["apps/web/src"]);
 
   const offenders = [];
   for (const rel of sources) {

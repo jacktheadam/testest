@@ -9,7 +9,7 @@
 //!   (`tail_reserve`) and an in-order commit pointer (`tail_commit`).
 //! - Can be used as a simpler SPSC queue by having a single producer.
 //!
-//! The JS/TS implementation mirrors this exactly. See `docs/ipc-protocol.md`.
+//! The JS/TS implementation mirrors this exactly. See the platform and firmware area page.
 
 use crate::layout::{ring_ctrl, RECORD_ALIGN, WRAP_MARKER};
 use core::sync::atomic::{AtomicU32, Ordering};

@@ -91,7 +91,8 @@ fn fxsave_legacy_layout_matches_intel_sdm_via_tier0() {
         expected[start..start + 16].copy_from_slice(&patterned_st80(0x10 + i as u8).to_le_bytes());
     }
 
-    for i in 0..8 {
+    // In IA-32e (64-bit) mode, FXSAVE (non-REX.W) saves all 16 XMM registers.
+    for i in 0..16 {
         let start = 160 + i * 16;
         expected[start..start + 16].copy_from_slice(&state.sse.xmm[i].to_le_bytes());
     }
@@ -126,7 +127,7 @@ fn fxsave_fxrstor_legacy_roundtrip_restores_state() {
         state.sse.xmm[i] = patterned_u128(0xC0 + i as u8);
     }
     let original_fpu = state.fpu.clone();
-    let original_low_xmm = state.sse.xmm[0..8].to_vec();
+    let original_xmm = state.sse.xmm.to_vec();
 
     let mut bus = FlatTestBus::new(BUS_SIZE);
     // fxsave [rax]; fxrstor [rax]
@@ -135,7 +136,7 @@ fn fxsave_fxrstor_legacy_roundtrip_restores_state() {
     // Save.
     step_ok(&mut state, &mut bus);
 
-    // Clobber the state (including upper XMM registers, which legacy FXRSTOR should NOT restore).
+    // Clobber all FPU + SSE state.
     state.fpu.fcw = 0;
     state.fpu.fsw = 0;
     state.fpu.top = 0;
@@ -147,18 +148,14 @@ fn fxsave_fxrstor_legacy_roundtrip_restores_state() {
     state.fpu.fds = 0;
     state.fpu.st = [0u128; 8];
     state.sse.mxcsr = 0;
-    state.sse.xmm[0..8].fill(0);
-    for i in 8..16 {
-        state.sse.xmm[i] = patterned_u128(0xD0 + i as u8);
-    }
-    let clobbered_upper_xmm = state.sse.xmm[8..16].to_vec();
+    state.sse.xmm.fill(0);
 
     // Restore.
     step_ok(&mut state, &mut bus);
 
     assert_eq!(state.fpu, original_fpu);
-    assert_eq!(&state.sse.xmm[0..8], &original_low_xmm[..]);
-    assert_eq!(&state.sse.xmm[8..16], &clobbered_upper_xmm[..]);
+    // In IA-32e mode, non-REX.W FXRSTOR restores all 16 XMM registers (SDM Vol 1 Table 10-9).
+    assert_eq!(&state.sse.xmm[..], &original_xmm[..]);
 }
 
 #[test]

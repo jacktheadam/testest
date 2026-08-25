@@ -323,8 +323,8 @@ For images that must “just work” on first boot, you’ll typically want to s
 See:
 
 - `drivers/windows7/virtio-snd/README.md` (test cert + signing workflow)
-- `docs/16-win7-image-servicing.md` (end-to-end servicing notes)
-- `docs/win7-bcd-offline-patching.md` (offline BCD edits for test-signing / nointegritychecks)
+- `wiki/areas/drivers-windows.md` (end-to-end image-servicing notes)
+- `wiki/areas/drivers-windows.md` (offline BCD edits for test-signing / nointegritychecks)
 
 ---
 

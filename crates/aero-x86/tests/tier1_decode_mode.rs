@@ -470,3 +470,273 @@ fn decode_one_mode_multi_byte_nop_0f1f_16bit_disp8_len() {
     assert_eq!(inst.len, 4);
     assert_eq!(inst.kind, InstKind::Nop);
 }
+
+#[test]
+fn decode_long_mode_adc_rdx_imm8_is_adc_not_invalid() {
+    // cryptsp bignum loops use `adc rdx, 0` / `adc r10, 0` (REX.W 83 /2 ib).
+    // Those used to be an unsupported 0x83 group, so the Tier-1 JIT split the
+    // 64-limb add/sub carry chain and produced a wrong 4096-bit RSA decrypt.
+    let inst = decode_one_mode(0, &[0x48, 0x83, 0xd2, 0x00], 64);
+    assert_eq!(inst.len, 4);
+    assert_eq!(
+        inst.kind,
+        InstKind::Alu {
+            op: AluOp::Adc,
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::Rdx,
+                width: Width::W64,
+                high8: false,
+            }),
+            src: Operand::Imm(0),
+            width: Width::W64,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_cmp_byte_ptr_rdx_imm8_is_cmp() {
+    // WinSetup.dll apply scan (vds-copy-93b RIP 0x7fefc0c127c):
+    // `cmp byte [rdx], 0xe8` is 80 /7, not 81/83.
+    let inst = decode_one_mode(0, &[0x80, 0x3a, 0xe8], 64);
+    assert_eq!(inst.len, 3);
+    assert_eq!(
+        inst.kind,
+        InstKind::Cmp {
+            lhs: Operand::Mem(aero_x86::tier1::Address {
+                base: Some(Gpr::Rdx),
+                index: None,
+                scale: 1,
+                disp: 0,
+                rip_relative: false,
+            }),
+            rhs: Operand::Imm(0xe8),
+            width: Width::W8,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_rex_add_dil_imm8_is_alu() {
+    // WinSetup bitstream refill: `add dil, 0x10` (40 80 C7 10).
+    let inst = decode_one_mode(0, &[0x40, 0x80, 0xc7, 0x10], 64);
+    assert_eq!(inst.len, 4);
+    assert_eq!(
+        inst.kind,
+        InstKind::Alu {
+            op: AluOp::Add,
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::Rdi,
+                width: Width::W8,
+                high8: false,
+            }),
+            src: Operand::Imm(0x10),
+            width: Width::W8,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_imul_eax_eax_imm32_is_imul3() {
+    // ntoskrnl CIM name-hash: `imul eax, eax, 0xffff9e5f` (69 C0 5F 9E FF FF).
+    let inst = decode_one_mode(0, &[0x69, 0xc0, 0x5f, 0x9e, 0xff, 0xff], 64);
+    assert_eq!(inst.len, 6);
+    assert_eq!(
+        inst.kind,
+        InstKind::Imul3 {
+            dst: Reg {
+                gpr: Gpr::Rax,
+                width: Width::W32,
+                high8: false,
+            },
+            src: Operand::Reg(Reg {
+                gpr: Gpr::Rax,
+                width: Width::W32,
+                high8: false,
+            }),
+            imm: 0xffff_9e5f,
+            width: Width::W32,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_imul_rdx_r9_is_two_operand_imul() {
+    // msvcrt memcpy splat: `imul rdx, r9` (REX.W 0F AF D1).
+    let inst = decode_one_mode(0, &[0x49, 0x0f, 0xaf, 0xd1], 64);
+    assert_eq!(inst.len, 4);
+    assert_eq!(
+        inst.kind,
+        InstKind::Alu {
+            op: AluOp::Imul,
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::Rdx,
+                width: Width::W64,
+                high8: false,
+            }),
+            src: Operand::Reg(Reg {
+                gpr: Gpr::R9,
+                width: Width::W64,
+                high8: false,
+            }),
+            width: Width::W64,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_ror_rax_imm8_is_ror_not_invalid() {
+    // bcryptprimitives SHA-512 Sigma0/1 uses `ror r64, imm8` with counts
+    // 14/18/28/34/39/41 (and 19/61 in the message schedule).
+    let inst = decode_one_mode(0, &[0x48, 0xc1, 0xc8, 0x22], 64);
+    assert_eq!(inst.len, 4);
+    assert_eq!(
+        inst.kind,
+        InstKind::Shift {
+            op: ShiftOp::Ror,
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::Rax,
+                width: Width::W64,
+                high8: false,
+            }),
+            count: 0x22,
+            width: Width::W64,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_ror_rax_1_is_ror() {
+    let inst = decode_one_mode(0, &[0x48, 0xd1, 0xc8], 64);
+    assert_eq!(inst.len, 3);
+    assert_eq!(
+        inst.kind,
+        InstKind::Shift {
+            op: ShiftOp::Ror,
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::Rax,
+                width: Width::W64,
+                high8: false,
+            }),
+            count: 1,
+            width: Width::W64,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_sub_dil_cl_is_alu() {
+    // WinSetup LZX bitstream: `sub dil, cl` (40 2A F9).
+    let inst = decode_one_mode(0, &[0x40, 0x2a, 0xf9], 64);
+    assert_eq!(inst.len, 3);
+    assert_eq!(
+        inst.kind,
+        InstKind::Alu {
+            op: AluOp::Sub,
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::Rdi,
+                width: Width::W8,
+                high8: false,
+            }),
+            src: Operand::Reg(Reg {
+                gpr: Gpr::Rcx,
+                width: Width::W8,
+                high8: false,
+            }),
+            width: Width::W8,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_test_dil_dil_is_test() {
+    // Same refill: `test dil, dil` (40 84 FF).
+    let inst = decode_one_mode(0, &[0x40, 0x84, 0xff], 64);
+    assert_eq!(inst.len, 3);
+    assert_eq!(
+        inst.kind,
+        InstKind::Test {
+            lhs: Operand::Reg(Reg {
+                gpr: Gpr::Rdi,
+                width: Width::W8,
+                high8: false,
+            }),
+            rhs: Operand::Reg(Reg {
+                gpr: Gpr::Rdi,
+                width: Width::W8,
+                high8: false,
+            }),
+            width: Width::W8,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_shl_r11d_cl_is_shift_cl() {
+    // Same refill: `shl r11d, cl` (41 D3 E3).
+    let inst = decode_one_mode(0, &[0x41, 0xd3, 0xe3], 64);
+    assert_eq!(inst.len, 3);
+    assert_eq!(
+        inst.kind,
+        InstKind::ShiftCl {
+            op: ShiftOp::Shl,
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::R11,
+                width: Width::W32,
+                high8: false,
+            }),
+            width: Width::W32,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_neg_ecx_is_neg() {
+    // WinSetup refill: `neg ecx` (F7 D9).
+    let inst = decode_one_mode(0, &[0xf7, 0xd9], 64);
+    assert_eq!(inst.len, 2);
+    assert_eq!(
+        inst.kind,
+        InstKind::Neg {
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::Rcx,
+                width: Width::W32,
+                high8: false,
+            }),
+            width: Width::W32,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_not_rcx_is_not() {
+    let inst = decode_one_mode(0, &[0x48, 0xf7, 0xd1], 64);
+    assert_eq!(inst.len, 3);
+    assert_eq!(
+        inst.kind,
+        InstKind::Not {
+            dst: Operand::Reg(Reg {
+                gpr: Gpr::Rcx,
+                width: Width::W64,
+                high8: false,
+            }),
+            width: Width::W64,
+        }
+    );
+}
+
+#[test]
+fn decode_long_mode_bswap_r8_is_bswap() {
+    let inst = decode_one_mode(0, &[0x49, 0x0f, 0xc8], 64);
+    assert_eq!(inst.len, 3);
+    assert_eq!(
+        inst.kind,
+        InstKind::Bswap {
+            dst: Reg {
+                gpr: Gpr::R8,
+                width: Width::W64,
+                high8: false,
+            },
+            width: Width::W64,
+        }
+    );
+}

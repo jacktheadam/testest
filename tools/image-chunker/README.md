@@ -9,7 +9,7 @@ necessarily the container file bytes. For a raw `.img`, those are the same; for 
 formats (qcow2/vhd/…), the chunker must read the image as a virtual disk and treat unallocated
 regions as zeros.
 
-See also: [`docs/18-chunked-disk-image-format.md`](../../docs/18-chunked-disk-image-format.md).
+See also: [`wiki/areas/storage.md`](wiki/areas/storage.md).
 
 Implementation note (for tooling authors): on native targets, prefer using the `aero-storage`
 stack (`aero_storage::StorageBackend` via a filesystem backend such as `aero_storage::FileBackend`,
@@ -89,7 +89,7 @@ this tool because it currently opens a single input file. Flatten/merge to a sta
   - `Content-Encoding: identity` (recommended for compatibility; avoid transparent compression)
   - `Cache-Control: public, max-age=60, no-transform` (default; configurable via `--cache-control-latest`)
 
-These defaults match [`docs/18-chunked-disk-image-format.md`](../../docs/18-chunked-disk-image-format.md) and can be overridden with:
+These defaults match [`wiki/areas/storage.md`](wiki/areas/storage.md) and can be overridden with:
 
 - `--cache-control-chunks <value>`
 - `--cache-control-manifest <value>`
@@ -324,7 +324,7 @@ the manifest URL (no AWS credentials required):
 ```
 
 The tool derives chunk URLs by resolving `chunks/<index>.bin` relative to `--manifest-url` (as
-specified in [`docs/18-chunked-disk-image-format.md`](../../docs/18-chunked-disk-image-format.md)).
+specified in [`wiki/areas/storage.md`](wiki/areas/storage.md)).
 
 If the CDN requires headers (e.g. `Authorization`), pass them with `--header`:
 
@@ -380,7 +380,7 @@ curl -fSs "<presigned-url>"
 
 ## Manifest format
 
-`manifest.json` is a single JSON document that describes the chunked image (see [`docs/18-chunked-disk-image-format.md`](../../docs/18-chunked-disk-image-format.md)):
+`manifest.json` is a single JSON document that describes the chunked image (see [`wiki/areas/storage.md`](wiki/areas/storage.md)):
 
 - `schema`: `aero.chunked-disk-image.v1`
 - `imageId` and `version`: identifiers for the image/version

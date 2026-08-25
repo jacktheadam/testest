@@ -43,7 +43,14 @@ impl Exception {
     }
 
     #[inline]
+    #[track_caller]
     pub fn gp(code: u16) -> Self {
+        if std::env::var_os("AERO_SEG_DEBUG").is_some() {
+            eprintln!(
+                "[gp] code={code:#06x} at {}",
+                std::panic::Location::caller()
+            );
+        }
         Self::GeneralProtection(code)
     }
 

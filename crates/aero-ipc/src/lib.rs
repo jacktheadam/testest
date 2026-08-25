@@ -5,7 +5,7 @@
 //! - A bounded, lock-free, variable-length ring buffer that can be placed in a
 //!   `SharedArrayBuffer` and driven by `Atomics` / WASM atomics.
 //!
-//! The *layout contract* is documented in `docs/ipc-protocol.md`.
+//! The *layout contract* is documented in the platform and firmware area page.
 
 pub mod ipc;
 pub mod layout;

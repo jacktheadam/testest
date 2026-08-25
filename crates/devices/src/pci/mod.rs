@@ -18,6 +18,7 @@ mod ports;
 mod resources;
 mod snapshot;
 
+pub use aero_pci_routing::q35_legacy_pic_irq_for_gsi;
 pub use bar_io_router::{PciIoBarHandler, PciIoBarRouter};
 pub use bar_mmio_router::{PciBarMmioHandler, PciBarMmioRouter};
 pub use bios::{bios_post, bios_post_with_extra_reservations};

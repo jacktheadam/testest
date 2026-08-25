@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { RunningStats } from "../packages/aero-stats/src/running-stats.js";
-import { formatOneLineError, formatOneLineUtf8 } from "../src/text.js";
+import { formatOneLineError, formatOneLineUtf8 } from "../packages/transport-safety/src/text.js";
 
 export const HISTORY_SCHEMA_VERSION = 1;
 

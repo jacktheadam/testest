@@ -81,7 +81,7 @@ impl ImagesState {
     }
 
     /// Configure the maximum number of bytes allowed to be served for a single chunk object in
-    /// chunked disk image delivery (`/v1/images/:image_id/chunked/chunks/...`).
+    /// chunked disk image delivery (`/v1/images/{image_id}/chunked/chunks/...`).
     pub fn with_max_chunk_bytes(mut self, max_chunk_bytes: u64) -> Self {
         self.max_chunk_bytes = max_chunk_bytes;
         self
@@ -183,11 +183,11 @@ impl ImagesState {
 pub fn router() -> Router<ImagesState> {
     Router::<ImagesState>::new()
         .route(
-            "/v1/images/:image_id/data",
+            "/v1/images/{image_id}/data",
             get(get_image).head(head_image).options(options_image),
         )
         .route(
-            "/v1/images/:image_id",
+            "/v1/images/{image_id}",
             get(get_image).head(head_image).options(options_image),
         )
 }
@@ -362,7 +362,7 @@ async fn serve_image(
                     }
                     Err(_) => {
                         // For syntactically invalid ranges, follow our public contract and return
-                        // `416`. (See `docs/16-disk-image-streaming-auth.md`.)
+                        // `416`. (See `wiki/areas/storage.md`.)
                         state.metrics.inc_range_request_invalid();
                         return range_not_satisfiable(&state, &req_headers, len);
                     }
@@ -453,7 +453,7 @@ async fn serve_image(
                 }
                 Err(_) => {
                     // For syntactically invalid ranges, follow our public contract and return `416`.
-                    // (See `docs/16-disk-image-streaming-auth.md`.)
+                    // (See `wiki/areas/storage.md`.)
                     state.metrics.inc_range_request_invalid();
                     return range_not_satisfiable(&state, &req_headers, len);
                 }
@@ -834,7 +834,7 @@ fn data_cache_control_value(
     // a manifest-private image must not become publicly cacheable.
     //
     // This aligns the bytes endpoints with the safety expectations documented in
-    // `docs/16-disk-image-streaming-auth.md`.
+    // `wiki/areas/storage.md`.
     if !image_public {
         return HeaderValue::from_static("private, no-store, no-transform");
     }
@@ -914,7 +914,7 @@ mod tests {
         let state = ImagesState::new(store, metrics);
 
         let app = Router::new()
-            .route("/v1/images/:image_id", get(|| async { StatusCode::OK }))
+            .route("/v1/images/{image_id}", get(|| async { StatusCode::OK }))
             .with_state(state.clone())
             .route_layer(middleware::from_fn_with_state(
                 state,

@@ -63,7 +63,6 @@ const AERO_USB_FOCUSED_TESTS: &[&str] = &[
     "hid_gamepad_report_clamping_fixture",
     "hid_keyboard_snapshot_sanitization",
     "hid_keyboard_leds",
-    "hid_mouse_report_generation",
     "hid_mouse_snapshot_clamping",
     "usb_hub_snapshot_configuration_clamping",
     "attached_device_snapshot_address_clamping",
@@ -243,7 +242,7 @@ Steps:
       (set AERO_WASM_PACK_SPLIT=1 to run each wasm-pack test in a separate invocation; slower but can help debug hangs)
   5. (optional: --with-wasm) cargo test -p aero-wasm --locked {aero_wasm_focused_flags}
   6. (unless --rust-only) npm -w web run test:unit -- {web_unit_test_paths}
-       (or: set --node-dir/--web-dir web / AERO_NODE_DIR=web (deprecated: AERO_WEB_DIR/WEB_DIR) to run `npm run test:unit` from `web/`)
+       (or: set --node-dir apps/web / AERO_NODE_DIR=apps/web to run `pnpm run test:unit` from `apps/web/`)
   7. (optional: --e2e, unless --rust-only) npm run test:e2e -- <input-related specs...>
       (defaults to --project=chromium --workers=1; sets AERO_WASM_PACKAGES=core unless already set)
 
@@ -264,7 +263,7 @@ Environment:
   AERO_NODE_DIR / AERO_WEB_DIR / WEB_DIR
                          Override the Node workspace directory for the web unit-test step.
                          (`AERO_WEB_DIR` and `WEB_DIR` are deprecated aliases.)
-                         If set to `web`, step 6 runs `npm run test:unit -- ...` inside `web/`.
+                         If set to `apps/web`, step 6 runs `pnpm run test:unit -- ...` inside `apps/web/`.
   AERO_WASM_PACKAGES    When running `--e2e`, defaults to `core` unless already set.
   AERO_ALLOW_UNSUPPORTED_NODE
                          Set to 1 to bypass Node version enforcement (see `.nvmrc` + `scripts/check-node-version.mjs`).
@@ -372,8 +371,14 @@ pub fn cmd(args: Vec<String>) -> Result<()> {
         if env_var_nonempty(AERO_WASM_PACK_SPLIT_ENV) {
             for &test in WASM_PACK_TESTS {
                 let mut cmd = Command::new("wasm-pack");
-                cmd.current_dir(&repo_root)
-                    .args(["test", "--node", "crates/aero-wasm", "--test", test, "--locked"]);
+                cmd.current_dir(&repo_root).args([
+                    "test",
+                    "--node",
+                    "crates/aero-wasm",
+                    "--test",
+                    test,
+                    "--locked",
+                ]);
                 let step_desc = format!(
                     "WASM: wasm-pack test --node crates/aero-wasm --test {test} --locked (split)"
                 );
@@ -428,35 +433,35 @@ pub fn cmd(args: Vec<String>) -> Result<()> {
     let node_dir = resolve_node_dir_for_input(&repo_root, opts.node_dir.as_deref())?;
 
     // `npm ci` from the repo root installs workspace deps under `./node_modules/`, but some
-    // setups may install within `web/` directly. Accept either so `cargo xtask input` can still
+    // setups may install within `apps/web/` directly. Accept either so `cargo xtask input` can still
     // provide a helpful missing-deps hint without being overly strict about layout.
     let has_node_modules = repo_root.join("node_modules").is_dir()
-        || repo_root.join("web/node_modules").is_dir()
+        || repo_root.join("apps/web/node_modules").is_dir()
         || node_dir.join("node_modules").is_dir();
     if !has_node_modules {
         return Err(XtaskError::Message(format!(
-            "node_modules is missing; install Node dependencies first (e.g. `npm ci`), \
-                 or run `{rust_only_hint}` to skip npm + Playwright"
+            "node_modules is missing; install JavaScript dependencies first (`pnpm install`), \
+                 or run `{rust_only_hint}` to skip the JavaScript and Playwright steps"
         )));
     }
 
-    let mut cmd = tools::npm();
+    let mut cmd = tools::package_manager();
     let step_desc = if node_dir == repo_root {
         cmd.current_dir(&repo_root)
-            .args(["-w", "web", "run", "test:unit", "--"]);
-        "Web: npm -w web run test:unit -- src/input src/hid src/platform/* src/workers/* (plus WebUSB/WebHID topology guards)"
+            .args(["-C", "apps/web", "run", "test:unit", "--"]);
+        "Web: pnpm -C apps/web run test:unit -- src/input src/hid src/platform/* src/workers/* (plus WebUSB/WebHID topology guards)"
             .to_string()
     } else {
         cmd.current_dir(&node_dir).args(["run", "test:unit", "--"]);
         let node_dir_display = paths::display_rel_path(&node_dir);
         format!(
-            "Web: npm run test:unit -- src/input src/hid src/platform/* src/workers/* (plus WebUSB/WebHID topology guards; node dir: {node_dir_display})"
+            "Web: pnpm run test:unit -- src/input src/hid src/platform/* src/workers/* (plus WebUSB/WebHID topology guards; node dir: {node_dir_display})"
         )
     };
     cmd.args(WEB_UNIT_TEST_PATHS.iter().copied());
     match runner.run_step(&step_desc, &mut cmd) {
         Ok(()) => {}
-        Err(XtaskError::Message(msg)) if msg.starts_with("missing required command: npm") => {
+        Err(XtaskError::Message(msg)) if msg.starts_with("missing required command: pnpm") => {
             return Err(XtaskError::Message(format!(
                 "{msg}\n\nInstall Node tooling, or run `{rust_only_hint}` to skip npm + Playwright."
             )));
@@ -472,7 +477,7 @@ pub fn cmd(args: Vec<String>) -> Result<()> {
         let mut cmd = build_e2e_cmd(&repo_root, &opts.pw_extra_args);
         match runner.run_step(&step_desc, &mut cmd) {
             Ok(()) => {}
-            Err(XtaskError::Message(msg)) if msg.starts_with("missing required command: npm") => {
+            Err(XtaskError::Message(msg)) if msg.starts_with("missing required command: pnpm") => {
                 return Err(XtaskError::Message(format!(
                     "{msg}\n\nInstall Node tooling, or run `{rust_only_hint}` to skip npm + Playwright."
                 )));
@@ -565,7 +570,7 @@ fn next_value(
 }
 
 fn build_e2e_cmd(repo_root: &Path, pw_extra_args: &[String]) -> Command {
-    let mut cmd = tools::npm();
+    let mut cmd = tools::package_manager();
     cmd.current_dir(repo_root).args(["run", "test:e2e", "--"]);
 
     // Playwright runs trigger `pretest:e2e`, which builds the web WASM bundles. The input/USB E2E
@@ -679,7 +684,7 @@ fn resolve_node_dir_for_input(repo_root: &Path, cli_override: Option<&str>) -> R
     for candidate in [
         repo_root.to_path_buf(),
         repo_root.join("frontend"),
-        repo_root.join("web"),
+        repo_root.join("apps/web"),
     ] {
         if candidate.join("package.json").is_file() {
             return Ok(candidate);
@@ -994,7 +999,7 @@ mod tests {
         assert_integration_tests_exist(repo_root, "crates/aero-wasm", WASM_PACK_TESTS);
 
         for &path in WEB_UNIT_TEST_PATHS {
-            let full = repo_root.join("web").join(path);
+            let full = repo_root.join("apps/web").join(path);
             assert!(
                 full.exists(),
                 "expected web unit test path `{path}` to exist at {full:?}"

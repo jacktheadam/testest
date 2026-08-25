@@ -82,6 +82,7 @@ fn snapshot_roundtrip_preserves_high_memory_contents() {
 
 #[test]
 fn dirty_pages_for_remapped_high_ram_are_reported_in_ram_offset_space() {
+    let _guard = TEST_LOCK.lock().unwrap();
     let cfg = MachineConfig {
         ram_size_bytes: firmware::bios::PCIE_ECAM_BASE + 0x2000,
         enable_serial: false,
@@ -114,6 +115,7 @@ fn dirty_pages_for_remapped_high_ram_are_reported_in_ram_offset_space() {
 
 #[test]
 fn snapshot_read_ram_straddles_low_high_boundary() {
+    let _guard = TEST_LOCK.lock().unwrap();
     let cfg = MachineConfig {
         ram_size_bytes: firmware::bios::PCIE_ECAM_BASE + 0x2000,
         enable_serial: false,
@@ -140,6 +142,7 @@ fn snapshot_read_ram_straddles_low_high_boundary() {
 
 #[test]
 fn snapshot_write_ram_straddles_low_high_boundary() {
+    let _guard = TEST_LOCK.lock().unwrap();
     let cfg = MachineConfig {
         ram_size_bytes: firmware::bios::PCIE_ECAM_BASE + 0x2000,
         enable_serial: false,
@@ -167,6 +170,7 @@ fn snapshot_write_ram_straddles_low_high_boundary() {
 
 #[test]
 fn physical_read_across_4gib_boundary_is_contiguous() {
+    let _guard = TEST_LOCK.lock().unwrap();
     let cfg = MachineConfig {
         ram_size_bytes: firmware::bios::PCIE_ECAM_BASE + 0x2000,
         enable_serial: false,
@@ -189,6 +193,7 @@ fn physical_read_across_4gib_boundary_is_contiguous() {
 
 #[test]
 fn physical_write_across_4gib_boundary_ignores_rom_and_writes_high_ram() {
+    let _guard = TEST_LOCK.lock().unwrap();
     let cfg = MachineConfig {
         ram_size_bytes: firmware::bios::PCIE_ECAM_BASE + 0x2000,
         enable_serial: false,
@@ -216,6 +221,7 @@ fn physical_write_across_4gib_boundary_ignores_rom_and_writes_high_ram() {
 
 #[test]
 fn writes_to_pci_hole_do_not_mark_ram_dirty() {
+    let _guard = TEST_LOCK.lock().unwrap();
     let cfg = MachineConfig {
         ram_size_bytes: firmware::bios::PCIE_ECAM_BASE + 0x2000,
         enable_serial: false,

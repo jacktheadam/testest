@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { formatOneLineError } from "../../src/text.js";
+import { formatOneLineError } from "../../packages/transport-safety/src/text.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
@@ -185,7 +185,7 @@ function autoDetectNodeDir() {
     return null;
   }
 
-  const candidates = [".", "frontend", "web"];
+  const candidates = [".", "frontend", "apps/web"];
   for (const rel of candidates) {
     const abs = path.resolve(repoRoot, rel);
     if (fileExists(path.join(abs, "package.json"))) return abs;

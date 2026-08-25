@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { isAeroPhase, type AeroPhase } from '../../shared/aero_status.ts';
+import { isAeroPhase, type AeroPhase } from '../../packages/shared/aero_status.ts';
 import type { ArtifactWriter, EmulatorDriver, MilestoneClient } from '../scenarios/types.ts';
 
 function sanitizePathFragment(fragment: string): string {

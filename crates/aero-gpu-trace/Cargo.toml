@@ -1,14 +1,16 @@
 [package]
 name = "aero-gpu-trace"
 version = "0.1.0"
+rust-version.workspace = true
 edition = "2021"
-license = "MIT OR Apache-2.0"
+publish = false
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
-aero-protocol = { path = "../../emulator/protocol" }
+aero-protocol = { path = "../aero-protocol" }
 aero-dxbc = { path = "../aero-dxbc", features = ["test-utils"] }

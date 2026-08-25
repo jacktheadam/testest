@@ -7,7 +7,7 @@ const PREVIEW_ORIGIN = process.env.AERO_PLAYWRIGHT_PREVIEW_ORIGIN ?? "http://127
 test("AudioWorklet output runs and does not underrun with synthetic tone", async ({ page }) => {
   test.skip(test.info().project.name !== "chromium", "AudioWorklet output test only runs on Chromium.");
 
-  await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: "load" });
+  await page.goto(`${PREVIEW_ORIGIN}/apps/web/`, { waitUntil: "load" });
 
   await page.click("#init-audio-output");
 

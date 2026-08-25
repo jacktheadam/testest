@@ -5,7 +5,7 @@ import WebSocket from "ws";
 import { EventEmitter } from "node:events";
 
 import { wsSendSafe } from "../../../scripts/_shared/ws_safe.js";
-import { unrefBestEffort } from "../../../src/unref_safe.js";
+import { unrefBestEffort } from "../../../packages/transport-safety/src/unref_safe.js";
 
 import { createProxyServer } from "../src/server.js";
 import {

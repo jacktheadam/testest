@@ -206,7 +206,7 @@ pub const BIOS_SECTOR_SIZE: usize = 512;
 /// This trait is **firmware-specific** and should not be used as a general-purpose disk image or
 /// device/controller abstraction. Outside of BIOS code, prefer the canonical synchronous disk
 /// traits (`aero_storage::StorageBackend` / `aero_storage::VirtualDisk`) and adapt as needed. See
-/// `docs/20-storage-trait-consolidation.md`.
+/// `wiki/areas/storage.md`.
 pub trait BlockDevice {
     fn read_sector(&mut self, lba: u64, buf: &mut [u8; BIOS_SECTOR_SIZE]) -> Result<(), DiskError>;
 
@@ -421,6 +421,11 @@ pub struct BiosConfig {
     pub smbios_uuid_seed: u64,
     /// Whether to build and publish ACPI tables during POST.
     pub enable_acpi: bool,
+    /// Whether ACPI should expose the legacy i8042 keyboard/mouse controller.
+    ///
+    /// This must match the machine's port and IRQ wiring so Windows can bind `i8042prt` when the
+    /// controller is present without creating a phantom device when it is absent.
+    pub enable_i8042: bool,
     /// Fixed placement contract for ACPI tables written during POST.
     pub acpi_placement: AcpiPlacement,
     /// Mapping of PCI PIRQ[A-D] -> platform GSI used by both the ACPI DSDT `_PRT`
@@ -460,8 +465,23 @@ impl Default for BiosConfig {
     fn default() -> Self {
         // RSDP must live in the standard BIOS scan region (< 1MiB) and be 16-byte aligned.
         // We keep it in the EBDA so guests can find it by scanning the first KiB.
+        //
+        // `tables_base`/`nvs_base` of 0 select auto placement: the ACPI windows go to the
+        // top of low RAM (below the PCIe ECAM window), like real PC BIOSes. Boot loaders
+        // allocate and reclaim low physical pages for image loading, so a fixed low base
+        // puts the SDTs in winload's allocation zone — Win7's winload loaded a PE image
+        // over the RSDT/XSDT and bailed with boot status 0xc0000225 ("the firmware (BIOS)
+        // is not ACPI compatible").
+        // `tables_base`/`nvs_base` of 0 select auto placement: the ACPI windows go to the
+        // top of low RAM (below the PCIe ECAM window), like real PC BIOSes. Boot loaders
+        // allocate and reclaim low physical pages for image loading, so a fixed low base
+        // puts the SDTs in winload's allocation zone — Win7's winload loaded a PE image
+        // over the RSDT/XSDT and bailed with boot status 0xc0000225 ("the firmware (BIOS)
+        // is not ACPI compatible").
         let acpi_placement = AcpiPlacement {
             rsdp_addr: EBDA_BASE + 0x100,
+            tables_base: 0,
+            nvs_base: 0,
             ..Default::default()
         };
         Self {
@@ -470,6 +490,7 @@ impl Default for BiosConfig {
             cpu_count: 1,
             smbios_uuid_seed: 0,
             enable_acpi: true,
+            enable_i8042: true,
             acpi_placement,
             // Match the default routing in `aero_acpi::AcpiConfig`.
             pirq_to_gsi: aero_pci_routing::DEFAULT_PIRQ_TO_GSI,
@@ -581,6 +602,17 @@ impl Bios {
     /// Initialize BDA time fields from the RTC.
     pub fn init<M: FirmwareMemoryBus + ?Sized>(&mut self, memory: &mut M) {
         self.bda_time.write_to_bda(memory);
+    }
+
+    /// Synchronize the interpreter-safe VBE ROM's writable LFB address after
+    /// platform PCI resource assignment.
+    ///
+    /// The ROM itself is immutable, while the final VGA/AeroGPU aperture is
+    /// not known until PCI POST. Windows' HAL copies and interprets the first
+    /// MiB for BIOS calls, so this guest-visible EBDA value is the bridge
+    /// between the final PCI wiring and the real-mode ROM handler.
+    pub fn sync_vbe_rom_lfb<M: FirmwareMemoryBus + ?Sized>(&self, memory: &mut M) {
+        rom::write_vbe_lfb_runtime_state(memory, self.video.vbe.lfb_base);
     }
 
     pub fn advance_time<M: FirmwareMemoryBus + ?Sized>(&mut self, memory: &mut M, delta: Duration) {
@@ -853,7 +885,7 @@ fn disk_err_to_int13_status(err: DiskError) -> u8 {
 #[cfg(test)]
 pub(super) struct TestMemory {
     a20_enabled: bool,
-    inner: PhysicalMemoryBus,
+    inner: PhysicalMemoryBus<memory::DenseMemory>,
 }
 
 #[cfg(test)]
@@ -862,7 +894,7 @@ impl TestMemory {
         let ram = DenseMemory::new(size).expect("guest RAM allocation failed");
         Self {
             a20_enabled: false,
-            inner: PhysicalMemoryBus::new(Box::new(ram)),
+            inner: PhysicalMemoryBus::new(ram),
         }
     }
 
@@ -1183,6 +1215,59 @@ mod tests {
         assert!(rsdt_addr >= reclaim_base && rsdt_addr < reclaim_base + reclaim_len);
     }
 
+    #[test]
+    fn post_places_acpi_tables_at_top_of_low_ram() {
+        // Boot loaders allocate/reclaim low physical pages for image loading, so the
+        // ACPI SDT window must live at the top of low RAM, like real PC BIOSes.
+        // Regression: Win7's winload overwrote the old 0x100000 tables with a PE image
+        // and bailed with boot status 0xc0000225.
+        let mem_size = 64 * 1024 * 1024u64;
+        let config = BiosConfig {
+            memory_size_bytes: mem_size,
+            ..Default::default()
+        };
+        let mut bios = Bios::new(config);
+        let mut cpu = CpuState::new(aero_cpu_core::state::CpuMode::Real);
+        let mut mem = TestMemory::new(mem_size);
+        let mut disk = InMemoryDisk::from_boot_sector(boot_sector(0));
+
+        bios.post(&mut cpu, &mut mem, &mut disk, None);
+
+        let rsdp_addr = bios.rsdp_addr().expect("RSDP should be built");
+        let rsdp = mem.read_bytes(rsdp_addr, 36);
+        assert_eq!(&rsdp[0..8], b"RSD PTR ");
+        let rsdt_addr = u32::from_le_bytes(rsdp[16..20].try_into().unwrap()) as u64;
+        let xsdt_addr = u64::from_le_bytes(rsdp[24..32].try_into().unwrap());
+
+        // SDTs must be in the top 64+4 KiB of low RAM, not in the low allocation zone.
+        let top = mem_size.min(super::PCIE_ECAM_BASE);
+        let window_floor = top - (0x1_0000 + 0x1000);
+        assert!(
+            rsdt_addr >= window_floor && rsdt_addr < top,
+            "RSDT at {rsdt_addr:#x}, expected in [{window_floor:#x}, {top:#x})"
+        );
+        assert!(
+            xsdt_addr >= window_floor && xsdt_addr < top,
+            "XSDT at {xsdt_addr:#x}, expected in [{window_floor:#x}, {top:#x})"
+        );
+
+        // The tables must really be there and well-formed (not just tracked).
+        assert_eq!(&mem.read_bytes(rsdt_addr, 4), b"RSDT");
+        assert_eq!(&mem.read_bytes(xsdt_addr, 4), b"XSDT");
+
+        // The e820 ACPI-reclaim window must cover the tables (so the OS preserves them
+        // until the tables are consumed) and must sit at the same top-of-RAM location.
+        let (reclaim_base, reclaim_len) = bios
+            .acpi_reclaimable
+            .expect("ACPI reclaimable window should be tracked");
+        assert!(reclaim_len > 0);
+        assert!(rsdt_addr >= reclaim_base && rsdt_addr < reclaim_base + reclaim_len);
+        assert!(
+            reclaim_base >= window_floor,
+            "reclaim window at {reclaim_base:#x}, expected >= {window_floor:#x}"
+        );
+    }
+
     fn parse_smbios_type1_uuid(mem: &mut TestMemory, eps_addr: u32) -> [u8; 16] {
         // SMBIOS 2.x EPS length is 0x1F bytes.
         let eps = mem.read_bytes(eps_addr as u64, 0x1F);
@@ -1277,11 +1362,18 @@ mod tests {
     }
     #[test]
     fn post_reports_acpi_build_failure_to_tty_output() {
-        // Force ACPI placement to be out-of-bounds by advertising too little guest RAM for the
-        // default `AcpiPlacement` (tables start at 1MiB).
+        // Force ACPI placement to be out-of-bounds with an explicit table base that does
+        // not fit in the advertised guest RAM. (The default placement is now auto: top of
+        // low RAM, which would fit in 1MiB.)
         let mut bios = Bios::new(BiosConfig {
             memory_size_bytes: 0x0010_0000, // 1MiB
             boot_drive: 0x80,
+            acpi_placement: aero_acpi::AcpiPlacement {
+                rsdp_addr: EBDA_BASE + 0x100,
+                tables_base: 0x0010_0000, // 1MiB: table end exceeds 1MiB of RAM
+                nvs_base: 0x0011_0000,
+                ..Default::default()
+            },
             ..BiosConfig::default()
         });
         let mut cpu = CpuState::new(aero_cpu_core::state::CpuMode::Real);

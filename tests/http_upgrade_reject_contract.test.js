@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PassThrough } from "node:stream";
 
-import { rejectHttpUpgrade } from "../src/http_upgrade_reject.js";
+import { rejectHttpUpgrade } from "../packages/transport-safety/src/http_upgrade_reject.js";
 
 test("http_upgrade_reject: emits a well-formed 4xx response with bounded body", () => {
   const socket = new PassThrough();

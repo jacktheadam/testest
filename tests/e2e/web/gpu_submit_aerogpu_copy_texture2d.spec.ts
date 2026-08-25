@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('GPU worker: submit_aerogpu COPY_TEXTURE2D copies sub-rects (with BGRX upload conversion)', async ({ page }) => {
-  await page.goto('/web/blank.html');
+  await page.goto('/apps/web/blank.html');
 
   await page.setContent(`
     <style>
@@ -10,17 +10,17 @@ test('GPU worker: submit_aerogpu COPY_TEXTURE2D copies sub-rects (with BGRX uplo
     </style>
      <canvas id="c"></canvas>
      <script type="module">
-        import { fnv1a32Hex } from "/web/src/utils/fnv1a.ts";
-        import { GPU_PROTOCOL_NAME, GPU_PROTOCOL_VERSION, isGpuWorkerMessageBase } from "/web/src/ipc/gpu-protocol.ts";
+        import { fnv1a32Hex } from "/apps/web/src/utils/fnv1a.ts";
+        import { GPU_PROTOCOL_NAME, GPU_PROTOCOL_VERSION, isGpuWorkerMessageBase } from "/apps/web/src/ipc/gpu-protocol.ts";
         import {
           AerogpuCmdWriter,
           AEROGPU_COPY_FLAG_NONE,
           AEROGPU_RESOURCE_USAGE_RENDER_TARGET,
           AEROGPU_RESOURCE_USAGE_SCANOUT,
           AEROGPU_RESOURCE_USAGE_TEXTURE,
-        } from "/emulator/protocol/aerogpu/aerogpu_cmd.ts";
-        import { AerogpuFormat } from "/emulator/protocol/aerogpu/aerogpu_pci.ts";
-        import { formatOneLineUtf8 } from "/web/src/text.ts";
+        } from "/crates/aero-protocol/aerogpu/aerogpu_cmd.ts";
+        import { AerogpuFormat } from "/crates/aero-protocol/aerogpu/aerogpu_pci.ts";
+        import { formatOneLineUtf8 } from "/packages/transport-safety/src/text.js";
   
         const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("c"));
   
@@ -106,7 +106,7 @@ test('GPU worker: submit_aerogpu COPY_TEXTURE2D copies sub-rects (with BGRX uplo
 
         (async () => {
           try {
-            const worker = new Worker("/web/src/workers/gpu.worker.ts", { type: "module" });
+            const worker = new Worker("/apps/web/src/workers/gpu.worker.ts", { type: "module" });
 
             let readyResolve;
             let readyReject;

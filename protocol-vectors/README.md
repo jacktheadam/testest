@@ -1,10 +1,11 @@
 # Protocol vectors
 
 This directory contains **canonical, shared golden vectors** for Aero’s bytes-on-the-wire
-protocols.
+protocols, plus other cross-language test data (HID/WebUSB fixtures, the Windows device
+contract manifests) relocated out of `docs/`.
 
 These JSON files are used by conformance tests across independent implementations
-(Go, TypeScript, JavaScript) for a subset of protocols.
+(Rust, Go, TypeScript, JavaScript) for a subset of protocols.
 
 Newer unified, versioned vectors live in `crates/conformance/test-vectors/`.
 Some protocols also have additional, more exhaustive vectors here for legacy
@@ -31,6 +32,15 @@ consumers and extra negative-case coverage.
   - Canonical, versioned cross-language vectors live in
     `crates/conformance/test-vectors/aero-vectors-v1.json` (key: `aero-l2-tunnel-v1`).
 - `origin.json` — Browser `Origin` header normalization + allowlist matching semantics.
+- `hid_usage_keyboard.json` / `hid_usage_consumer.json` — HID usage tables (keyboard page 0x07,
+  consumer page 0x0C media keys) shared by the Rust and TypeScript input stacks.
+- `hid_gamepad_report_vectors.json` / `hid_gamepad_report_clamping_vectors.json` — USB HID gamepad
+  8-byte report packing vectors (in-range layout plus out-of-range clamping/masking semantics).
+- `webusb_passthrough_wire.json` — WebUSB passthrough `UsbHostAction`/`UsbHostCompletion` wire
+  contract vectors (round-tripped by Rust and TypeScript).
+- `windows-device-contract.json` / `windows-device-contract-virtio-win.json` — machine-readable
+  Windows PCI device contract manifests (canonical Aero service names; virtio-win variant).
+  `windows-device-contract.schema.json` is the editor/CI feedback schema for both.
 
 ## Auth tokens (format + defensive parsing)
 
@@ -54,6 +64,6 @@ High-level invariants enforced by the shared verifiers:
 
 1. Update the protocol spec docs:
    - UDP relay: `proxy/webrtc-udp-relay/PROTOCOL.md`
-   - TCP mux: `docs/backend/01-aero-gateway-api.md`
+   - TCP mux: `wiki/history/retirements.md`
 2. Regenerate or edit the vectors to match the new canonical bytes.
 3. Run the conformance tests in all implementations (Go + npm workspaces) until green.

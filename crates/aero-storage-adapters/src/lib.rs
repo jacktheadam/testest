@@ -4,7 +4,7 @@
 //! - [`aero_storage::VirtualDisk`] (disk image layer; canonical synchronous disk trait)
 //! - `aero_devices::storage::DiskBackend` (byte-addressed device-model backend used by parts of the
 //!   `aero-devices` stack)
-//! - legacy `emulator::io::storage::disk::DiskBackend` (sector-addressed backend used by the
+//! - sector-addressed backends (the shape older storage stacks expose, used by the
 //!   legacy emulator storage stack)
 //!
 //! This crate provides lightweight wrapper *types* around [`aero_storage::VirtualDisk`].
@@ -16,7 +16,7 @@
 //! code can use a consistent name across controllers (e.g.
 //! `aero_devices::storage::AeroStorageDiskAdapter`).
 //!
-//! See `docs/20-storage-trait-consolidation.md` for the repo-wide storage trait consolidation plan
+//! See `wiki/areas/storage.md` for the repo-wide storage trait consolidation plan
 //! and guidance on where adapter types vs trait impls should live.
 //!
 //! ## Virtio-blk (`aero-virtio`)
@@ -69,7 +69,7 @@ type NvmeDiskBackend = Box<dyn VirtualDisk>;
 /// Adapter wrapper for exposing an [`aero_storage::VirtualDisk`] through a sector-addressed disk
 /// backend interface.
 ///
-/// This wrapper is used by legacy sector-addressed storage stacks (e.g. the `crates/emulator` disk
+/// This wrapper is used by sector-addressed storage stacks (the older disk
 /// models).
 pub struct AeroVirtualDiskAsNvmeBackend {
     disk: NvmeDiskBackend,

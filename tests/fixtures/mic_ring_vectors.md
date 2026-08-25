@@ -6,7 +6,7 @@ capture ring buffer index math.
 The same semantics are implemented in two places:
 
 - Rust: `crates/platform/src/audio/mic_bridge.rs`
-- JS: `web/src/audio/mic_ring.js`
+- JS: `apps/web/src/audio/mic_ring.js`
 
 The fields in each test case are `u32` sample counters (wrapping at `2^32`):
 

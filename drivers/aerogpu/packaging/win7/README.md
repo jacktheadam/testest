@@ -172,7 +172,7 @@ Note: the legacy INFs under `drivers/aerogpu/packaging/win7/legacy/` are kept in
 compatibility/regression. CI-staged packages include a copy at `legacy/aerogpu.inf` so Guest Tools can support
 emulator builds that still expose the deprecated legacy device model.
 
-See `docs/abi/aerogpu-pci-identity.md` for the full context and the matching emulator device models. The Win7 KMD
+See `wiki/areas/graphics.md` for the full context and the matching emulator device models. The Win7 KMD
 supports multiple ABIs and auto-detects which one is active based on MMIO magic; see `drivers/aerogpu/kmd/README.md`.
 
 Before installing, confirm your VM's device model reports one of the above Hardware IDs:
@@ -188,11 +188,11 @@ Before installing, confirm your VM's device model reports one of the above Hardw
 The simplest workflow is to generate and sign the driver package on a **Windows 10/11 build host** using the repo CI scripts, then copy the signed package into the Windows 7 VM:
 
 ```powershell
-pwsh ci/install-wdk.ps1
-pwsh ci/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
-pwsh ci/build-aerogpu-dbgctl.ps1 -ToolchainJson out/toolchain.json
-pwsh ci/make-catalogs.ps1 -ToolchainJson out/toolchain.json
-pwsh ci/sign-drivers.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/install-wdk.ps1
+pwsh drivers/build/build-drivers.ps1 -ToolchainJson out/toolchain.json -Drivers aerogpu
+pwsh drivers/build/build-aerogpu-dbgctl.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/make-catalogs.ps1 -ToolchainJson out/toolchain.json
+pwsh drivers/build/sign-drivers.ps1 -ToolchainJson out/toolchain.json
 ```
 
 This produces:
@@ -472,7 +472,7 @@ cd \path\to\repo\drivers\aerogpu\tests\win7
 build_all_vs2010.cmd
 :: Choose the VID/DID that matches your VM's Hardware Ids:
 run_all.cmd --require-vid=0xA3A0 --require-did=0x0001
-:: If using the deprecated legacy device model, pass the matching VID/DID (see docs/abi/aerogpu-pci-identity.md).
+:: If using the deprecated legacy device model, pass the matching VID/DID (see wiki/areas/graphics.md).
 :: Note: legacy bring-up requires the legacy INFs under drivers/aerogpu/packaging/win7/legacy/ and enabling the
 :: emulator legacy device model (feature emulator/aerogpu-legacy).
 ```

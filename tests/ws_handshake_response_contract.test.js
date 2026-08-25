@@ -5,7 +5,7 @@ import {
   computeWebSocketAccept,
   encodeWebSocketHandshakeResponse,
   writeWebSocketHandshake,
-} from "../src/ws_handshake_response.js";
+} from "../packages/transport-safety/src/ws_handshake_response.js";
 
 test("ws_handshake_response: computeWebSocketAccept matches RFC6455 example", () => {
   // RFC6455 example:

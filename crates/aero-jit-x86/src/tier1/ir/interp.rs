@@ -37,6 +37,10 @@ fn compute_logic_flags(width: Width, result: u64) -> FlagVals {
 }
 
 fn compute_add_flags(width: Width, lhs: u64, rhs: u64, result: u64) -> FlagVals {
+    compute_add_flags_cin(width, lhs, rhs, 0, result)
+}
+
+fn compute_add_flags_cin(width: Width, lhs: u64, rhs: u64, cin: u64, result: u64) -> FlagVals {
     let mask = width.mask();
     let lhs = lhs & mask;
     let rhs = rhs & mask;
@@ -44,7 +48,7 @@ fn compute_add_flags(width: Width, lhs: u64, rhs: u64, result: u64) -> FlagVals 
     let bits = width.bits();
     let sign_bit = 1u64 << (bits - 1);
 
-    let wide = (lhs as u128) + (rhs as u128);
+    let wide = (lhs as u128) + (rhs as u128) + (cin as u128);
     let cf = (wide >> bits) != 0;
     let of = ((lhs ^ result) & (rhs ^ result) & sign_bit) != 0;
     let af = ((lhs ^ rhs ^ result) & 0x10) != 0;
@@ -59,6 +63,10 @@ fn compute_add_flags(width: Width, lhs: u64, rhs: u64, result: u64) -> FlagVals 
 }
 
 fn compute_sub_flags(width: Width, lhs: u64, rhs: u64, result: u64) -> FlagVals {
+    compute_sub_flags_bin(width, lhs, rhs, 0, result)
+}
+
+fn compute_sub_flags_bin(width: Width, lhs: u64, rhs: u64, bin: u64, result: u64) -> FlagVals {
     let mask = width.mask();
     let lhs = lhs & mask;
     let rhs = rhs & mask;
@@ -66,7 +74,8 @@ fn compute_sub_flags(width: Width, lhs: u64, rhs: u64, result: u64) -> FlagVals 
     let bits = width.bits();
     let sign_bit = 1u64 << (bits - 1);
 
-    let cf = lhs < rhs;
+    let subtrahend = (rhs as u128) + (bin as u128);
+    let cf = (lhs as u128) < subtrahend;
     let of = ((lhs ^ rhs) & (lhs ^ result) & sign_bit) != 0;
     let af = ((lhs ^ rhs ^ result) & 0x10) != 0;
     FlagVals {
@@ -76,6 +85,75 @@ fn compute_sub_flags(width: Width, lhs: u64, rhs: u64, result: u64) -> FlagVals 
         zf: result == 0,
         sf: (result & sign_bit) != 0,
         of,
+    }
+}
+
+fn rotate_left(width: Width, val: u64, shift_amt: u32) -> u64 {
+    let bits = width.bits();
+    let val = width.truncate(val);
+    let amt = shift_amt % bits;
+    if amt == 0 {
+        val
+    } else {
+        width.truncate((val << amt) | (val >> (bits - amt)))
+    }
+}
+
+fn rotate_right(width: Width, val: u64, shift_amt: u32) -> u64 {
+    let bits = width.bits();
+    let val = width.truncate(val);
+    let amt = shift_amt % bits;
+    if amt == 0 {
+        val
+    } else {
+        width.truncate((val >> amt) | (val << (bits - amt)))
+    }
+}
+
+fn bswap_width(width: Width, val: u64) -> u64 {
+    match width {
+        Width::W64 => val.swap_bytes(),
+        Width::W32 => (val as u32).swap_bytes() as u64,
+        Width::W16 => (val as u16).swap_bytes() as u64,
+        Width::W8 => val & 0xff,
+    }
+}
+
+fn update_rotate_flags(
+    cpu: &mut TestCpu,
+    width: Width,
+    op: BinOp,
+    _lhs: u64,
+    shift_amt: u32,
+    result: u64,
+    flags: FlagSet,
+) {
+    let bits = width.bits();
+    let amt = shift_amt % bits;
+    if amt == 0 {
+        return;
+    }
+    let result = width.truncate(result);
+    let sign_bit = 1u64 << (bits - 1);
+    if flags.contains(FlagSet::CF) {
+        let cf = match op {
+            BinOp::Rol => (result & 1) != 0,
+            BinOp::Ror => (result & sign_bit) != 0,
+            _ => false,
+        };
+        write_flag(cpu, Flag::Cf, cf);
+    }
+    if flags.contains(FlagSet::OF) && amt == 1 {
+        let msb = (result & sign_bit) != 0;
+        let of = match op {
+            BinOp::Rol => msb ^ ((result & 1) != 0),
+            BinOp::Ror => {
+                let msb2 = (result & (sign_bit >> 1)) != 0;
+                msb ^ msb2
+            }
+            _ => false,
+        };
+        write_flag(cpu, Flag::Of, of);
     }
 }
 
@@ -266,7 +344,34 @@ pub fn execute_block<B: Tier1Bus>(block: &IrBlock, cpu_mem: &mut [u8], bus: &mut
     res
 }
 
-fn execute_block_cpu<B: Tier1Bus>(block: &IrBlock, cpu: &mut TestCpu, bus: &mut B) -> ExecResult {
+/// Execute a pre-decoded IR block directly against a [`CpuState`], reading/writing
+/// guest memory through `bus`.
+///
+/// This bypasses the WASM compilation pipeline entirely — the IR interpreter
+/// executes the pre-decoded block instruction-by-instruction. While slower than
+/// compiled WASM, it eliminates per-instruction decode and dispatch overhead,
+/// giving a meaningful speedup for hot blocks without requiring a WASM engine
+/// or memory synchronization.
+pub fn execute_block_cpu_state<B: Tier1Bus>(
+    block: &IrBlock,
+    cpu: &mut CpuState,
+    bus: &mut B,
+) -> ExecResult {
+    let mut test_cpu = TestCpu::from_cpu_state(cpu);
+    let res = execute_block_cpu(block, &mut test_cpu, bus);
+    test_cpu.write_to_cpu_state(cpu);
+    res
+}
+
+/// Execute one IR block against an already-materialized [`TestCpu`].
+///
+/// Used by the machine's cached-block chain so a 3-block guest loop does not
+/// copy [`CpuState`] in and out on every two-instruction `Jcc`.
+pub fn execute_block_cpu<B: Tier1Bus>(
+    block: &IrBlock,
+    cpu: &mut TestCpu,
+    bus: &mut B,
+) -> ExecResult {
     let mut temps = vec![0u64; block.value_types.len()];
 
     for inst in &block.insts {
@@ -325,9 +430,23 @@ fn execute_block_cpu<B: Tier1Bus>(block: &IrBlock, cpu: &mut TestCpu, bus: &mut 
                         let res = w.truncate(l.wrapping_add(r));
                         (res, Some(compute_add_flags(w, l, r, res)))
                     }
+                    BinOp::Adc => {
+                        let cin = read_flag(cpu, Flag::Cf) as u64;
+                        let wide = (l as u128) + (r as u128) + (cin as u128);
+                        let res = w.truncate(wide as u64);
+                        (res, Some(compute_add_flags_cin(w, l, r, cin, res)))
+                    }
                     BinOp::Sub => {
                         let res = w.truncate(l.wrapping_sub(r));
                         (res, Some(compute_sub_flags(w, l, r, res)))
+                    }
+                    BinOp::Sbb => {
+                        let bin = read_flag(cpu, Flag::Cf) as u64;
+                        let wide = (l as u128)
+                            .wrapping_sub(r as u128)
+                            .wrapping_sub(bin as u128);
+                        let res = w.truncate(wide as u64);
+                        (res, Some(compute_sub_flags_bin(w, l, r, bin, res)))
                     }
                     BinOp::And => {
                         let res = w.truncate(l & r);
@@ -354,6 +473,46 @@ fn execute_block_cpu<B: Tier1Bus>(block: &IrBlock, cpu: &mut TestCpu, bus: &mut 
                         let res = w.truncate((signed >> shift_amt) as u64);
                         (res, None)
                     }
+                    BinOp::Rol => (rotate_left(w, l, shift_amt), None),
+                    BinOp::Ror => (rotate_right(w, l, shift_amt), None),
+                    BinOp::Bswap => (bswap_width(w, l), None),
+                    BinOp::Mul => {
+                        let mask = w.mask();
+                        let lhs = l & mask;
+                        let rhs = r & mask;
+                        let bits = w.bits();
+                        let wide = (lhs as u128).wrapping_mul(rhs as u128);
+                        let res = w.truncate(wide as u64);
+                        let sign = 1u64 << (bits - 1);
+                        let lhs_s = if (lhs & sign) != 0 {
+                            (lhs as i128) | !((mask) as i128)
+                        } else {
+                            lhs as i128
+                        };
+                        let rhs_s = if (rhs & sign) != 0 {
+                            (rhs as i128) | !((mask) as i128)
+                        } else {
+                            rhs as i128
+                        };
+                        let full = lhs_s.wrapping_mul(rhs_s);
+                        let trunc_s = if (res & sign) != 0 {
+                            (res as i128) | !((mask) as i128)
+                        } else {
+                            res as i128
+                        };
+                        let overflow = full != trunc_s;
+                        (
+                            res,
+                            Some(FlagVals {
+                                cf: overflow,
+                                pf: false,
+                                af: false,
+                                zf: false,
+                                sf: false,
+                                of: overflow,
+                            }),
+                        )
+                    }
                 };
                 temps[dst.0 as usize] = res;
                 if !flags.is_empty() {
@@ -361,6 +520,8 @@ fn execute_block_cpu<B: Tier1Bus>(block: &IrBlock, cpu: &mut TestCpu, bus: &mut 
                         write_flagset(cpu, *flags, vals);
                     } else if matches!(op, BinOp::Shl | BinOp::Shr | BinOp::Sar) {
                         update_shift_flags(cpu, w, *op, l, shift_amt, res, *flags);
+                    } else if matches!(op, BinOp::Rol | BinOp::Ror) {
+                        update_rotate_flags(cpu, w, *op, l, shift_amt, res, *flags);
                     }
                 }
             }

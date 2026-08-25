@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sendJsonNoStore, sendTextNoStore, tryWriteResponse } from "../src/http_response_safe.js";
+import { sendJsonNoStore, sendTextNoStore, tryWriteResponse } from "../packages/transport-safety/src/http_response_safe.js";
 
 test("http_response_safe: does not throw if res.writeHead/res.end getters throw", () => {
   const res = new Proxy(

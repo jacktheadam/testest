@@ -40,7 +40,7 @@ function fallbackFormatOneLineError(err, maxLen = 512) {
 
 let formatOneLineError = fallbackFormatOneLineError;
 try {
-    const mod = await import(new URL("../../src/text.js", import.meta.url));
+    const mod = await import(new URL("../../packages/transport-safety/src/text.js", import.meta.url));
     if (typeof mod?.formatOneLineError === "function") {
         formatOneLineError = mod.formatOneLineError;
     }

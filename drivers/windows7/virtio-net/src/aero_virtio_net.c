@@ -3871,7 +3871,7 @@ static NDIS_STATUS AerovNetVirtioStart(_Inout_ AEROVNET_ADAPTER* Adapter) {
   AerovNetCtrlVqRegistryInit(Adapter);
 
   /*
-   * Contract v1 ring invariants (docs/windows7-virtio-driver-contract.md §2.3):
+   * Contract v1 ring invariants (wiki/areas/drivers-windows.md §2.3):
    * - MUST offer INDIRECT_DESC
    * - PACKED is not negotiated by the driver (split ring only)
    *
@@ -3882,7 +3882,7 @@ static NDIS_STATUS AerovNetVirtioStart(_Inout_ AEROVNET_ADAPTER* Adapter) {
    */
   Adapter->HostFeatures = VirtioPciReadDeviceFeatures(&Adapter->Vdev);
 
-  // Contract v1 features (docs/windows7-virtio-driver-contract.md §3.2.3):
+  // Contract v1 features (wiki/areas/drivers-windows.md §3.2.3):
   // - required: VERSION_1 + INDIRECT_DESC + MAC + STATUS
   RequiredFeatures = VIRTIO_NET_F_MAC | VIRTIO_NET_F_STATUS | AEROVNET_FEATURE_RING_INDIRECT_DESC;
   // Optional:
@@ -6628,7 +6628,7 @@ static NTSTATUS AerovNetDiagDispatchDeviceControl(_In_ PDEVICE_OBJECT DeviceObje
       WRITE_REGISTER_USHORT((volatile USHORT*)&CommonCfg->queue_select, 0);
       KeMemoryBarrier();
       /*
-       * Flush posted MMIO selector writes (see docs/windows7-virtio-driver-contract.md §1.5.0).
+       * Flush posted MMIO selector writes (see wiki/areas/drivers-windows.md §1.5.0).
        * Without a readback, some platforms can observe the old queue_select value
        * when reading queue_msix_vector immediately after the write.
        */

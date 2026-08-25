@@ -8,8 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const repoRoot = path.resolve(__dirname, '..');
-const watPath = path.join(repoRoot, 'web', 'public', 'wasm-jit-csp', 'mega-module.wat');
-const wasmPath = path.join(repoRoot, 'web', 'public', 'wasm-jit-csp', 'mega-module.wasm');
+const watPath = path.join(repoRoot, 'apps/web', 'public', 'wasm-jit-csp', 'mega-module.wat');
+const wasmPath = path.join(repoRoot, 'apps/web', 'public', 'wasm-jit-csp', 'mega-module.wasm');
 
 const wabt = await wabtInit();
 const wat = await readFile(watPath, 'utf8');

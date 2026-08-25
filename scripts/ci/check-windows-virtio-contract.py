@@ -3,7 +3,7 @@
 Validate Aero's Windows 7 virtio device contract wiring end-to-end.
 
 This is a deterministic CI check that ensures the canonical device contract manifest
-(`docs/windows-device-contract.json`) is consistent with:
+(`protocol-vectors/windows-device-contract.json`) is consistent with:
 
   - Windows driver INFs (HWID matches, service names, and strict contract-v1 gating)
   - The emulator's canonical PCI profiles (`crates/devices/src/pci/profile.rs`)
@@ -31,7 +31,7 @@ from typing import Any, Iterable, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-DEFAULT_CONTRACT_PATH = REPO_ROOT / "docs/windows-device-contract.json"
+DEFAULT_CONTRACT_PATH = REPO_ROOT / "protocol-vectors/windows-device-contract.json"
 DEFAULT_PROFILE_RS_PATH = REPO_ROOT / "crates/devices/src/pci/profile.rs"
 
 GUEST_TOOLS_DEVICES_CMD = REPO_ROOT / "guest-tools/config/devices.cmd"
@@ -970,7 +970,7 @@ def _validate_inf_bindings(devices: dict[str, ContractDevice], errors: list[str]
             hwid_upper = hwid.upper()
             if hwid_upper not in contract_hwids_upper:
                 errors.append(
-                    f"[{name}] INF matches HWID not present in docs/windows-device-contract.json.hardware_id_patterns:\n"
+                    f"[{name}] INF matches HWID not present in protocol-vectors/windows-device-contract.json.hardware_id_patterns:\n"
                     f"  INF: {inf_path.as_posix()}\n"
                     f"  HWID: {hwid!r}"
                 )
@@ -1044,7 +1044,7 @@ def main(argv: list[str]) -> int:
         "--contract",
         type=Path,
         default=DEFAULT_CONTRACT_PATH,
-        help="Path to docs/windows-device-contract.json (default: repo copy).",
+        help="Path to protocol-vectors/windows-device-contract.json (default: repo copy).",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="Check only (default).")

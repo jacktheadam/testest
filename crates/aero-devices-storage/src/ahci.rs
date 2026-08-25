@@ -8,13 +8,14 @@
 //! - Per-port registers (CLB/FB/IS/IE/CMD/TFD/SIG/SSTS/CI)
 //! - Command list parsing (command header + command table + PRDT)
 //! - ATA commands: IDENTIFY, READ/WRITE DMA (28-bit + EXT), READ/WRITE SECTORS (PIO 28-bit + EXT),
-//!   FLUSH CACHE(_EXT), SET FEATURES
+//!   READ VERIFY(_EXT), INITIALIZE DEVICE PARAMETERS, FLUSH CACHE(_EXT), SET FEATURES
 
 use std::fmt;
 use std::io;
 
 use crate::ata::{
-    AtaDrive, ATA_CMD_FLUSH_CACHE, ATA_CMD_FLUSH_CACHE_EXT, ATA_CMD_IDENTIFY, ATA_CMD_READ_DMA,
+    AtaDrive, ATA_CMD_FLUSH_CACHE, ATA_CMD_FLUSH_CACHE_EXT, ATA_CMD_IDENTIFY, ATA_CMD_INIT_DEV_PARAMS,
+    ATA_CMD_READ_DMA, ATA_CMD_READ_VERIFY, ATA_CMD_READ_VERIFY_EXT,
     ATA_CMD_READ_DMA_EXT, ATA_CMD_READ_SECTORS, ATA_CMD_READ_SECTORS_EXT, ATA_CMD_SET_FEATURES,
     ATA_CMD_WRITE_DMA, ATA_CMD_WRITE_DMA_EXT, ATA_CMD_WRITE_SECTORS, ATA_CMD_WRITE_SECTORS_EXT,
     ATA_ERROR_ABRT, ATA_STATUS_BSY, ATA_STATUS_DRDY, ATA_STATUS_DSC, ATA_STATUS_ERR,
@@ -404,9 +405,11 @@ impl AhciController {
             return;
         }
 
-        // Preserve AE/IE and ignore reserved bits. AE is required for AHCI mode.
-        let masked = val & (GHC_IE | GHC_AE);
-        self.hba.ghc = masked;
+        // On ICH9 (AHCI-only), GHC.AE is read-only-1: once set at reset it
+        // cannot be cleared. A non-RMW write that sets IE but omits AE would
+        // otherwise drop AE and silently leave AHCI mode. Mirror QEMU's
+        // ich9-ahci behavior by pinning AE on; only IE tracks the guest write.
+        self.hba.ghc = GHC_AE | (val & GHC_IE);
     }
 
     fn write_hba_is(&mut self, val: u32) {
@@ -754,6 +757,25 @@ fn process_command_slot(
     }
 
     let command = cfis[2];
+    if std::env::var_os("AERO_ATA_TRACE").is_some() {
+        // Bring-up: log every ATA opcode (not only the unsupported arm). FormatEx
+        // failing with ERROR_INVALID_PARAMETER before any write is the Win7 Setup
+        // wall; seeing IDENTIFY/READ/VERIFY vs silence tells us whether the reject
+        // is a missing opcode or a software parameter check.
+        let lba = if command == ATA_CMD_READ_DMA_EXT
+            || command == ATA_CMD_READ_SECTORS_EXT
+            || command == ATA_CMD_WRITE_DMA_EXT
+            || command == ATA_CMD_WRITE_SECTORS_EXT
+            || command == ATA_CMD_READ_VERIFY_EXT
+        {
+            extract_lba48(&cfis)
+        } else if cfis[7] & 0x40 != 0 {
+            extract_lba28(&cfis).unwrap_or(u64::MAX)
+        } else {
+            u64::MAX
+        };
+        eprintln!("AERO_ATA_TRACE: cmd=0x{command:02x} lba={lba:#x}");
+    }
     match command {
         ATA_CMD_IDENTIFY => {
             let identify = drive.identify_sector();
@@ -796,16 +818,32 @@ fn process_command_slot(
             drive.flush()?;
             complete_command(mem, port_regs, slot, 0);
         }
+        // READ VERIFY / READ VERIFY EXT: no data transfer. FormatEx issues
+        // these while preparing a new NTFS volume; aborting them as
+        // unsupported surfaces ERROR_INVALID_PARAMETER (0x80070057).
+        ATA_CMD_READ_VERIFY | ATA_CMD_READ_VERIFY_EXT | ATA_CMD_INIT_DEV_PARAMS => {
+            complete_command(mem, port_regs, slot, 0);
+        }
         ATA_CMD_SET_FEATURES => {
-            // Subcommand is in Features (low byte).
+            // Subcommand is in Features (low byte, cfis[3]).
+            // cfis[12] is the Sector Count register (the mode/parameter byte).
             match cfis[3] {
                 0x02 => drive.set_write_cache_enabled(true),
                 0x82 => drive.set_write_cache_enabled(false),
+                0x03 => {
+                    // Set Transfer Mode: sub-features in cfis[12].
+                    // Bits 0-2 select the type (0=PioDefault, 8=UDMA), bits 3-5
+                    // the mode index. storahci issues this during init.
+                    let _ = drive.set_transfer_mode_select(cfis[12]);
+                }
                 _ => {}
             }
             complete_command(mem, port_regs, slot, 0);
         }
         _ => {
+            if std::env::var_os("AERO_ATA_TRACE").is_some() {
+                eprintln!("AERO_ATA_TRACE: unsupported ATA command 0x{command:02x}");
+            }
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("unsupported ATA command 0x{command:02x}"),
@@ -950,6 +988,11 @@ fn dma_read_sectors_into_guest(
 
     let mut remaining = byte_len;
     let mut scratch = try_alloc_zeroed(MAX_DMA_CHUNK_BYTES)?;
+    // AHCI PRDs are byte-granular. The disk layer only accepts whole sectors, so
+    // a sector read is scattered across PRDs (Win7 FormatEx / NTFS $MFT does this).
+    let mut pending = [0u8; SECTOR_SIZE];
+    let mut pending_off = 0usize;
+    let mut pending_valid = 0usize;
 
     for i in 0..prdt_entries as u64 {
         if remaining == 0 {
@@ -961,33 +1004,48 @@ fn dma_read_sectors_into_guest(
             .wrapping_add(i.wrapping_mul(16));
         let prd = PrdtEntry::read(mem, prd_addr);
         let mut seg_remaining = (prd.dbc as usize).min(remaining);
-
-        if !seg_remaining.is_multiple_of(SECTOR_SIZE) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "unaligned PRDT length for ATA read DMA",
-            ));
-        }
-
         let mut seg_off = 0usize;
         while seg_remaining != 0 {
-            let chunk_len = seg_remaining.min(MAX_DMA_CHUNK_BYTES);
-            let dst = prd.dba.wrapping_add(seg_off as u64);
-
-            drive.read_sectors(lba, &mut scratch[..chunk_len])?;
-            mem.write_physical(dst, &scratch[..chunk_len]);
-
-            lba = lba.wrapping_add((chunk_len / SECTOR_SIZE) as u64);
-            remaining -= chunk_len;
-            seg_remaining -= chunk_len;
-            seg_off += chunk_len;
+            if pending_off == pending_valid {
+                if pending_valid != 0 && pending_valid != SECTOR_SIZE {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "AHCI DMA read left a partial sector",
+                    ));
+                }
+                // Fast path: guest asked for whole sectors into this PRD.
+                if seg_remaining >= SECTOR_SIZE {
+                    let chunk_len = (seg_remaining / SECTOR_SIZE * SECTOR_SIZE)
+                        .min(MAX_DMA_CHUNK_BYTES);
+                    drive.read_sectors(lba, &mut scratch[..chunk_len])?;
+                    mem.write_physical(prd.dba.wrapping_add(seg_off as u64), &scratch[..chunk_len]);
+                    lba = lba.wrapping_add((chunk_len / SECTOR_SIZE) as u64);
+                    remaining -= chunk_len;
+                    seg_remaining -= chunk_len;
+                    seg_off += chunk_len;
+                    continue;
+                }
+                drive.read_sectors(lba, &mut pending)?;
+                lba = lba.wrapping_add(1);
+                pending_off = 0;
+                pending_valid = SECTOR_SIZE;
+            }
+            let take = (pending_valid - pending_off).min(seg_remaining);
+            mem.write_physical(
+                prd.dba.wrapping_add(seg_off as u64),
+                &pending[pending_off..pending_off + take],
+            );
+            pending_off += take;
+            remaining -= take;
+            seg_remaining -= take;
+            seg_off += take;
         }
     }
 
     if remaining != 0 {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
-            "PRDT too small for DMA write",
+            "PRDT too small for DMA read",
         ));
     }
 
@@ -1029,6 +1087,12 @@ fn dma_write_sectors_from_guest(
 
     let mut remaining = byte_len;
     let mut scratch = try_alloc_zeroed(MAX_DMA_CHUNK_BYTES)?;
+    // AHCI PRDs are byte-granular (DBC is 0-based). storahci / FormatEx often
+    // split a 512-byte NTFS sector across two PRDs (e.g. 100+412). The disk
+    // backend rejects non-multiples of 512, which aborted those writes as
+    // TFES/ABRT and surfaced to Setup as ERROR_INVALID_PARAMETER (0x80070057).
+    let mut pending = [0u8; SECTOR_SIZE];
+    let mut pending_len = 0usize;
 
     for i in 0..prdt_entries as u64 {
         if remaining == 0 {
@@ -1040,33 +1104,49 @@ fn dma_write_sectors_from_guest(
             .wrapping_add(i.wrapping_mul(16));
         let prd = PrdtEntry::read(mem, prd_addr);
         let mut seg_remaining = (prd.dbc as usize).min(remaining);
-
-        if !seg_remaining.is_multiple_of(SECTOR_SIZE) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "unaligned PRDT length for ATA write DMA",
-            ));
-        }
-
         let mut seg_off = 0usize;
         while seg_remaining != 0 {
-            let chunk_len = seg_remaining.min(MAX_DMA_CHUNK_BYTES);
-            let src = prd.dba.wrapping_add(seg_off as u64);
-
-            mem.read_physical(src, &mut scratch[..chunk_len]);
-            drive.write_sectors(lba, &scratch[..chunk_len])?;
-
-            lba = lba.wrapping_add((chunk_len / SECTOR_SIZE) as u64);
-            remaining -= chunk_len;
-            seg_remaining -= chunk_len;
-            seg_off += chunk_len;
+            if pending_len == 0 && seg_remaining >= SECTOR_SIZE {
+                let chunk_len =
+                    (seg_remaining / SECTOR_SIZE * SECTOR_SIZE).min(MAX_DMA_CHUNK_BYTES);
+                mem.read_physical(
+                    prd.dba.wrapping_add(seg_off as u64),
+                    &mut scratch[..chunk_len],
+                );
+                drive.write_sectors(lba, &scratch[..chunk_len])?;
+                lba = lba.wrapping_add((chunk_len / SECTOR_SIZE) as u64);
+                remaining -= chunk_len;
+                seg_remaining -= chunk_len;
+                seg_off += chunk_len;
+                continue;
+            }
+            let take = (SECTOR_SIZE - pending_len).min(seg_remaining);
+            mem.read_physical(
+                prd.dba.wrapping_add(seg_off as u64),
+                &mut pending[pending_len..pending_len + take],
+            );
+            pending_len += take;
+            remaining -= take;
+            seg_remaining -= take;
+            seg_off += take;
+            if pending_len == SECTOR_SIZE {
+                drive.write_sectors(lba, &pending)?;
+                lba = lba.wrapping_add(1);
+                pending_len = 0;
+            }
         }
     }
 
     if remaining != 0 {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
-            "PRDT too small for DMA read",
+            "PRDT too small for DMA write",
+        ));
+    }
+    if pending_len != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "AHCI DMA write left a partial sector",
         ));
     }
 
@@ -1886,6 +1966,107 @@ mod tests {
         mem.read_physical(verify_buf, &mut verify);
         assert_eq!(verify, [1, 2, 3, 4]);
         assert!(irq.level());
+    }
+
+    #[test]
+    fn write_dma_split_prdt_unaligned_entries_roundtrip() {
+        // Win7 FormatEx / NTFS $MFT writes one 512-byte sector as two AHCI PRDs
+        // (e.g. 100+412). Each entry is a legal 0-based DBC; only the total is
+        // sector-aligned. Aborting that as UnalignedLength was the Setup
+        // 0x80070057 Format wall.
+        let irq = TestIrqLine::default();
+        let mut ctl = AhciController::new(Box::new(irq.clone()), 1);
+        let mut mem = TestMemory::new(0x20_000);
+
+        let capacity = 64 * SECTOR_SIZE as u64;
+        let disk = RawDisk::create(MemBackend::new(), capacity).unwrap();
+        ctl.attach_drive(0, AtaDrive::new(Box::new(disk)).unwrap());
+
+        let clb = 0x1000;
+        let fb = 0x2000;
+        let ctba = 0x3000;
+        ctl.write_u32(PORT_BASE + PORT_REG_CLB, clb as u32);
+        ctl.write_u32(PORT_BASE + PORT_REG_FB, fb as u32);
+        ctl.write_u32(HBA_REG_GHC, GHC_IE | GHC_AE);
+        ctl.write_u32(PORT_BASE + PORT_REG_IE, PORT_IS_DHRS);
+        ctl.write_u32(PORT_BASE + PORT_REG_CMD, PORT_CMD_ST | PORT_CMD_FRE);
+
+        let first = 0x6000u64;
+        let second = 0x6100u64;
+        let mut payload = [0u8; SECTOR_SIZE];
+        for (i, b) in payload.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        mem.write_physical(first, &payload[..100]);
+        mem.write_physical(second, &payload[100..]);
+
+        write_cmd_header(&mut mem, clb, 0, ctba, 2, true);
+        write_cfis_28(&mut mem, ctba, ATA_CMD_WRITE_DMA, 7, 1);
+        write_prdt(&mut mem, ctba, 0, first, 100);
+        write_prdt(&mut mem, ctba, 1, second, (SECTOR_SIZE - 100) as u32);
+        ctl.write_u32(PORT_BASE + PORT_REG_CI, 1);
+        ctl.process(&mut mem);
+        assert_eq!(
+            ctl.read_u32(PORT_BASE + PORT_REG_TFD) & (ATA_STATUS_ERR as u32),
+            0,
+            "split-PRDT write must not TFES/ABRT"
+        );
+
+        let verify_buf = 0x7000;
+        write_cmd_header(&mut mem, clb, 0, ctba, 1, false);
+        write_cfis(&mut mem, ctba, ATA_CMD_READ_DMA_EXT, 7, 1);
+        write_prdt(&mut mem, ctba, 0, verify_buf, SECTOR_SIZE as u32);
+        ctl.write_u32(PORT_BASE + PORT_REG_CI, 1);
+        ctl.process(&mut mem);
+
+        let mut got = [0u8; SECTOR_SIZE];
+        mem.read_physical(verify_buf, &mut got);
+        assert_eq!(got, payload);
+    }
+
+    #[test]
+    fn read_dma_split_prdt_unaligned_entries_roundtrip() {
+        let irq = TestIrqLine::default();
+        let mut ctl = AhciController::new(Box::new(irq.clone()), 1);
+        let mut mem = TestMemory::new(0x20_000);
+
+        let capacity = 64 * SECTOR_SIZE as u64;
+        let disk = RawDisk::create(MemBackend::new(), capacity).unwrap();
+        let mut drive = AtaDrive::new(Box::new(disk)).unwrap();
+        let mut payload = [0u8; SECTOR_SIZE];
+        for (i, b) in payload.iter_mut().enumerate() {
+            *b = (i % 241) as u8;
+        }
+        drive.write_sectors(3, &payload).unwrap();
+        ctl.attach_drive(0, drive);
+
+        let clb = 0x1000;
+        let fb = 0x2000;
+        let ctba = 0x3000;
+        ctl.write_u32(PORT_BASE + PORT_REG_CLB, clb as u32);
+        ctl.write_u32(PORT_BASE + PORT_REG_FB, fb as u32);
+        ctl.write_u32(HBA_REG_GHC, GHC_IE | GHC_AE);
+        ctl.write_u32(PORT_BASE + PORT_REG_IE, PORT_IS_DHRS);
+        ctl.write_u32(PORT_BASE + PORT_REG_CMD, PORT_CMD_ST | PORT_CMD_FRE);
+
+        let first = 0x6000u64;
+        let second = 0x6100u64;
+        write_cmd_header(&mut mem, clb, 0, ctba, 2, false);
+        write_cfis_28(&mut mem, ctba, ATA_CMD_READ_DMA, 3, 1);
+        write_prdt(&mut mem, ctba, 0, first, 100);
+        write_prdt(&mut mem, ctba, 1, second, (SECTOR_SIZE - 100) as u32);
+        ctl.write_u32(PORT_BASE + PORT_REG_CI, 1);
+        ctl.process(&mut mem);
+        assert_eq!(
+            ctl.read_u32(PORT_BASE + PORT_REG_TFD) & (ATA_STATUS_ERR as u32),
+            0,
+            "split-PRDT read must not TFES/ABRT"
+        );
+
+        let mut got = [0u8; SECTOR_SIZE];
+        mem.read_physical(first, &mut got[..100]);
+        mem.read_physical(second, &mut got[100..]);
+        assert_eq!(got, payload);
     }
 
     #[test]

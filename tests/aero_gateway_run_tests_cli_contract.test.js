@@ -10,7 +10,7 @@ function repoRootFromHere(importMetaUrl) {
 }
 
 function runGatewayTestsCli(repoRoot, args) {
-  const scriptAbs = path.join(repoRoot, "backend", "aero-gateway", "scripts", "run-tests.js");
+  const scriptAbs = path.join(repoRoot, "services", "gateway", "scripts", "run-tests.js");
   const res = spawnSync(process.execPath, [scriptAbs, ...args], {
     cwd: repoRoot,
     env: {

@@ -12,7 +12,7 @@ set -euo pipefail
 # - booleans normalize to 1/0 (e.g. AERO_REQUIRE_WEBGPU=true -> 1)
 # - invalid paths fail fast with clear errors
 #
-# See: docs/env-vars.md
+# See: the env-var reference in wiki/areas/testing.md
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"

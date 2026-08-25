@@ -25,12 +25,12 @@ fn cpu_count_must_be_non_zero() {
         "error message must explain that SMP is still bring-up only; got: {msg}"
     );
     assert!(
-        msg.contains("docs/21-smp.md"),
-        "error message must point to relevant docs; got: {msg}"
+        msg.contains("CPU and JIT area page"),
+        "error message must point to the SMP status notes in the wiki; got: {msg}"
     );
     assert!(
-        msg.contains("docs/09-bios-firmware.md"),
-        "error message must also point to the firmware SMP boot docs; got: {msg}"
+        msg.contains("platform and firmware area page"),
+        "error message must also point to the SMP boot notes in the wiki; got: {msg}"
     );
 }
 

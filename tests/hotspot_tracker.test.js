@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { HotspotTracker } from '../src/perf/hotspot_tracker.js';
+import { HotspotTracker } from '../apps/web/src/perf/hotspot_tracker.js';
 
 test('HotspotTracker reports a tight loop PC as the dominant hotspot', () => {
   const tracker = new HotspotTracker({ capacity: 8 });

@@ -43,7 +43,7 @@ export const run = async (page: Page, baseUrl: string): Promise<MemoryStabilityR
   const url = normalizedBase.endsWith('/web') ? `${normalizedBase}/` : `${normalizedBase}/web/`;
   await page.goto(url, { waitUntil: 'load' });
 
-  // Memory telemetry is installed by the `/web/` entrypoint. If it's missing,
+  // Memory telemetry is installed by the `/apps/web/` entrypoint. If it's missing,
   // proceed in best-effort mode (returning null samples/deltas) rather than
   // failing the entire scenario.
   let telemetryAvailable = false;

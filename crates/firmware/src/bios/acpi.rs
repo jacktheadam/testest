@@ -1,6 +1,20 @@
-use aero_acpi::{AcpiConfig, AcpiPlacement, AcpiTables, PhysicalMemory as AcpiPhysicalMemory};
+use aero_acpi::{
+    AcpiConfig, AcpiPlacement, AcpiTables, PhysicalMemory as AcpiPhysicalMemory,
+    DEFAULT_ACPI_ALIGNMENT,
+};
 
 use super::{BiosBus, PCIE_ECAM_BASE, PCIE_ECAM_END_BUS, PCIE_ECAM_SEGMENT, PCIE_ECAM_START_BUS};
+
+/// Reserved window for the auto-placed SDT blob region (DSDT/FADT/MADT/HPET/
+/// RSDT/XSDT) at the top of low RAM. The e820 ACPI-reclaim region is computed
+/// from the actual table addresses afterwards, so this only needs to be a safe
+/// upper bound on the combined table footprint.
+const ACPI_RECLAIM_WINDOW_SIZE: u64 = 0x1_0000;
+
+fn align_down(value: u64, alignment: u64) -> u64 {
+    debug_assert!(alignment.is_power_of_two());
+    value & !(alignment - 1)
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct AcpiInfo {
@@ -74,6 +88,7 @@ pub trait AcpiBuilder: Send {
         memory_size_bytes: u64,
         cpu_count: u8,
         pirq_to_gsi: [u32; 4],
+        enable_i8042: bool,
         placement: AcpiPlacement,
     ) -> Result<AcpiInfo, BiosAcpiError>;
 }
@@ -88,9 +103,17 @@ impl AcpiBuilder for AeroAcpiBuilder {
         memory_size_bytes: u64,
         cpu_count: u8,
         pirq_to_gsi: [u32; 4],
+        enable_i8042: bool,
         placement: AcpiPlacement,
     ) -> Result<AcpiInfo, BiosAcpiError> {
-        build_and_write(bus, memory_size_bytes, cpu_count, pirq_to_gsi, placement)
+        build_and_write(
+            bus,
+            memory_size_bytes,
+            cpu_count,
+            pirq_to_gsi,
+            enable_i8042,
+            placement,
+        )
     }
 }
 
@@ -99,11 +122,13 @@ pub fn build_and_write(
     memory_size_bytes: u64,
     cpu_count: u8,
     pirq_to_gsi: [u32; 4],
+    enable_i8042: bool,
     placement: AcpiPlacement,
 ) -> Result<AcpiInfo, BiosAcpiError> {
     let cfg = AcpiConfig {
         cpu_count: cpu_count.max(1),
         pirq_to_gsi,
+        enable_i8042,
         // Enable PCIe-friendly config space access via MMCONFIG/ECAM.
         //
         // This must match the platform MMIO mapping (see `aero-pc-platform`).
@@ -113,6 +138,32 @@ pub fn build_and_write(
         pcie_end_bus: PCIE_ECAM_END_BUS,
         ..Default::default()
     };
+
+    // `tables_base == 0` / `nvs_base == 0` mean "auto": place the ACPI windows at
+    // the top of low RAM (below the PCIe ECAM / MMIO window), like real PC BIOSes.
+    // Boot loaders allocate and reclaim low physical pages for image loading, so
+    // the old fixed `0x100000` base put the SDTs directly in winload's allocation
+    // zone.
+    //
+    // Regression witness: Win7's winload loaded a boot PE image over the
+    // RSDT/XSDT at 0x100AC0/0x100B00, then failed ACPI validation with boot
+    // status 0xc0000225 ("the firmware (BIOS) is not ACPI compatible").
+    let mut placement = placement;
+    if placement.tables_base == 0 || placement.nvs_base == 0 {
+        let low_ram_top = memory_size_bytes.min(PCIE_ECAM_BASE);
+        if placement.nvs_base == 0 {
+            placement.nvs_base = align_down(
+                low_ram_top.saturating_sub(placement.nvs_size),
+                DEFAULT_ACPI_ALIGNMENT,
+            );
+        }
+        if placement.tables_base == 0 {
+            placement.tables_base = align_down(
+                placement.nvs_base.saturating_sub(ACPI_RECLAIM_WINDOW_SIZE),
+                DEFAULT_ACPI_ALIGNMENT,
+            );
+        }
+    }
 
     let tables = AcpiTables::build(&cfg, placement);
 
@@ -130,6 +181,12 @@ pub fn build_and_write(
     if let (Some(addr), Some(table)) = (tables.addresses.mcfg, tables.mcfg.as_ref()) {
         to_check.push(("MCFG", addr, table.len()));
     }
+    let Some(nvs_end) = placement.nvs_base.checked_add(placement.nvs_size) else {
+        return Err(BiosAcpiError::NvsAddressOverflow {
+            base: placement.nvs_base,
+            size: placement.nvs_size,
+        });
+    };
     for (name, addr, len) in to_check {
         let Some(end) = addr.checked_add(len as u64) else {
             return Err(BiosAcpiError::TableAddressOverflow {
@@ -146,12 +203,6 @@ pub fn build_and_write(
             });
         }
     }
-    let Some(nvs_end) = placement.nvs_base.checked_add(placement.nvs_size) else {
-        return Err(BiosAcpiError::NvsAddressOverflow {
-            base: placement.nvs_base,
-            size: placement.nvs_size,
-        });
-    };
     if nvs_end > memory_size_bytes {
         return Err(BiosAcpiError::NvsOutOfBounds {
             end: nvs_end,

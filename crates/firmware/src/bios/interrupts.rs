@@ -11,6 +11,13 @@ use super::{
 };
 use crate::cpu::CpuState as FirmwareCpuState;
 
+/// Whether to trace PCI BIOS (INT 1Ah AH=0xB1) calls to host stderr.
+/// Bring-up/debug only, env-gated (`AERO_PCI_BIOS_TRACE`).
+fn pci_bios_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("AERO_PCI_BIOS_TRACE").is_some())
+}
+
 pub const E820_RAM: u32 = 1;
 pub const E820_RESERVED: u32 = 2;
 pub const E820_ACPI: u32 = 3;
@@ -1753,6 +1760,24 @@ fn handle_int15(bios: &mut Bios, cpu: &mut CpuState, bus: &mut dyn BiosBus) {
                 cpu.gpr[gpr::RAX] = (cpu.gpr[gpr::RAX] & !0xFFFF) | ext_kb.min(0xFFFF);
                 cpu.rflags &= !FLAG_CF;
             }
+            0xD8 => {
+                // Return ACPI RSDP table pointer via ES:EBX.
+                //
+                // Windows bootmgr/winload probes this to determine firmware-ACPI
+                // compatibility before scanning memory for the RSDP signature. On
+                // a real BIOS this returns the RSDP in the F-segment or EBDA.
+                if let Some(rsdp_addr) = bios.rsdp_addr {
+                    let seg = (rsdp_addr >> 4) as u16;
+                    let off = (rsdp_addr & 0xF) as u16;
+                    set_real_mode_seg(&mut cpu.segments.es, seg);
+                    cpu.gpr[gpr::RBX] = (cpu.gpr[gpr::RBX] & !0xFFFF) | (off as u64);
+                    cpu.gpr[gpr::RAX] &= !0xFF00u64; // AH=0
+                    cpu.rflags &= !FLAG_CF;
+                } else {
+                    cpu.rflags |= FLAG_CF;
+                    cpu.gpr[gpr::RAX] = (cpu.gpr[gpr::RAX] & !0xFFFF) | (0x86u64 << 8);
+                }
+            }
             _ => {
                 const LOG_LIMIT: u32 = 16;
                 let count = bios.unhandled_interrupt_log_count;
@@ -2022,16 +2047,109 @@ fn handle_int1a(bios: &mut Bios, cpu: &mut CpuState, bus: &mut dyn BiosBus) {
                 }
             }
         }
-        _ => {
-            // Common extension probe: PCI BIOS interface uses AH=0xB1.
+        0xB1 => {
+            // PCI BIOS interface.
             //
-            // We don't currently expose a PCI BIOS interface surface (callers should use native
-            // config space + ACPI), but returning a conventional status code avoids confusing
-            // legacy probes that expect AH to be set on failure.
-            if ah == 0xB1 {
-                // 0x81 = function not supported.
-                cpu.gpr[gpr::RAX] = (cpu.gpr[gpr::RAX] & !0xFF00) | (0x81u64 << 8);
+            // The NT loader (bootmgr/winload) probes for a PCI BIOS as part of its
+            // firmware compatibility check; reporting the interface unsupported
+            // (AH=0x81 + CF) made Win7's winload bail with boot status 0xc0000225
+            // ("the firmware (BIOS) is not ACPI compatible") *before* it ever
+            // scanned for the RSDP (verified: zero reads of the RSDP/table
+            // addresses under a read watchpoint on the failing boot).
+            //
+            // FIND_PCI / FIND_CLASS are answered truthfully from the POST
+            // enumeration (`pci_devices`). Config-space read/write and the IRQ
+            // routing table remain unsupported (AH=0x81 + CF) until a guest
+            // demonstrates it needs them; `AERO_PCI_BIOS_TRACE` logs the calls.
+            // PCI BIOS 2.1 function codes in AL (AH=0xB1):
+            //   0x01 PCI_BIOS_PRESENT — installation check (EDX must become 'PCI ')
+            //   0x02 FIND_PCI_DEVICE
+            //   0x03 FIND_PCI_CLASS_CODE
+            //   0x06.. config space / special cycle / IRQ routing / ...
+            //
+            // Regression (2026-07-27): AL=0x01 was wrongly treated as FIND_PCI. Bootmgr's
+            // installation check then got AH=0x86 / no 'PCI ' in EDX and failed early
+            // with "BOOTMGR image is corrupt". jul26 (AH=0x81 for all B1) cold-booted;
+            // the mis-coded FIND path did not.
+            let al = (cpu.gpr[gpr::RAX] & 0xFF) as u8;
+            if pci_bios_trace() {
+                eprintln!(
+                    "[pci-bios] AX={:#06x} BX={:#06x} CX={:#06x} DX={:#06x} SI={:#06x} DI={:#06x}",
+                    cpu.gpr[gpr::RAX] & 0xFFFF,
+                    cpu.gpr[gpr::RBX] & 0xFFFF,
+                    cpu.gpr[gpr::RCX] & 0xFFFF,
+                    cpu.gpr[gpr::RDX] & 0xFFFF,
+                    cpu.gpr[gpr::RSI] & 0xFFFF,
+                    cpu.gpr[gpr::RDI] & 0xFFFF
+                );
             }
+            match al {
+                0x01 => {
+                    // PCI_BIOS_PRESENT. Required by Win7 winload (0xc0000225 without it).
+                    // AL = hardware mechanism bits (bit0 = config mech #1).
+                    // BH/BL = interface level major/minor (2.10).
+                    // CL = last PCI bus number.
+                    // EDX = 'PCI ' (0x20494350 little-endian).
+                    let last_bus = bios.pci_devices().iter().map(|d| d.bus).max().unwrap_or(0);
+                    cpu.gpr[gpr::RAX] = (cpu.gpr[gpr::RAX] & !0xFFFF) | 0x0001; // AH=0, AL=mech#1
+                    cpu.gpr[gpr::RBX] = (cpu.gpr[gpr::RBX] & !0xFFFF) | 0x0210; // v2.10
+                    cpu.gpr[gpr::RCX] = (cpu.gpr[gpr::RCX] & !0xFF) | (last_bus as u64);
+                    cpu.gpr[gpr::RDX] = (cpu.gpr[gpr::RDX] & !0xFFFF_FFFF) | 0x2049_4350; // 'PCI '
+                    cpu.rflags &= !FLAG_CF;
+                }
+                0x02 => {
+                    // FIND_PCI_DEVICE: CX=vendor, DX=device, SI=index.
+                    let want_vendor = (cpu.gpr[gpr::RCX] & 0xFFFF) as u16;
+                    let want_device = (cpu.gpr[gpr::RDX] & 0xFFFF) as u16;
+                    let index = (cpu.gpr[gpr::RSI] & 0xFFFF) as usize;
+                    match bios
+                        .pci_devices()
+                        .iter()
+                        .filter(|d| d.vendor_id == want_vendor && d.device_id == want_device)
+                        .nth(index)
+                    {
+                        Some(d) => {
+                            cpu.gpr[gpr::RAX] &= !0xFF00; // AH=0
+                            cpu.gpr[gpr::RBX] = (cpu.gpr[gpr::RBX] & !0xFFFF)
+                                | (((d.bus as u64) << 8) | (((d.device << 3) | d.function) as u64));
+                            cpu.rflags &= !FLAG_CF;
+                        }
+                        None => {
+                            cpu.gpr[gpr::RAX] = (cpu.gpr[gpr::RAX] & !0xFF00) | (0x86u64 << 8);
+                            cpu.rflags |= FLAG_CF;
+                        }
+                    }
+                }
+                0x03 => {
+                    // FIND_PCI_CLASS_CODE: ECX bits 23:0 = class code, SI=index.
+                    let want_class = (cpu.gpr[gpr::RCX] & 0x00FF_FFFF) as u32;
+                    let index = (cpu.gpr[gpr::RSI] & 0xFFFF) as usize;
+                    match bios
+                        .pci_devices()
+                        .iter()
+                        .filter(|d| d.class_code == want_class)
+                        .nth(index)
+                    {
+                        Some(d) => {
+                            cpu.gpr[gpr::RAX] &= !0xFF00;
+                            cpu.gpr[gpr::RBX] = (cpu.gpr[gpr::RBX] & !0xFFFF)
+                                | (((d.bus as u64) << 8) | (((d.device << 3) | d.function) as u64));
+                            cpu.rflags &= !FLAG_CF;
+                        }
+                        None => {
+                            cpu.gpr[gpr::RAX] = (cpu.gpr[gpr::RAX] & !0xFF00) | (0x86u64 << 8);
+                            cpu.rflags |= FLAG_CF;
+                        }
+                    }
+                }
+                _ => {
+                    // Config R/W, special cycle, IRQ routing table, ...
+                    cpu.gpr[gpr::RAX] = (cpu.gpr[gpr::RAX] & !0xFF00) | (0x81u64 << 8);
+                    cpu.rflags |= FLAG_CF;
+                }
+            }
+        }
+        _ => {
             cpu.rflags |= FLAG_CF;
         }
     }
@@ -3842,15 +3960,61 @@ mod tests {
     }
 
     #[test]
-    fn int1a_pci_bios_probes_report_function_not_supported() {
+    fn int1a_pci_bios_present_find_and_unsupported_functions() {
+        // Regression: Win7 winload probes INT 1Ah AH=0xB1; AH=0x81 on the
+        // presence check (AL=0x01) made it bail with 0xc0000225 before scanning
+        // the RSDP. A later bug treated AL=0x01 as FIND_PCI and broke cold boot
+        // with "BOOTMGR image is corrupt" — AL codes follow PCI BIOS 2.1:
+        //   0x01 PRESENT, 0x02 FIND_DEVICE, 0x03 FIND_CLASS.
         let mut bios = Bios::new(super::super::BiosConfig::default());
+        bios.pci_devices.push(super::super::PciDevice {
+            bus: 0,
+            device: 2,
+            function: 0,
+            vendor_id: 0x8086,
+            device_id: 0x100e,
+            class_code: 0x020000,
+            irq_line: 11,
+        });
         let mut cpu = CpuState::new(CpuMode::Real);
         let mut mem = TestMemory::new(2 * 1024 * 1024);
 
-        // PCI BIOS presence check uses AX=B101h.
+        // PRESENT (AX=B101) → AH=0, EDX='PCI ', CF clear.
         cpu.gpr[gpr::RAX] = 0xB101;
         handle_int1a(&mut bios, &mut cpu, &mut mem);
+        assert_eq!(cpu.rflags & FLAG_CF, 0);
+        assert_eq!((cpu.gpr[gpr::RAX] >> 8) as u8, 0);
+        assert_eq!((cpu.gpr[gpr::RDX] as u32), 0x2049_4350);
+        assert_eq!((cpu.gpr[gpr::RBX] as u16), 0x0210);
 
+        // FIND_PCI_DEVICE (AX=B102) for the seeded device.
+        cpu.gpr[gpr::RAX] = 0xB102;
+        cpu.gpr[gpr::RCX] = 0x8086;
+        cpu.gpr[gpr::RDX] = 0x100e;
+        cpu.gpr[gpr::RSI] = 0;
+        handle_int1a(&mut bios, &mut cpu, &mut mem);
+        assert_eq!(cpu.rflags & FLAG_CF, 0);
+        assert_eq!((cpu.gpr[gpr::RAX] >> 8) as u8, 0);
+        assert_eq!(cpu.gpr[gpr::RBX] as u16, (2 << 3));
+
+        // FIND_PCI_DEVICE miss → AH=0x86 + CF.
+        cpu.gpr[gpr::RAX] = 0xB102;
+        cpu.gpr[gpr::RDX] = 0x5678;
+        handle_int1a(&mut bios, &mut cpu, &mut mem);
+        assert_ne!(cpu.rflags & FLAG_CF, 0);
+        assert_eq!((cpu.gpr[gpr::RAX] >> 8) as u8, 0x86);
+
+        // FIND_CLASS (AX=B103) for network class 0x020000.
+        cpu.gpr[gpr::RAX] = 0xB103;
+        cpu.gpr[gpr::RCX] = 0x020000;
+        cpu.gpr[gpr::RSI] = 0;
+        handle_int1a(&mut bios, &mut cpu, &mut mem);
+        assert_eq!(cpu.rflags & FLAG_CF, 0);
+        assert_eq!(cpu.gpr[gpr::RBX] as u16, (2 << 3));
+
+        // Unsupported (config read AX=B108) → AH=0x81 + CF.
+        cpu.gpr[gpr::RAX] = 0xB108;
+        handle_int1a(&mut bios, &mut cpu, &mut mem);
         assert_ne!(cpu.rflags & FLAG_CF, 0);
         assert_eq!((cpu.gpr[gpr::RAX] >> 8) as u8, 0x81);
     }

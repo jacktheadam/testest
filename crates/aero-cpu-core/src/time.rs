@@ -32,6 +32,13 @@ pub enum TimeSourceMode {
 pub struct TimeSource {
     tsc_hz: u64,
     tsc: u64,
+    /// Monotonic virtual cycles advanced by the emulator.
+    ///
+    /// This is deliberately independent of the guest-visible TSC. Software may
+    /// legally move `IA32_TSC` backward or forward with `WRMSR`; embeddings
+    /// still need an unaffected elapsed-cycle counter to advance platform
+    /// clocks without interpreting that architectural write as elapsed time.
+    elapsed_cycles: u64,
     mode: TimeSourceMode,
 }
 
@@ -46,6 +53,7 @@ impl TimeSource {
         Self {
             tsc_hz,
             tsc: 0,
+            elapsed_cycles: 0,
             mode: TimeSourceMode::Deterministic,
         }
     }
@@ -55,6 +63,7 @@ impl TimeSource {
         Self {
             tsc_hz,
             tsc: 0,
+            elapsed_cycles: 0,
             mode: TimeSourceMode::WallClock {
                 anchor: now,
                 anchor_tsc: 0,
@@ -81,6 +90,16 @@ impl TimeSource {
         }
     }
 
+    /// Return the monotonic number of virtual cycles explicitly advanced by
+    /// the emulator.
+    ///
+    /// Unlike [`TimeSource::read_tsc`], this value is not changed by
+    /// [`TimeSource::set_tsc`]. It is intended for short-interval accounting
+    /// by machine embeddings, not as an architectural guest register.
+    pub fn elapsed_cycles(&self) -> u64 {
+        self.elapsed_cycles
+    }
+
     pub fn read_tsc(&mut self) -> u64 {
         match &mut self.mode {
             TimeSourceMode::Deterministic => self.tsc,
@@ -94,6 +113,7 @@ impl TimeSource {
     }
 
     pub fn advance_cycles(&mut self, cycles: u64) {
+        self.elapsed_cycles = self.elapsed_cycles.wrapping_add(cycles);
         if matches!(&self.mode, TimeSourceMode::Deterministic) {
             self.tsc = self.tsc.wrapping_add(cycles);
             return;
@@ -113,4 +133,28 @@ fn duration_to_ticks(tsc_hz: u64, duration: Duration) -> u64 {
     let nanos = duration.as_nanos();
     let ticks = nanos.saturating_mul(tsc_hz as u128) / 1_000_000_000u128;
     ticks.min(u64::MAX as u128) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TimeSource;
+
+    #[test]
+    fn architectural_tsc_writes_do_not_change_elapsed_cycle_accounting() {
+        let mut time = TimeSource::new_deterministic(3_000_000_000);
+        time.advance_cycles(1234);
+        assert_eq!(time.elapsed_cycles(), 1234);
+
+        time.set_tsc(7);
+        assert_eq!(time.read_tsc(), 7);
+        assert_eq!(
+            time.elapsed_cycles(),
+            1234,
+            "WRMSR IA32_TSC must not masquerade as elapsed platform time"
+        );
+
+        time.advance_cycles(9);
+        assert_eq!(time.read_tsc(), 16);
+        assert_eq!(time.elapsed_cycles(), 1243);
+    }
 }

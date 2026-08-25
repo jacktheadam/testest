@@ -41,7 +41,7 @@ fn hid_gamepad_set_hat_and_axes_clamp_to_descriptor_ranges() {
 }
 
 fn composite_gamepad_get_report_bytes(dev: &mut UsbCompositeHidInputHandle) -> [u8; 8] {
-    // Request the gamepad input report from interface 2 (see docs/usb-hid-gamepad.md).
+    // Request the gamepad input report from interface 2 (see the USB and input area page).
     let resp = dev.handle_control_request(
         SetupPacket {
             bm_request_type: 0xa1,

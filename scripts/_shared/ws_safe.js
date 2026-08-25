@@ -1,1 +1,1 @@
-export { wsCloseSafe, wsIsOpenSafe, wsSendSafe } from "../../src/ws_safe.js";
+export { wsCloseSafe, wsIsOpenSafe, wsSendSafe } from "../../apps/web/src/ws_safe.js";

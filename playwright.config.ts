@@ -260,23 +260,28 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `npm run dev:harness -- --host 127.0.0.1 --port ${DEV_PORT} --strictPort`,
+      // Invoke the tool directly rather than through a package script. Package
+      // managers differ in how they forward trailing arguments — pnpm passes the
+      // `--` separator through, which Vite treats as end-of-options, so the port
+      // is silently ignored and the server binds to its default. Playwright then
+      // waits for a port nothing is listening on and fails 60s later with a
+      // message about the web server rather than about arguments.
+      command: `pnpm exec vite --config vite.harness.config.ts --host 127.0.0.1 --port ${DEV_PORT} --strictPort`,
       port: DEV_PORT,
-      // Default to `false` locally to avoid accidentally reusing a different Vite
-      // server on the same port (e.g. the legacy `web/` Vite app via `npm run dev:web`
-      // or `npm -w web run dev`). Opt in explicitly when iterating on E2E:
-      // `AERO_PLAYWRIGHT_REUSE_SERVER=1 npm run test:e2e`.
+      // Default to `false` locally so a different Vite server already on this
+      // port is not silently reused. Opt in when iterating:
+      // `AERO_PLAYWRIGHT_REUSE_SERVER=1 pnpm run test:e2e`.
       reuseExistingServer: REUSE_EXISTING_SERVER,
     },
     {
-      command: `npm run serve:coi:harness -- --host 127.0.0.1 --port ${PREVIEW_PORT} --strictPort`,
+      command: `pnpm exec vite build --config vite.harness.config.ts --emptyOutDir && pnpm exec vite preview --config vite.harness.config.ts --host 127.0.0.1 --port ${PREVIEW_PORT} --strictPort`,
       port: PREVIEW_PORT,
       timeout: 300_000,
       reuseExistingServer: REUSE_EXISTING_SERVER,
     },
     {
       // Dedicated server for CSP (wasm-unsafe-eval) matrix tests.
-      command: `node server/poc-server.mjs --port ${CSP_POC_PORT}`,
+      command: `node tests/helpers/csp_server.mjs --port ${CSP_POC_PORT}`,
       port: CSP_POC_PORT,
       reuseExistingServer: REUSE_EXISTING_SERVER,
     },

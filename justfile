@@ -121,7 +121,7 @@ setup:
   rustup component add rustfmt clippy --toolchain "${stable_toolchain}"
 
   # Threaded/shared-memory WASM builds use `-Z build-std` and therefore need
-  # nightly + rust-src. The web app's `npm run wasm:build` script depends on this.
+  # nightly + rust-src. The web app's `pnpm run wasm:build` script depends on this.
   toolchains_file="scripts/toolchains.json"
   if [[ ! -f "${toolchains_file}" ]]; then
     echo "error: ${toolchains_file} not found (required to determine pinned nightly toolchain)" >&2
@@ -159,17 +159,17 @@ setup:
   fi
 
   if [[ -f "{{WEB_DIR}}/package.json" ]]; then
-    echo "==> Node: installing JS dependencies (npm ci)"
+    echo "==> Node: installing JS dependencies (pnpm install --frozen-lockfile)"
     just _check_node_version
-    if ! command -v npm >/dev/null; then
-      echo "error: npm is required to install JS deps" >&2
+    if ! command -v pnpm >/dev/null; then
+      echo "error: pnpm is required to install JS deps" >&2
       exit 1
     fi
 
     # Workspaces: the lockfile lives at the repo root, even if users override
     # `AERO_NODE_DIR` to point at a workspace subdir (e.g. `web/`).
     #
-    # Running `npm ci` inside a workspace subdir can create a nested
+    # Running `pnpm install --frozen-lockfile` inside a workspace subdir can create a nested
     # `web/node_modules` tree, which defeats the purpose of a single shared
     # workspace install.
     install_dir="{{WEB_DIR}}"
@@ -188,9 +188,9 @@ setup:
     # Keep `just setup` fast by skipping the Playwright browser download. Install
     # browsers explicitly when you need to run E2E tests:
     #   npx playwright install --with-deps chromium
-    (cd "$install_dir" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci)
+    (cd "$install_dir" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pnpm install --frozen-lockfile)
   else
-    echo "==> Node: '{{WEB_DIR}}/package.json' not found; skipping npm ci"
+    echo "==> Node: '{{WEB_DIR}}/package.json' not found; skipping pnpm install --frozen-lockfile"
   fi
 
   echo "==> Setup complete"
@@ -207,9 +207,9 @@ wasm:
         echo "error: wasm-pack not found; run 'just setup' (or 'cargo install --locked wasm-pack')" >&2
         exit 1
       fi
-      echo "==> Building WASM (single + threaded) via '{{WEB_DIR}}' npm scripts"
+      echo "==> Building WASM (single + threaded) via '{{WEB_DIR}}' pnpm scripts"
       just _check_node_version
-      npm --prefix "{{WEB_DIR}}" run wasm:build
+      pnpm -C "{{WEB_DIR}}" run wasm:build
       exit 0
     fi
   fi
@@ -241,9 +241,9 @@ wasm-single:
         echo "error: wasm-pack not found; run 'just setup' (or 'cargo install --locked wasm-pack')" >&2
         exit 1
       fi
-      echo "==> Building WASM (single) via '{{WEB_DIR}}' npm scripts"
+      echo "==> Building WASM (single) via '{{WEB_DIR}}' pnpm scripts"
       just _check_node_version
-      npm --prefix "{{WEB_DIR}}" run wasm:build:single
+      pnpm -C "{{WEB_DIR}}" run wasm:build:single
       exit 0
     fi
   fi
@@ -263,9 +263,9 @@ wasm-threaded:
         echo "error: wasm-pack not found; run 'just setup' (or 'cargo install --locked wasm-pack')" >&2
         exit 1
       fi
-      echo "==> Building WASM (threaded/shared-memory) via '{{WEB_DIR}}' npm scripts"
+      echo "==> Building WASM (threaded/shared-memory) via '{{WEB_DIR}}' pnpm scripts"
       just _check_node_version
-      npm --prefix "{{WEB_DIR}}" run wasm:build:threaded
+      pnpm -C "{{WEB_DIR}}" run wasm:build:threaded
       exit 0
     fi
   fi
@@ -292,9 +292,9 @@ _maybe_run_web_script script:
 
   # Only run if the script exists, otherwise keep things green for partial checkouts.
   if (cd "{{WEB_DIR}}" && node -e "const p=require('./package.json'); process.exit((p.scripts && p.scripts['{{script}}']) ? 0 : 1)" >/dev/null 2>&1); then
-    npm --prefix "{{WEB_DIR}}" run "{{script}}"
+    pnpm -C "{{WEB_DIR}}" run "{{script}}"
   else
-    echo "==> Web: no npm script named '{{script}}' (skipping)"
+    echo "==> Web: no pnpm script named '{{script}}' (skipping)"
   fi
 
 dev:
@@ -333,13 +333,13 @@ dev:
       echo "     just wasm-watch  # rebuilds the threaded/shared-memory WASM variant"
     fi
 
-    npm --prefix "{{WEB_DIR}}" run dev
+    pnpm -C "{{WEB_DIR}}" run dev
   else
     echo '==> No Node workspace detected.'
     echo ""
     echo "Falling back to the browser-memory proof-of-concept server, which sets COOP/COEP"
     echo "headers so `SharedArrayBuffer` is available."
-    node poc/browser-memory/server.mjs
+    echo "    (the browser-memory proof-of-concept server was purged; use ./scripts/win7.sh or apps/web)"
   fi
 
 wasm-watch:
@@ -382,7 +382,7 @@ build:
 
     just _check_node_version
     echo "==> Building web bundle (production)"
-    npm --prefix "{{WEB_DIR}}" run build
+    pnpm -C "{{WEB_DIR}}" run build
   else
     echo "==> Web: '{{WEB_DIR}}/package.json' not found; skipping web build"
   fi
@@ -409,7 +409,7 @@ test:
 
   # Prefer a dedicated unit-test script if available.
   if [[ -f "{{WEB_DIR}}/package.json" ]] && (cd "{{WEB_DIR}}" && node -e "const p=require('./package.json'); process.exit((p.scripts && p.scripts['test:unit']) ? 0 : 1)" >/dev/null 2>&1); then
-    npm --prefix "{{WEB_DIR}}" run test:unit
+    pnpm -C "{{WEB_DIR}}" run test:unit
   else
     just _maybe_run_web_script test
   fi
@@ -451,7 +451,7 @@ gen-scancodes:
   just _warn_deprecated_env
   just _check_node_version
 
-  npm run gen:scancodes
+  pnpm run gen:scancodes
 
 check-scancodes:
   #!/usr/bin/env bash
@@ -460,7 +460,7 @@ check-scancodes:
   just _warn_deprecated_env
   just _check_node_version
 
-  npm run check:scancodes
+  pnpm run check:scancodes
 
 fmt:
   #!/usr/bin/env bash
@@ -490,49 +490,28 @@ lint:
   just _maybe_run_web_script typecheck
   just _maybe_run_web_script lint
 
-object-store-up:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if ! command -v docker >/dev/null; then
-    echo "error: docker is required to run the local object store" >&2
-    exit 1
-  fi
-  (cd infra/local-object-store && docker compose up)
+# ── Win7 bring-up ────────────────────────────────────────────────────────────
+#
+# The boot is ~94% of the cost of one experiment, so the slow part happens once:
+# `boot-snapshot` saves the machine just before the wall and `boot-resume`
+# restarts from there in seconds. See wiki/areas/debugging.md.
 
-object-store-up-proxy:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if ! command -v docker >/dev/null; then
-    echo "error: docker is required to run the local object store" >&2
-    exit 1
-  fi
-  (cd infra/local-object-store && docker compose --profile proxy up)
+# Cold-boot Win7 and save a snapshot just before the wall (slow; do this once).
+boot-snapshot budget="1500000":
+  ./scripts/win7.sh snapshot {{budget}}
 
-object-store-down:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if ! command -v docker >/dev/null; then
-    echo "error: docker is required to manage the local object store" >&2
-    exit 1
-  fi
-  (cd infra/local-object-store && docker compose --profile proxy down)
+# Resume from the saved snapshot — the fast loop for bring-up experiments.
+boot-resume budget="300000":
+  ./scripts/win7.sh resume {{budget}}
 
-object-store-reset:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if ! command -v docker >/dev/null; then
-    echo "error: docker is required to manage the local object store" >&2
-    exit 1
-  fi
-  (cd infra/local-object-store && docker compose --profile proxy down -v)
+# Cold-boot without saving a snapshot.
+boot-cold budget="1500000":
+  ./scripts/win7.sh cold {{budget}}
 
-object-store-verify *args:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  (cd infra/local-object-store && bash ./verify.sh {{args}})
+# Report the furthest boot milestone reached by the most recent run.
+boot-ladder run_dir="":
+  ./scripts/win7.sh ladder {{run_dir}}
 
-# Reproduce `.github/workflows/iac.yml` locally (Terraform/tflint + Helm/kubeconform + deploy hygiene).
-check-iac:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  bash ./scripts/ci/check-iac.sh
+# First-divergence against QEMU: the first block Aero and QEMU disagree on.
+boot-diverge budget="20000000":
+  ./scripts/win7-diverge.sh {{budget}}

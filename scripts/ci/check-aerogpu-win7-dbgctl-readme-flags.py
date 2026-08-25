@@ -40,7 +40,7 @@ ROOT = repo_root()
 
 DBGCTL_SRC = ROOT / "drivers" / "aerogpu" / "tools" / "win7_dbgctl" / "src" / "aerogpu_dbgctl.cpp"
 DBGCTL_README = ROOT / "drivers" / "aerogpu" / "tools" / "win7_dbgctl" / "README.md"
-WIN7_VALIDATION_DOC = ROOT / "docs" / "graphics" / "win7-aerogpu-validation.md"
+WIN7_VALIDATION_DOC = ROOT / "wiki" / "specs" / "windows7-aerogpu-validation.md"
 WIN7_TEST_RUNNER_SRC = (
     ROOT / "drivers" / "aerogpu" / "tests" / "win7" / "test_runner" / "main.cpp"
 )

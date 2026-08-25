@@ -20,7 +20,7 @@ type SharedDiskBackend = Box<dyn VirtualDisk>;
 ///   virtio-blk)
 ///   can operate on the *same* disk image when a guest transitions between them.
 ///
-/// See `docs/20-storage-trait-consolidation.md`.
+/// See `wiki/areas/storage.md`.
 #[derive(Clone)]
 pub struct SharedDisk {
     #[cfg(target_arch = "wasm32")]

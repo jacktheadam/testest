@@ -1,10 +1,19 @@
+//! Shared fixtures for the `bcd_patch` integration tests.
+//!
+//! Each test binary compiles this module separately, so anything used by only
+//! one of them reads as dead code in the others. That is inherent to `tests/`
+//! layout rather than a sign of an unused helper.
+#![allow(dead_code, unused_imports)]
+
 use regf::{DataType, HiveBuilder, RegistryHive};
 use uuid::Uuid;
 
 pub use bcd_patch::constants::{
+    DEBUGGER_DEFAULT_BAUDRATE, DEBUGGER_DEFAULT_PORT, DEBUGGER_TYPE_SERIAL,
     ELEM_ALLOW_PRERELEASE_SIGNATURES, ELEM_APPLICATION_PATH, ELEM_BOOTMGR_DEFAULT_OBJECT,
-    ELEM_BOOTMGR_DISPLAY_ORDER, ELEM_DISABLE_INTEGRITY_CHECKS, OBJ_BOOTLOADERSETTINGS, OBJ_BOOTMGR,
-    OBJ_GLOBALSETTINGS, OBJ_RESUMELOADERSETTINGS,
+    ELEM_BOOTMGR_DISPLAY_ORDER, ELEM_DEBUGGER_ENABLED, ELEM_DEBUGGER_SERIAL_BAUDRATE,
+    ELEM_DEBUGGER_SERIAL_PORT, ELEM_DEBUGGER_TYPE, ELEM_DISABLE_INTEGRITY_CHECKS,
+    OBJ_BOOTLOADERSETTINGS, OBJ_BOOTMGR, OBJ_GLOBALSETTINGS, OBJ_RESUMELOADERSETTINGS,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -215,4 +224,32 @@ pub fn assert_boolean_element(hive: &RegistryHive, object: &str, elem: u32, expe
     assert_eq!(&data[4..8], &4u32.to_le_bytes());
     let got = u32::from_le_bytes(data[8..12].try_into().unwrap());
     assert_eq!(got != 0, expected);
+}
+
+/// BCD integer elements share the boolean header but carry an 8-byte payload.
+pub fn assert_integer_element(hive: &RegistryHive, object: &str, elem: u32, expected: u64) {
+    let path = format!("Objects\\{object}\\Elements\\{}", element_key_name(elem));
+    let key = hive
+        .open_key(&path)
+        .unwrap_or_else(|e| panic!("open {path}: {e}"));
+    let val = key.value("Element").unwrap();
+    assert_eq!(val.data_type(), DataType::Binary);
+    let data = val.raw_data().unwrap();
+    assert!(
+        data.len() >= 16,
+        "expected integer element data to be >= 16 bytes, got {}",
+        data.len()
+    );
+    assert_eq!(&data[0..4], &elem.to_le_bytes());
+    assert_eq!(&data[4..8], &8u32.to_le_bytes());
+    assert_eq!(
+        u64::from_le_bytes(data[8..16].try_into().unwrap()),
+        expected
+    );
+}
+
+/// True when the element key is absent entirely.
+pub fn element_absent(hive: &RegistryHive, object: &str, elem: u32) -> bool {
+    let path = format!("Objects\\{object}\\Elements\\{}", element_key_name(elem));
+    hive.open_key(&path).is_err()
 }

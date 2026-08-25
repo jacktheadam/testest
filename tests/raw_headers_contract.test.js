@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const { hasRepeatedRawHeader, iterRawHeaderValues, rawHeaderSingle } = await import(
-  new URL("../backend/aero-gateway/src/rawHeaders.ts", import.meta.url)
+  new URL("../services/gateway/src/rawHeaders.ts", import.meta.url)
 );
 
 test("rawHeaders: rawHeaderSingle tri-state contract", () => {

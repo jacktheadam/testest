@@ -119,8 +119,12 @@ fn session_cookie_vectors() {
         "bad signature token must differ from a properly minted token"
     );
     assert!(
-        verify_session_token(&vectors.aero_session.tokens.bad_signature.token, secret, now_ms)
-            .is_none(),
+        verify_session_token(
+            &vectors.aero_session.tokens.bad_signature.token,
+            secret,
+            now_ms
+        )
+        .is_none(),
         "verify bad signature token"
     );
 }

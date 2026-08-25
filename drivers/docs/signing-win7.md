@@ -48,11 +48,11 @@ Exact commands depend on your WDK version and driver type; keep the process scri
 For Aero’s in-tree drivers (including AeroGPU), the repo provides an end-to-end scripted pipeline:
 
 ```powershell
-.\ci\install-wdk.ps1
-.\ci\build-drivers.ps1 -ToolchainJson .\out\toolchain.json
-.\ci\build-aerogpu-dbgctl.ps1 -ToolchainJson .\out\toolchain.json
-.\ci\make-catalogs.ps1 -ToolchainJson .\out\toolchain.json
-.\ci\sign-drivers.ps1 -ToolchainJson .\out\toolchain.json
+.\drivers\build\install-wdk.ps1
+.\drivers\build\build-drivers.ps1 -ToolchainJson .\out\toolchain.json
+.\drivers\build\build-aerogpu-dbgctl.ps1 -ToolchainJson .\out\toolchain.json
+.\drivers\build\make-catalogs.ps1 -ToolchainJson .\out\toolchain.json
+.\drivers\build\sign-drivers.ps1 -ToolchainJson .\out\toolchain.json
 ```
 
 This produces:

@@ -128,7 +128,7 @@ fn hda_snapshot_restore_preserves_guest_visible_state_and_dma_progress() {
         sd.fifos = 0x40;
         sd.fmt = fmt_raw;
         // SRST | RUN | IOCE | stream number 1.
-        sd.ctl = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 20);
+        sd.ctl = (1 << 1) | (1 << 2) | (1 << 20);
     }
 
     // Process some host time to advance DMA and trigger IOC on entry 0.
@@ -287,7 +287,7 @@ fn hda_capture_snapshot_restore_preserves_lpib_and_frame_accum() {
         sd.lvi = 1;
         sd.fmt = fmt_raw;
         // SRST | RUN | stream number 2.
-        sd.ctl = (1 << 0) | (1 << 1) | (2 << 20);
+        sd.ctl = (1 << 1) | (2 << 20);
     }
 
     // Use a non-integer ratio step to ensure the capture-frame accumulator is non-zero at snapshot time.
@@ -446,7 +446,7 @@ fn hda_snapshot_restore_restores_output_rate_hz_for_resampler_determinism() {
         sd.lvi = 0;
         sd.fmt = fmt_raw;
         // SRST | RUN | stream number 1.
-        sd.ctl = (1 << 0) | (1 << 1) | (1 << 20);
+        sd.ctl = (1 << 1) | (1 << 20);
     }
 
     // Advance DMA a bit so the resampler has non-trivial state at snapshot time.
@@ -509,7 +509,7 @@ fn hda_snapshot_restore_restores_capture_sample_rate_hz_for_capture_resampler_de
         sd.lvi = 0;
         sd.fmt = fmt_raw;
         // SRST | RUN | stream number 2.
-        sd.ctl = (1 << 0) | (1 << 1) | (2 << 20);
+        sd.ctl = (1 << 1) | (2 << 20);
     }
 
     let output_frames = 256usize;
@@ -656,7 +656,7 @@ fn hda_snapshot_restore_clamps_bdl_index_to_lvi() {
     snap.streams[0].lvi = 0;
     snap.streams[0].fmt = fmt_raw;
     // SRST | RUN | stream number 1.
-    snap.streams[0].ctl = (1 << 0) | (1 << 1) | (1 << 20);
+    snap.streams[0].ctl = (1 << 1) | (1 << 20);
 
     // Corrupt runtime state: bdl_index is out of range for lvi=0.
     snap.stream_runtime[0].bdl_index = 10;
@@ -716,7 +716,7 @@ fn hda_snapshot_restore_clamps_capture_frame_accum_to_avoid_huge_capture_steps()
     snap.streams[1].lvi = 0;
     snap.streams[1].fmt = fmt_raw;
     // SRST | RUN | stream number 2.
-    snap.streams[1].ctl = (1 << 0) | (1 << 1) | (2 << 20);
+    snap.streams[1].ctl = (1 << 1) | (2 << 20);
 
     // Corrupt accumulator to an enormous value; without clamping this would produce an absurd
     // `dst_frames` count on the next capture tick.
