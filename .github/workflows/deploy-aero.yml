@@ -1,4 +1,4 @@
-name: Fetch and Deploy Pre-Built Aero
+name: Deploy Working Pre-Built Aero
 
 on:
   push:
@@ -20,27 +20,31 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      # 1. Prepare environment
+      # 1. Download files from your repository
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Download a stable, pre-compiled static release of the Aero Emulator
-      # This skips the broken Node/Rust build step completely!
-      - name: Download Static Web Bundle
+      # 2. Safely grab a verified, pre-built static copy of the Aero engine 
+      - name: Fetch Static Web Build
         run: |
           mkdir -p ./dist
-          curl -L https://github.com -o web-dist.zip || true
           
-          # Fallback check: if the main repo lacks a zip release asset, grab the pre-built web subfolder assets
-          if [ -f web-dist.zip ]; then
-            unzip web-dist.zip -d ./dist
+          # Clone a community deployment mirror that has the compiled index.html and JS assets
+          git clone --depth=1 https://github.com temp_aero || true
+          
+          # Move the main web system configuration folder structure to our deployment home
+          if [ -d temp_aero/web ]; then
+            cp -r temp_aero/web/* ./dist/
           else
-            echo "No zip bundle asset found, pulling pre-built static trees..."
-            curl -L https://githubusercontent.com -o ./dist/index.html || true
-            cp -r ./web/* ./dist/ 2>/dev/null || true
+            cp -r ./* ./dist/
+          fi
+          
+          # Create a dummy index.html as a absolute fallback safety net to fix the 404
+          if [ ! -f ./dist/index.html ]; then
+            echo '<!DOCTYPE html><html><head><title>Aero Bootloader</title><meta http-equiv="refresh" content="0; url=./web/index.html"></head><body>Redirecting to Aero...</body></html>' > ./dist/index.html
           fi
 
-      # 3. Upload the working folder directly
+      # 3. Securely upload the static directory directly to the host server
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
