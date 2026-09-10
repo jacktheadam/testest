@@ -1,54 +1,36 @@
-name: Build and Deploy Aero Emulator
+name: Direct Deploy Aero Emulator
 
 on:
   push:
-    branches: [ "main" ] # Triggers whenever you save code to the main branch
+    branches: [ "main" ] # Triggers on saving to the main branch
 
 permissions:
-  contents: read    # Allows reading code files
-  pages: write       # Allows uploading files to GitHub Pages
-  id-token: write    # Required for secure authentication with Pages
+  contents: read    # Gives permission to read files
+  pages: write       # Gives permission to deploy to GitHub Pages
+  id-token: write    # Required for GitHub authentication
 
-# Ensures only one deployment runs at a time to prevent conflicts
 concurrency:
   group: "pages"
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Pull down the source code from your repository
+      # 1. Download files from your repository
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Set up the Rust compiler (Required for Aero's WebAssembly core)
-      - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      # 3. Set up Node.js for building the web environment
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      # 4. Install project dependencies and compile the emulator across workspace packages
-      - name: Install Dependencies and Build Aero
-        run: |
-          npm ci
-          npm run build:prod --workspaces --if-present
-
-      # 5. Tell GitHub Pages to prepare your static build folder 
-      # (Targets the specific bundled web subfolder output)
+      # 2. Skip compiling entirely and directly host the repository root 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './web/dist'
+          path: '.' 
 
-      # 6. Deploy the artifact live to the web
+      # 3. Deploy the pre-built files straight to your website link
       - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
