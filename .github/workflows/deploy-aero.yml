@@ -1,11 +1,11 @@
-name: Direct Deploy Aero Emulator
+name: Build and Deploy Aero Emulator
 
 on:
   push:
     branches: [ "main" ] # Triggers on saving to the main branch
 
 permissions:
-  contents: read    # Gives permission to read files
+  contents: read    # Gives permission to read the code files
   pages: write       # Gives permission to deploy to GitHub Pages
   id-token: write    # Required for GitHub authentication
 
@@ -14,23 +14,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
       # 1. Download files from your repository
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Skip compiling entirely and directly host the repository root 
+      # 2. Set up the Rust compiler (Required for Aero's WebAssembly core)
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # 3. Set up Node.js for building the web environment
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # 4. Install dependencies and safely build all projects in the monorepo
+      - name: Install Dependencies and Build Aero
+        run: |
+          npm ci
+          npm run build:prod --if-present
+
+      # 5. Tell GitHub Pages to target the generated web distribution folder
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.' 
+          path: './dist' # If this still gives an error later, we will change it to './web/dist'
 
-      # 3. Deploy the pre-built files straight to your website link
+      # 6. Deploy the artifact live to the web
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
